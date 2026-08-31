@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Repayment schedule{% endblock %}
+{% block topbar_title %}Repayment schedule{% endblock %}
+{% block topbar_context %}Know what is due and when.{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'officer_loan_detail' loan_id=loan.id %}"><i class="bi bi-arrow-left me-1"></i>Back to {{ loan.reference }}</a>
+    <div class="eyebrow mt-3">Loan {{ loan.reference }}</div>
+    <h1>Repayment schedule</h1>
+    <p>{{ loan.application.borrower_name }}'s full payment plan from disbursement on {{ loan.start_date }} · {{ loan.term_months }}-month term · {{ loan.payment_frequency|lower }} payments of {{ loan.periodic_payment|peso }}.</p>
+  </div>
+  <a class="btn btn-outline-primary csv-link" href="{% url 'export_schedule_csv' loan_id=loan.id %}"><i class="bi bi-download"></i>Download CSV</a>
+</div>
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card-soft">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="card-title">Payment plan</h2>
+        <span class="small text-muted">{{ paid_payment_count|default:"0" }} of {{ payment_count|default:"0" }} paid</span>
+      </div>
+      {% if schedule %}
+      <div class="table-responsive">
+        <table class="table table-hover">
+          <thead><tr><th>#</th><th>Due date</th><th>Payment</th><th>Principal</th><th>Interest</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for payment in schedule %}
+            <tr>
+              <td class="text-muted">{{ payment.installment_number }}</td>
+              <td><strong>{{ payment.due_date }}</strong>{% if payment.is_next %}<span class="badge status-pending ms-2">Next</span>{% endif %}</td>
+              <td>{{ payment.amount|peso }}</td>
+              <td>{{ payment.principal|peso }}</td>
+              <td>{{ payment.interest|peso }}</td>
+              <td>{% include "includes/status_badge.html" with status=payment.status label=payment.status_label %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      {% include "includes/empty_state.html" with icon="bi-calendar3" title="Schedule is not available yet" description="The repayment schedule will appear once the loan is active." %}
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Payment summary</h2></div>
+      <div class="card-body">
+        <div class="detail-label">Principal</div><div class="detail-value mb-3">{{ loan.principal|peso }}</div>
+        <div class="detail-label">Term</div><div class="detail-value mb-3">{{ loan.term_months }} months · {{ loan.payment_frequency }}</div>
+        <div class="detail-label">Payment per period</div><div class="detail-value mb-3">{{ loan.periodic_payment|peso }}</div>
+        <div class="detail-label">Total payable</div><div class="detail-value mb-0">{{ loan.total_payable|peso }}</div>
+      </div>
+    </div>
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Next payment</h2></div>
+      <div class="card-body">
+        <div class="eyebrow">Due {{ next_payment.due_date|default:"—" }}</div>
+        <div class="metric-value mb-2">{{ next_payment.remaining|default:"0.00"|peso }}</div>
+        <p class="text-muted small">Includes principal and interest.</p>
+        {% if loan.outstanding_balance > 0 %}<a href="{% url 'officer_make_payment' loan_id=loan.id %}" class="btn btn-primary w-100">Record payment</a>{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

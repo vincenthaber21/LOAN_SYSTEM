@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}{{ account.reference }}{% endblock %}
+{% block topbar_title %}{{ account.member.display_name }}{% endblock %}
+{% block topbar_context %}{{ account.reference }} · {{ account.product_name }}{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <a class="small" href="{% url 'officer_savings_accounts' %}"><i class="bi bi-arrow-left me-1"></i>Back to savings accounts</a>
+    <div class="eyebrow mt-3">{{ account.reference }}</div>
+    <h1>{{ account.product_name }}</h1>
+    <p>{{ account.member.display_name }} · {{ account.member.email }} · {{ account.status_label }}</p>
+  </div>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-3">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Current balance</div>
+      <div class="metric-value">{{ account.balance|peso }}</div>
+      <div class="metric-note positive">{{ account.status_label }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Total deposited</div>
+      <div class="metric-value">{{ ledger.total_deposits|peso }}</div>
+      <div class="metric-note">Member deposits only</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Total interest earned</div>
+      <div class="metric-value text-success">{{ ledger.total_interest_earned|peso }}</div>
+      <div class="metric-note">Interest credited to this account</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Total withdrawn</div>
+      <div class="metric-value">{{ ledger.total_withdrawals|peso }}</div>
+      <div class="metric-note">Debits from this account</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    {% if account.is_operational %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Record transaction</h2></div>
+      <div class="card-body">
+        <form method="post" id="savings-tx-form">{% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ transaction_form.action.id_for_label }}">Transaction type</label>
+            {{ transaction_form.action }}
+          </div>
+          <div class="mb-3"><label class="form-label">Amount</label>{{ transaction_form.amount }}{% for error in transaction_form.amount.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+          <div class="mb-3"><label class="form-label">Method</label>{{ transaction_form.method }}</div>
+          <div class="mb-3"><label class="form-label">Reference</label>{{ transaction_form.reference_number }}</div>
+          <div class="mb-4"><label class="form-label">Notes</label>{{ transaction_form.notes }}</div>
+          <button class="btn btn-primary w-100" type="submit" id="savings-tx-submit">Record deposit</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+    {% if account.is_operational %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Interest schedule</h2></div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Interest follows the product term from the account open date
+          (e.g. {{ interest.example_anchor }} → {{ interest.example_next }} for {{ interest.schedule_label|lower }}).
+        </p>
+        <dl class="row mb-0 small g-2">
+          <dt class="col-6 text-muted">Account opened</dt>
+          <dd class="col-6 mb-2">{{ interest.opened_date|date:"M d, Y" }}</dd>
+          <dt class="col-6 text-muted">Credit cycle</dt>
+          <dd class="col-6 mb-2">{{ interest.schedule_label }}</dd>
+          <dt class="col-6 text-muted">Last interest</dt>
+          <dd class="col-6 mb-2">{% if interest.last_interest_date %}{{ interest.last_interest_date|date:"M d, Y" }}{% else %}Not credited yet{% endif %}</dd>
+          <dt class="col-6 text-muted">Next interest</dt>
+          <dd class="col-6 mb-2">
+            {% if interest.is_due %}
+              <span class="badge status-pending">Due now</span>
+            {% else %}
+              {{ interest.next_interest_date|date:"M d, Y" }}
+            {% endif %}
+          </dd>
+        </dl>
+        {% if interest.amount_per_period <= 0 %}
+        <div class="text-muted small mt-3 mb-0">Balance must be at least {{ account.product.min_balance|peso }} to earn interest.</div>
+        {% else %}
+        <div class="text-muted small mt-3 mb-0">
+          Next credit on {{ interest.next_interest_date|date:"M d, Y" }} · estimated {{ interest.amount_per_period|peso }} at {{ account.product.interest_rate }}% p.a.
+          Due interest is applied automatically when you open this account.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% if is_admin and account.is_operational and account.balance == 0 %}
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="close"><button class="btn btn-outline-danger w-100" type="submit">Close account</button></form>
+    {% endif %}
+    <div class="info-strip">
+      <i class="bi bi-journal-text me-2"></i>
+      <span>Opened {{ account.opened_at|date:"M d, Y" }}{% if account.opened_by %} by {{ account.opened_by.display_name }}{% endif %}.</span>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card-soft fade-up-3">
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+        <div>
+          <div class="eyebrow">Transaction ledger</div>
+          <h2 class="card-title mt-1 mb-1">Latest movements on this account.</h2>
+          <p class="text-muted small mb-0">A running record of deposits, withdrawals, and balance changes.</p>
+        </div>
+        <span class="badge rounded-pill status-neutral">{{ ledger.transaction_count }} movement{{ ledger.transaction_count|pluralize }}</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-4">
+          <div class="col-sm-4">
+            <div class="border rounded-3 px-3 py-2 h-100">
+              <div class="text-muted small">Net flow</div>
+              <div class="fw-semibold {% if ledger.net_flow >= 0 %}text-success{% else %}text-danger{% endif %}">{{ ledger.net_flow|peso }}</div>
+            </div>
+          </div>
+          <div class="col-sm-4">
+            <div class="border rounded-3 px-3 py-2 h-100">
+              <div class="text-muted small">Last movement</div>
+              <div class="fw-semibold" style="font-size:.9rem;">
+                {% if ledger.last_movement %}
+                  {{ ledger.last_movement.created_at|date:"M d, Y · g:i A" }}
+                {% else %}
+                  No activity yet
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="col-sm-4">
+            <div class="border rounded-3 px-3 py-2 h-100">
+              <div class="text-muted small">Ledger balance</div>
+              <div class="fw-semibold">{{ account.balance|peso }}</div>
+            </div>
+          </div>
+        </div>
+
+        {% if transactions %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="width:36px;"></th>
+                <th>Date & time</th>
+                <th>Type</th>
+                <th>Method</th>
+                <th>Reference</th>
+                <th class="text-end">Amount</th>
+                <th class="text-end">Balance after</th>
+                <th>Recorded by</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tx in transactions %}
+              <tr>
+                <td class="text-muted">
+                  {% if tx.transaction_type == 'deposit' %}
+                    <i class="bi bi-arrow-down-circle text-success" title="Deposit"></i>
+                  {% elif tx.transaction_type == 'withdrawal' %}
+                    <i class="bi bi-arrow-up-circle text-danger" title="Withdrawal"></i>
+                  {% else %}
+                    <i class="bi bi-percent text-success" title="Interest"></i>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="fw-semibold" style="font-size:.82rem;">{{ tx.created_at|date:"M d, Y" }}</div>
+                  <div class="text-muted" style="font-size:.72rem;">{{ tx.created_at|date:"g:i A" }}</div>
+                </td>
+                <td>
+                  {% if tx.transaction_type == 'withdrawal' %}
+                    <span class="badge status-declined">{{ tx.type_label }}</span>
+                  {% elif tx.transaction_type == 'interest' %}
+                    <span class="badge status-pending">{{ tx.type_label }}</span>
+                  {% else %}
+                    <span class="badge status-approved">{{ tx.type_label }}</span>
+                  {% endif %}
+                  {% if tx.notes %}<div class="text-muted mt-1" style="font-size:.7rem;">{{ tx.notes|truncatewords:8 }}</div>{% endif %}
+                </td>
+                <td>{{ tx.get_method_display }}</td>
+                <td>{{ tx.reference_number|default:"—" }}</td>
+                <td class="text-end fw-semibold {% if tx.is_credit %}text-success{% else %}text-danger{% endif %}">
+                  {% if tx.is_credit %}+{% else %}−{% endif %}{{ tx.amount|peso }}
+                </td>
+                <td class="text-end">{{ tx.balance_after|peso }}</td>
+                <td>{{ tx.created_by.display_name|default:"—" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if ledger.transaction_count > transactions|length %}
+        <div class="text-muted small mt-3">Showing the latest {{ transactions|length }} of {{ ledger.transaction_count }} movements.</div>
+        {% endif %}
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-journal-text" title="No ledger entries yet" description="Deposits and withdrawals recorded on this account will appear here." %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var actionSelect = document.getElementById("{{ transaction_form.action.id_for_label }}");
+  var submitBtn = document.getElementById("savings-tx-submit");
+  if (!actionSelect || !submitBtn) return;
+  function syncSubmit() {
+    var isWithdraw = actionSelect.value === "withdraw";
+    submitBtn.textContent = isWithdraw ? "Record withdrawal" : "Record deposit";
+    submitBtn.classList.toggle("btn-primary", !isWithdraw);
+    submitBtn.classList.toggle("btn-outline-primary", isWithdraw);
+    var amountInput = document.querySelector("#savings-tx-form input[name='amount']");
+    if (amountInput) {
+      if (isWithdraw) {
+        amountInput.setAttribute("max", "{{ account.balance }}");
+      } else {
+        amountInput.removeAttribute("max");
+      }
+    }
+  }
+  actionSelect.addEventListener("change", syncSubmit);
+  syncSubmit();
+})();
+</script>
+{% endblock %}

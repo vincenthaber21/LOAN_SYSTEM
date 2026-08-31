@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Officer overview{% endblock %}
+{% block topbar_title %}Good morning, {{ officer.first_name|default:user.first_name|default:"team" }}{% endblock %}
+{% block topbar_context %}{% if is_all_view %}Complete portfolio — all records, no date filter.{% elif is_today_view %}A focused view of today's lending work.{% else %}Portfolio snapshot for {{ overview_date_label }}.{% endif %}{% endblock %}
+{% block content %}
+<div class="page-heading fade-up"><div><div class="eyebrow">Officer workspace · {{ branch_name|default:app_name }}</div><h1>Make the next decision clearer.</h1><p>Prioritize what needs judgment, keep applicants moving, and leave a careful trail.</p></div><a class="btn btn-primary" href="{% url 'applications_queue' %}"><i class="bi bi-inbox me-1"></i>Open application queue</a></div>
+
+<form method="get" action="{% url 'officer_dashboard' %}" class="filter-bar dashboard-date-bar mb-4 fade-up-2">
+  <div class="row g-2 align-items-end">
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="overview-date">Overview date</label>
+      <input class="form-control" type="date" id="overview-date" name="date" value="{{ selected_date }}" max="{{ today }}">
+    </div>
+    <div class="col-sm-3 col-lg-2">
+      <button class="btn btn-primary w-100" type="submit">Apply</button>
+    </div>
+    <div class="col-sm-3 col-lg-auto">
+      <a class="btn btn-outline-secondary w-100{% if is_today_view and not is_all_view %} active{% endif %}" href="{% url 'officer_dashboard' %}">Today</a>
+    </div>
+    <div class="col-sm-3 col-lg-auto">
+      <a class="btn btn-outline-secondary w-100{% if is_all_view %} active{% endif %}" href="{% url 'officer_dashboard' %}?view=all">All data</a>
+    </div>
+    <div class="col-lg-auto ms-lg-auto d-flex align-items-center">
+      <span class="dashboard-date-badge{% if is_all_view %} dashboard-date-badge--all{% elif not is_today_view %} dashboard-date-badge--past{% endif %}">
+        <i class="bi bi-{% if is_all_view %}collection{% else %}calendar3{% endif %}"></i>
+        {% if is_all_view %}Viewing all data{% elif is_today_view %}Viewing today{% else %}Viewing {{ overview_date_label }}{% endif %}
+      </span>
+    </div>
+  </div>
+</form>
+
+<div class="row g-3 mb-2 fade-up-2">
+  <div class="col-12"><div class="dashboard-section-label">Portfolio snapshot</div></div>
+  {% for metric in dashboard_metrics %}
+  <div class="col-sm-6 col-xl-3"><div class="card-soft metric-card"><div class="metric-label">{{ metric.label }}</div><div class="metric-value">{{ metric.value }}</div><div class="metric-note {% if metric.positive %}positive{% endif %}">{{ metric.note }}</div></div></div>
+  {% empty %}
+  <div class="col-12"><div class="card-soft p-4 text-muted">Metrics are being prepared for this workspace.</div></div>
+  {% endfor %}
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-12"><div class="dashboard-section-label">{% if is_all_view %}All-time totals{% else %}Daily activity{% if not is_today_view %} · {{ overview_date_label }}{% endif %}{% endif %}</div></div>
+  {% for metric in daily_metrics %}
+  <div class="col-sm-4"><div class="card-soft metric-card metric-card--compact"><div class="metric-label">{{ metric.label }}</div><div class="metric-value">{{ metric.value }}</div><div class="metric-note {% if metric.positive %}positive{% endif %}">{{ metric.note }}</div></div></div>
+  {% endfor %}
+</div>
+
+<div class="row g-4 mb-4">
+  {% if user.is_admin %}
+  <div class="col-xl-4">
+    <div class="card-soft h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div><div class="eyebrow">Team presence</div><h2 class="card-title mt-1">Officers online</h2></div>
+        <span class="badge status-online">{{ online_officer_count|default:"0" }} online</span>
+      </div>
+      <div class="card-body pt-0">
+        {% if officer_presence %}
+        {% for team_member in officer_presence %}
+        <div class="d-flex align-items-center justify-content-between border-bottom py-3{% if forloop.last %} border-0{% endif %}">
+          <div class="person">
+            <span class="avatar">{{ team_member.initials }}</span>
+            <span>
+              <span class="person-name d-block">{{ team_member.display_name }}{% if team_member.pk == user.pk %} <span class="text-muted fw-normal">(you)</span>{% endif %}</span>
+              <span class="person-sub">{{ team_member.role_label }}</span>
+            </span>
+          </div>
+          <div class="text-end">
+            {% if team_member.presence_status == "online" %}
+            {% include "includes/status_badge.html" with status="online" label="Online" %}
+            {% else %}
+            {% include "includes/status_badge.html" with status="neutral" label=team_member.presence_label %}
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-person-badge" title="No officers yet" description="Add loan officers to see who is active in the workspace." %}
+        {% endif %}
+        <p class="text-muted small mb-0 mt-3">Officers appear online when active in the last 5 minutes.</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-8">
+  {% else %}
+  <div class="col-12">
+  {% endif %}
+    <div class="card-soft h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div><div class="eyebrow">Application mix</div><h2 class="card-title mt-1">Status breakdown</h2></div>
+        <span class="badge status-neutral">{{ status_breakdown|length }} statuses</span>
+      </div>
+      <div class="card-body pt-0">
+        {% if status_breakdown %}
+        {% for item in status_breakdown %}
+        <div class="d-flex align-items-center justify-content-between border-bottom py-3{% if forloop.last %} border-0{% endif %}">
+          <span class="small fw-semibold">{{ item.label }}</span>
+          <span class="badge status-neutral">{{ item.count }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-pie-chart" title="No applications yet" description="Application counts will appear here as the portfolio grows." %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card-soft mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div><div class="eyebrow">Needs attention</div><h2 class="card-title mt-1">Work queue{% if is_all_view %} · all pending{% elif not is_today_view %} · {{ overview_date_label }}{% endif %}</h2></div>
+    <span class="badge status-pending">{{ priority_applications|length }} pending</span>
+  </div>
+  {% if priority_applications %}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Applicant</th><th>Request</th><th>Received</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for application in priority_applications %}
+        <tr>
+          <td><a class="person" href="{% url 'application_review' application_id=application.id %}"><span class="avatar">{{ application.initials }}</span><span><span class="person-name d-block">{{ application.borrower_name }}</span><span class="person-sub">{{ application.reference }}</span></span></a></td>
+          <td><strong>{{ application.amount|peso }}</strong><span class="person-sub d-block">{{ application.product_name }}</span></td>
+          <td>{{ application.received_at }}</td>
+          <td>{% include "includes/status_badge.html" with status=application.status label=application.status_label %}</td>
+          <td><a class="btn btn-sm btn-light" href="{% url 'application_review' application_id=application.id %}">Review</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body">{% include "includes/empty_state.html" with icon="bi-check2-circle" title="The queue is clear" description="No applications need your attention for this date." %}</div>
+  {% endif %}
+</div>
+
+<div class="card-soft mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div><div class="eyebrow">Released funds</div><h2 class="card-title mt-1">{% if is_all_view %}All disbursements{% elif is_today_view %}Disbursements today{% else %}Disbursements · {{ overview_date_label }}{% endif %}</h2></div>
+    <span class="badge status-paid">{{ disbursements_on_date|length }} record{{ disbursements_on_date|length|pluralize }}</span>
+  </div>
+  {% if disbursements_on_date %}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Borrower</th><th>Principal</th><th>Product</th><th>Loan</th><th>Method</th><th></th></tr></thead>
+      <tbody>
+        {% for loan in disbursements_on_date %}
+        <tr>
+          <td><div class="person"><span class="avatar">{{ loan.application.initials }}</span><span><span class="person-name d-block">{{ loan.application.borrower_name }}</span><span class="person-sub">{{ loan.application.reference }}</span></span></div></td>
+          <td><strong>{{ loan.principal|peso }}</strong><span class="person-sub d-block">Net {{ loan.net_release_amount|peso }}</span></td>
+          <td>{{ loan.product_name }}</td>
+          <td>{{ loan.reference }}</td>
+          <td>{{ loan.disbursement_method }}</td>
+          <td><a class="btn btn-sm btn-light" href="{% url 'officer_loan_detail' loan_id=loan.id %}">View loan</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body">
+    {% if is_all_view %}
+    {% include "includes/empty_state.html" with icon="bi-bank" title="No disbursements" description="No disbursements have been recorded yet." %}
+    {% else %}
+    {% include "includes/empty_state.html" with icon="bi-bank" title="No disbursements" description="No funds were released on this date." %}
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card-soft mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div><div class="eyebrow">Repayments</div><h2 class="card-title mt-1">{% if is_all_view %}All payments{% elif is_today_view %}Payments collected today{% else %}Payments collected · {{ overview_date_label }}{% endif %}</h2></div>
+    <span class="badge status-paid">{{ payments_on_date|length }} payment{{ payments_on_date|length|pluralize }}</span>
+  </div>
+  {% if payments_on_date %}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Borrower</th><th>Amount</th><th>Loan</th><th>{% if is_all_view %}Date{% else %}Method{% endif %}</th><th>{% if is_all_view %}Method{% else %}Reference{% endif %}</th>{% if is_all_view %}<th>Reference</th>{% endif %}<th></th></tr></thead>
+      <tbody>
+        {% for payment in payments_on_date %}
+        <tr>
+          <td><div class="person"><span class="avatar">{{ payment.loan.application.initials }}</span><span><span class="person-name d-block">{{ payment.loan.application.borrower_name }}</span><span class="person-sub">{{ payment.loan.application.reference }}</span></span></div></td>
+          <td><strong>{{ payment.amount|peso }}</strong></td>
+          <td>{{ payment.loan.reference }}</td>
+          <td>{% if is_all_view %}{{ payment.payment_date|date:"M d, Y" }}{% else %}{{ payment.get_method_display }}{% endif %}</td>
+          <td>{% if is_all_view %}{{ payment.get_method_display }}{% else %}{{ payment.reference_number|default:"—" }}{% endif %}</td>
+          {% if is_all_view %}<td>{{ payment.reference_number|default:"—" }}</td>{% endif %}
+          <td><a class="btn btn-sm btn-light" href="{% url 'officer_loan_detail' loan_id=payment.loan.id %}">View loan</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body">{% include "includes/empty_state.html" with icon="bi-cash-stack" title="No payments" description="No payments were recorded on this date." %}</div>
+  {% endif %}
+</div>
+
+<div class="card-soft mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div><div class="eyebrow">Intake</div><h2 class="card-title mt-1">{% if is_all_view %}All applications{% elif is_today_view %}Applications received today{% else %}Applications received · {{ overview_date_label }}{% endif %}</h2></div>
+    <span class="badge status-neutral">{{ applications_on_date_list|length }} application{{ applications_on_date_list|length|pluralize }}</span>
+  </div>
+  {% if applications_on_date_list %}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Applicant</th><th>Request</th><th>Product</th><th>Received</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for application in applications_on_date_list %}
+        <tr>
+          <td><a class="person" href="{% url 'application_review' application_id=application.id %}"><span class="avatar">{{ application.initials }}</span><span><span class="person-name d-block">{{ application.borrower_name }}</span><span class="person-sub">{{ application.reference }}</span></span></a></td>
+          <td><strong>{{ application.amount|peso }}</strong></td>
+          <td>{{ application.product_name }}</td>
+          <td>{{ application.received_at }}</td>
+          <td>{% include "includes/status_badge.html" with status=application.status label=application.status_label %}</td>
+          <td><a class="btn btn-sm btn-light" href="{% url 'application_review' application_id=application.id %}">Open</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body">{% include "includes/empty_state.html" with icon="bi-inbox" title="No applications" description="No applications were received on this date." %}</div>
+  {% endif %}
+</div>
+
+<div class="card-soft mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div><div class="eyebrow">Portfolio</div><h2 class="card-title mt-1">All loans{% if not is_all_view and not is_today_view %} as of {{ overview_date_label }}{% endif %}</h2></div>
+    <span class="badge status-neutral">{{ portfolio_loans|length }} loan{{ portfolio_loans|length|pluralize }}</span>
+  </div>
+  {% if portfolio_loans %}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Borrower</th><th>Principal</th><th>Outstanding</th><th>Product</th><th>Disbursed</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for loan in portfolio_loans %}
+        <tr>
+          <td><div class="person"><span class="avatar">{{ loan.application.initials }}</span><span><span class="person-name d-block">{{ loan.application.borrower_name }}</span><span class="person-sub">{{ loan.reference }}</span></span></div></td>
+          <td><strong>{{ loan.principal|peso }}</strong></td>
+          <td>{{ loan.outstanding_balance|peso }}</td>
+          <td>{{ loan.product_name }}</td>
+          <td>{{ loan.start_date }}</td>
+          <td>{% include "includes/status_badge.html" with status=loan.status label=loan.status_label %}</td>
+          <td><a class="btn btn-sm btn-light" href="{% url 'officer_loan_detail' loan_id=loan.id %}">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body">{% include "includes/empty_state.html" with icon="bi-journal-text" title="No loans yet" description="Disbursed loans will appear in the portfolio for this date." %}</div>
+  {% endif %}
+</div>
+
+<div class="card-soft mt-4"><div class="card-body d-flex flex-wrap gap-3 align-items-center justify-content-between"><div><div class="eyebrow">{{ overview_date_label }} at a glance</div><h2 class="card-title mt-1">Keep the human part visible.</h2><p class="text-muted mb-0 small">Your team has {{ overdue_review_count|default:"0" }} review{{ overdue_review_count|pluralize }} past the target response time{% if not is_today_view %} as of {{ overview_date_label }}{% endif %}.</p></div><a class="btn btn-outline-primary" href="{% url 'reports' %}">Open reporting <i class="bi bi-bar-chart-line ms-1"></i></a></div></div>
+{% endblock %}

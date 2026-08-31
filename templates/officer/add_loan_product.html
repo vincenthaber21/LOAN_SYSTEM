@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Add loan product{% endblock %}
+{% block topbar_title %}Add loan product{% endblock %}
+{% block topbar_context %}Define a new product available to borrowers.{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'loan_products' %}"><i class="bi bi-arrow-left me-1"></i>Back to loan products</a>
+    <h1 class="mt-3 mb-2">Add loan product</h1>
+    <p>New products are available immediately for loan applications.</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <form method="post" action="{% url 'add_loan_product_page' %}" data-client-validation novalidate>
+      {% csrf_token %}
+      {% include "includes/form_errors.html" %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Product identity</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-8">
+              <label class="form-label" for="{{ form.name.id_for_label }}">Product name</label>
+              <input class="form-control {% if form.name.errors %}is-invalid{% endif %}" type="text" id="{{ form.name.id_for_label }}" name="{{ form.name.html_name }}" value="{{ form.name.value|default:'' }}" placeholder="e.g. Flex Personal Loan" required>
+              {% for error in form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.loan_type.id_for_label }}">Loan type</label>
+              <select class="form-select {% if form.loan_type.errors %}is-invalid{% endif %}" id="{{ form.loan_type.id_for_label }}" name="{{ form.loan_type.html_name }}" required>
+                {% for value, label in form.loan_type.field.choices %}
+                <option value="{{ value }}" {% if form.loan_type.value == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              {% for error in form.loan_type.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Amount limits</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.min_amount.id_for_label }}">Minimum amount (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.min_amount.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.min_amount.id_for_label }}" name="{{ form.min_amount.html_name }}" value="{{ form.min_amount.value|default:'' }}" placeholder="5,000" required>
+              </div>
+              {% for error in form.min_amount.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.max_amount.id_for_label }}">Maximum amount (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.max_amount.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.max_amount.id_for_label }}" name="{{ form.max_amount.html_name }}" value="{{ form.max_amount.value|default:'' }}" placeholder="500,000" required>
+              </div>
+              {% for error in form.max_amount.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Rate &amp; term</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.interest_rate.id_for_label }}">Interest rate (% p.a.)</label>
+              <div class="input-group">
+                <input class="form-control {% if form.interest_rate.errors %}is-invalid{% endif %}" type="number" step="0.01" min="0" id="{{ form.interest_rate.id_for_label }}" name="{{ form.interest_rate.html_name }}" value="{{ form.interest_rate.value|default:'' }}" placeholder="12.00" required>
+                <span class="input-group-text">%</span>
+              </div>
+              {% for error in form.interest_rate.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.min_term_months.id_for_label }}">Min term (months)</label>
+              <input class="form-control {% if form.min_term_months.errors %}is-invalid{% endif %}" type="number" min="1" id="{{ form.min_term_months.id_for_label }}" name="{{ form.min_term_months.html_name }}" value="{{ form.min_term_months.value|default:'' }}" placeholder="3" required>
+              {% for error in form.min_term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.max_term_months.id_for_label }}">Max term (months)</label>
+              <input class="form-control {% if form.max_term_months.errors %}is-invalid{% endif %}" type="number" min="1" id="{{ form.max_term_months.id_for_label }}" name="{{ form.max_term_months.html_name }}" value="{{ form.max_term_months.value|default:'' }}" placeholder="24" required>
+              {% for error in form.max_term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary px-4" type="submit"><i class="bi bi-check2 me-1"></i>Save product</button>
+        <a class="btn btn-outline-secondary" href="{% url 'applications_queue' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="card-soft mb-4">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h2 class="card-title mb-0">Existing products</h2>
+        <a class="small" href="{% url 'loan_products' %}">View all</a>
+      </div>
+      <div class="card-body p-0">
+        {% for product in existing_products %}
+        <div class="border-bottom px-4 py-3">
+          <div class="fw-semibold">{{ product.name }}</div>
+          <div class="text-muted small">
+            {{ product.get_loan_type_display }} ·
+            {{ product.min_amount|peso_whole }} – {{ product.max_amount|peso_whole }} ·
+            {{ product.interest_rate }}% p.a. ·
+            {{ product.min_term_months }}–{{ product.max_term_months }} mo
+          </div>
+        </div>
+        {% empty %}
+        <div class="p-4 text-muted small">No products yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="info-strip"><i class="bi bi-info-circle me-2"></i><span>Products marked active are visible to borrowers when applying.</span></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  function formatAmount(raw) {
+    var clean = String(raw || '').replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + decPart;
+  }
+
+  var amountInputs = document.querySelectorAll('#{{ form.min_amount.id_for_label }}, #{{ form.max_amount.id_for_label }}');
+  var productForm = amountInputs[0] && amountInputs[0].closest('form');
+
+  amountInputs.forEach(function (input) {
+    input.addEventListener('input', function () {
+      var oldLength = input.value.length;
+      var oldPos = input.selectionStart;
+      input.value = formatAmount(input.value);
+      input.setSelectionRange(oldPos + (input.value.length - oldLength), oldPos + (input.value.length - oldLength));
+    });
+    if (input.value) {
+      input.value = formatAmount(input.value);
+    }
+  });
+
+  if (productForm) {
+    productForm.addEventListener('submit', function () {
+      amountInputs.forEach(function (input) {
+        input.value = input.value.replace(/,/g, '');
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

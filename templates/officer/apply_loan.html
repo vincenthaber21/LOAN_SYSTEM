@@ -1,0 +1,565 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}New loan application{% endblock %}
+{% block topbar_title %}New application{% endblock %}
+{% block topbar_context %}Create a loan application on behalf of a borrower.{% endblock %}
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<style>
+  .borrower-combobox .ts-wrapper { width: 100%; }
+  .borrower-combobox .ts-wrapper .ts-control {
+    border-radius: var(--radius);
+    border-color: var(--line);
+    min-height: calc(1.5em + .75rem + 2px);
+    padding: .375rem .75rem;
+    font-size: .94rem;
+  }
+  .borrower-combobox .ts-wrapper.focus .ts-control {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 .2rem rgba(29, 124, 120, .15);
+  }
+  .borrower-combobox .ts-wrapper.is-invalid .ts-control {
+    border-color: var(--danger);
+  }
+  .borrower-combobox .ts-dropdown {
+    border-radius: 12px;
+    border-color: var(--line);
+    box-shadow: var(--shadow-sm);
+  }
+  .borrower-combobox .ts-dropdown .option.active {
+    background: var(--mint);
+    color: var(--ink);
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'applications_queue' %}"><i class="bi bi-arrow-left me-1"></i>Back to applications</a>
+    <h1 class="mt-3 mb-2">New loan application</h1>
+    <p>Fill in the details below to create an application on behalf of a borrower.</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <form method="post" action="{% url 'officer_apply_loan' %}" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Borrower</h2></div>
+        <div class="card-body">
+          {% include "includes/form_errors.html" %}
+          <div class="mb-3 borrower-combobox">
+            <label class="form-label" for="{{ form.borrower.id_for_label }}">{{ form.borrower.label }}</label>
+            <select class="form-select {% if form.borrower.errors %}is-invalid{% endif %}" id="{{ form.borrower.id_for_label }}" name="{{ form.borrower.html_name }}" required>
+              <option value="">Select a borrower…</option>
+              {% for borrower in form.borrower.field.queryset %}
+              <option value="{{ borrower.pk }}" {% if form.borrower.value|stringformat:"s" == borrower.pk|stringformat:"s" %}selected{% endif %}>
+                {{ borrower.display_name }} — {{ borrower.email }}
+              </option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Type a name or email to search active members.</div>
+            {% for error in form.borrower.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Loan details</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label class="form-label mb-0" for="{{ form.loan_product.id_for_label }}">{{ form.loan_product.label }}</label>
+                <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                  <i class="bi bi-plus-circle me-1"></i>Add product
+                </button>
+              </div>
+              <select class="form-select {% if form.loan_product.errors %}is-invalid{% endif %}" id="{{ form.loan_product.id_for_label }}" name="{{ form.loan_product.html_name }}" required>
+                <option value="">Select product…</option>
+                {% for product in products %}
+                <option value="{{ product.pk }}" data-min="{{ product.min_amount }}" data-max="{{ product.max_amount }}" {% if form.loan_product.value|stringformat:"s" == product.pk|stringformat:"s" %}selected{% endif %}>
+                  {{ product.name }} — {{ product.get_loan_type_display }} ({{ product.interest_rate }}% p.a.)
+                </option>
+                {% endfor %}
+              </select>
+              {% for error in form.loan_product.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <div class="text-muted small mt-1 d-none" id="productAvailabilityHint"></div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.amount_requested.id_for_label }}">Amount requested (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.amount_requested.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.amount_requested.id_for_label }}" name="{{ form.amount_requested.html_name }}" value="{{ form.amount_requested.value|default:'' }}" placeholder="0.00" required>
+              </div>
+              {% for error in form.amount_requested.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <div class="text-danger small mt-1 d-none" id="amountRangeError"></div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.term_months.id_for_label }}">Term (months)</label>
+              <input class="form-control {% if form.term_months.errors %}is-invalid{% endif %}" type="number" min="1" max="60" id="{{ form.term_months.id_for_label }}" name="{{ form.term_months.html_name }}" value="{{ form.term_months.value|default:'' }}" required>
+              {% for error in form.term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.applied_on.id_for_label }}">Application date</label>
+              <input class="form-control {% if form.applied_on.errors %}is-invalid{% endif %}" type="date" id="{{ form.applied_on.id_for_label }}" name="{{ form.applied_on.html_name }}" value="{{ form.applied_on_input_value }}" max="{{ form.today_iso }}" required>
+              <div class="form-text">{{ form.applied_on.help_text }}</div>
+              {% for error in form.applied_on.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.payment_frequency.id_for_label }}">{{ form.payment_frequency.label }}</label>
+              <select class="form-select {% if form.payment_frequency.errors %}is-invalid{% endif %}" id="{{ form.payment_frequency.id_for_label }}" name="{{ form.payment_frequency.html_name }}" required>
+                {% for value, label in form.payment_frequency.field.choices %}
+                <option value="{{ value }}" {% if form.payment_frequency.value == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              {% for error in form.payment_frequency.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.purpose.id_for_label }}">Purpose</label>
+              <textarea class="form-control {% if form.purpose.errors %}is-invalid{% endif %}" id="{{ form.purpose.id_for_label }}" name="{{ form.purpose.html_name }}" rows="3" placeholder="Briefly describe the reason for this loan." required>{{ form.purpose.value|default:'' }}</textarea>
+              {% for error in form.purpose.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Documents</h2></div>
+        <div class="card-body">
+          <p class="text-muted small mb-3">Attach supporting documents as an image, PDF, or Word file (JPG, PNG, GIF, WEBP, PDF, DOC, DOCX). Optional — you can also add these later from the application review page.</p>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="{{ document_forms.0.file.id_for_label }}"><i class="bi bi-card-image me-1"></i>Valid ID</label>
+              <input type="hidden" name="{{ document_forms.0.prefix }}-doc_type" value="valid_id">
+              <input class="form-control {% if document_forms.0.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.0.file.id_for_label }}" name="{{ document_forms.0.file.html_name }}">
+              {% for error in document_forms.0.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ document_forms.1.file.id_for_label }}"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Proof of income</label>
+              <input type="hidden" name="{{ document_forms.1.prefix }}-doc_type" value="proof_of_income">
+              <input class="form-control {% if document_forms.1.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.1.file.id_for_label }}" name="{{ document_forms.1.file.html_name }}">
+              {% for error in document_forms.1.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ document_forms.2.file.id_for_label }}"><i class="bi bi-file-earmark me-1"></i>Other document</label>
+              <input type="hidden" name="{{ document_forms.2.prefix }}-doc_type" value="other">
+              <input class="form-control {% if document_forms.2.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.2.file.id_for_label }}" name="{{ document_forms.2.file.html_name }}">
+              {% for error in document_forms.2.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary px-4" type="submit" name="create_application" value="1" id="createApplicationBtn"><i class="bi bi-check2 me-1"></i>Create application</button>
+        <a class="btn btn-outline-secondary" href="{% url 'applications_queue' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="card-soft mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="card-title mb-0">Active loan products</h2>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addProductModal">
+          <i class="bi bi-plus-lg me-1"></i>Add
+        </button>
+      </div>
+      <div class="card-body p-0" id="productList">
+        {% for product in products %}
+        <div class="border-bottom px-4 py-3">
+          <div class="fw-semibold">{{ product.name }}</div>
+          <div class="text-muted small">₱{{ product.min_amount|floatformat:0 }} – ₱{{ product.max_amount|floatformat:0 }} · {{ product.interest_rate }}% p.a. · {{ product.min_term_months }}–{{ product.max_term_months }} mo</div>
+        </div>
+        {% empty %}
+        <div class="p-4 text-muted small" id="noProductsMsg">No active products.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="info-strip"><i class="bi bi-shield-check me-2"></i><span>This application will be linked to your officer account and logged in the audit trail.</span></div>
+  </div>
+</div>
+
+<!-- Add Loan Product Modal -->
+<div class="modal fade" id="addProductModal" tabindex="-1" aria-labelledby="addProductModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="addProductModalLabel">Add loan product</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="productFormErrors" class="alert alert-danger d-none"></div>
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label" for="p_name">Product name</label>
+            <input class="form-control" type="text" id="p_name" placeholder="e.g. Quick Personal Loan" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="p_loan_type">Loan type</label>
+            <select class="form-select" id="p_loan_type">
+              <option value="personal">Personal</option>
+              <option value="business">Business</option>
+              <option value="education">Education</option>
+              <option value="emergency">Emergency</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="p_min_amount">Minimum amount (₱)</label>
+            <input class="form-control" type="number" id="p_min_amount" step="500" min="0" placeholder="5000">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="p_max_amount">Maximum amount (₱)</label>
+            <input class="form-control" type="number" id="p_max_amount" step="500" min="0" placeholder="500000">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="p_interest_rate">Interest rate (% p.a.)</label>
+            <input class="form-control" type="number" id="p_interest_rate" step="0.01" min="0" placeholder="12.00">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="p_min_term">Min term (months)</label>
+            <input class="form-control" type="number" id="p_min_term" min="1" placeholder="3">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="p_max_term">Max term (months)</label>
+            <input class="form-control" type="number" id="p_max_term" min="1" placeholder="24">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="saveProductBtn">
+          <span id="saveProductSpinner" class="spinner-border spinner-border-sm me-1 d-none" role="status"></span>
+          Save product
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Application Modal -->
+<div class="modal fade" id="confirmApplicationModal" tabindex="-1" aria-labelledby="confirmApplicationModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmApplicationModalLabel"><i class="bi bi-shield-check me-2"></i>Confirm loan application</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">Please review the details below before creating this application.</p>
+        <dl class="row mb-0 confirm-summary">
+          <dt class="col-5">Borrower</dt><dd class="col-7" id="confirmBorrower">—</dd>
+          <dt class="col-5">Loan product</dt><dd class="col-7" id="confirmProduct">—</dd>
+          <dt class="col-5">Amount requested</dt><dd class="col-7" id="confirmAmount">—</dd>
+          <dt class="col-5">Term</dt><dd class="col-7" id="confirmTerm">—</dd>
+          <dt class="col-5">Application date</dt><dd class="col-7" id="confirmAppliedOn">—</dd>
+          <dt class="col-5">Payment frequency</dt><dd class="col-7" id="confirmFrequency">—</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
+        <button type="button" class="btn btn-primary" id="confirmApplicationBtn"><i class="bi bi-check2 me-1"></i>Confirm & create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/js/tom-select.complete.min.js"></script>
+<script>
+(function () {
+  var amountInput = document.getElementById('{{ form.amount_requested.id_for_label }}');
+  var amountForm = amountInput.closest('form');
+
+  function formatAmount(raw) {
+    var clean = raw.replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    var formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return formattedInt + decPart;
+  }
+
+  var rangeError = document.getElementById('amountRangeError');
+
+  function moneyFmt(n) {
+    return '₱' + Math.round(n).toLocaleString('en-US');
+  }
+
+  function validateAmount() {
+    var product = productSelect.options[productSelect.selectedIndex];
+    var raw = amountInput.value.replace(/,/g, '');
+    var amount = parseFloat(raw);
+
+    rangeError.classList.add('d-none');
+    rangeError.textContent = '';
+    amountInput.classList.remove('is-invalid');
+    amountInput.setCustomValidity('');
+
+    if (!product || !product.value || !raw) {
+      return;
+    }
+    var min = parseFloat(product.dataset.min);
+    var max = parseFloat(product.dataset.max);
+    if (isNaN(min) || isNaN(max)) {
+      return;
+    }
+    if (isNaN(amount) || amount < min || amount > max) {
+      var msg = 'Enter an amount between ' + moneyFmt(min) + ' and ' + moneyFmt(max) + '.';
+      rangeError.textContent = msg;
+      rangeError.classList.remove('d-none');
+      amountInput.classList.add('is-invalid');
+      amountInput.setCustomValidity(msg);
+    }
+  }
+
+  amountInput.addEventListener('input', function () {
+    var oldLength = amountInput.value.length;
+    var oldPos = amountInput.selectionStart;
+    var formatted = formatAmount(amountInput.value);
+    amountInput.value = formatted;
+    var newPos = Math.max(0, oldPos + (formatted.length - oldLength));
+    amountInput.setSelectionRange(newPos, newPos);
+    validateAmount();
+  });
+
+  if (amountInput.value) {
+    amountInput.value = formatAmount(amountInput.value);
+  }
+
+  if (amountForm) {
+    amountForm.addEventListener('submit', function () {
+      amountInput.value = amountInput.value.replace(/,/g, '');
+    });
+  }
+
+  var productSelect = document.getElementById('{{ form.loan_product.id_for_label }}');
+  var borrowerSelect = document.getElementById('{{ form.borrower.id_for_label }}');
+  var availabilityHint = document.getElementById('productAvailabilityHint');
+  var createBtn = document.getElementById('createApplicationBtn');
+  var availableProductsToken = 0;
+
+  function renderProductOptions(products, selectedId, borrowerInactive, borrowerHasActiveLoan, blockedProductCount, creditScoreBlocked, creditScoreBlockMessage) {
+    var currentValue = selectedId != null ? String(selectedId) : productSelect.value;
+    productSelect.innerHTML = '';
+    productSelect.appendChild(new Option('Select product…', ''));
+    products.forEach(function (product) {
+      var opt = new Option(product.label, product.id);
+      opt.dataset.min = product.min_amount;
+      opt.dataset.max = product.max_amount;
+      if (String(product.id) === currentValue) opt.selected = true;
+      productSelect.appendChild(opt);
+    });
+    validateAmount();
+    if (borrowerInactive) {
+      availabilityHint.textContent = 'This member\'s account is inactive. Only active members can receive a new loan application.';
+      availabilityHint.classList.remove('d-none');
+      createBtn.disabled = true;
+    } else if (creditScoreBlocked) {
+      availabilityHint.textContent = creditScoreBlockMessage || 'This borrower\'s credit score is too low to apply for loans.';
+      availabilityHint.classList.remove('d-none');
+      createBtn.disabled = true;
+    } else if (products.length === 0 && borrowerSelect.value) {
+      if (borrowerHasActiveLoan || blockedProductCount > 0) {
+        availabilityHint.textContent = 'This borrower has active or pending loans on all available products. Choose a different product type or wait until an existing loan is closed.';
+      } else {
+        availabilityHint.textContent = 'No active loan products are available right now.';
+      }
+      availabilityHint.classList.remove('d-none');
+      createBtn.disabled = true;
+    } else if (borrowerSelect.value) {
+      if (borrowerHasActiveLoan || blockedProductCount > 0) {
+        availabilityHint.textContent = 'Products with an active or pending loan for this borrower are hidden. Other products remain available.';
+      } else {
+        availabilityHint.textContent = 'All active loan products are available for this borrower.';
+      }
+      availabilityHint.classList.remove('d-none');
+      createBtn.disabled = false;
+    } else {
+      availabilityHint.classList.add('d-none');
+      createBtn.disabled = false;
+    }
+  }
+
+  function refreshAvailableProducts(selectedId) {
+    var token = ++availableProductsToken;
+    var borrowerId = borrowerSelect.value;
+    var url = '{% url "officer_available_products" %}' + (borrowerId ? ('?borrower=' + encodeURIComponent(borrowerId)) : '');
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (token !== availableProductsToken) return;
+        renderProductOptions(
+          data.products,
+          selectedId,
+          data.borrower_inactive,
+          data.borrower_has_active_loan,
+          data.blocked_product_count || 0,
+          data.credit_score_blocked,
+          data.credit_score_block_message
+        );
+      })
+      .catch(function () { /* ignore — server-side validation still applies on submit */ });
+  }
+
+  if (borrowerSelect && window.TomSelect) {
+    new TomSelect(borrowerSelect, {
+      create: false,
+      maxOptions: null,
+      allowEmptyOption: true,
+      placeholder: 'Type a name or email to search…',
+      sortField: { field: 'text', direction: 'asc' },
+      onChange: function () {
+        refreshAvailableProducts(null);
+      },
+    });
+  } else if (borrowerSelect) {
+    borrowerSelect.addEventListener('change', function () { refreshAvailableProducts(null); });
+  }
+  productSelect.addEventListener('change', validateAmount);
+  refreshAvailableProducts(productSelect.value);
+
+  var saveBtn = document.getElementById('saveProductBtn');
+  var errBox = document.getElementById('productFormErrors');
+  var spinner = document.getElementById('saveProductSpinner');
+  var productList = document.getElementById('productList');
+  var csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+  saveBtn.addEventListener('click', function () {
+    errBox.classList.add('d-none');
+    errBox.textContent = '';
+    var name = document.getElementById('p_name').value.trim();
+    var loan_type = document.getElementById('p_loan_type').value;
+    var min_amount = document.getElementById('p_min_amount').value;
+    var max_amount = document.getElementById('p_max_amount').value;
+    var interest_rate = document.getElementById('p_interest_rate').value;
+    var min_term_months = document.getElementById('p_min_term').value;
+    var max_term_months = document.getElementById('p_max_term').value;
+
+    if (!name || !min_amount || !max_amount || !interest_rate || !min_term_months || !max_term_months) {
+      errBox.textContent = 'Please fill in all required fields.';
+      errBox.classList.remove('d-none');
+      return;
+    }
+
+    spinner.classList.remove('d-none');
+    saveBtn.disabled = true;
+
+    var body = new URLSearchParams({
+      csrfmiddlewaretoken: csrf,
+      name: name, loan_type: loan_type,
+      min_amount: min_amount, max_amount: max_amount,
+      interest_rate: interest_rate,
+      min_term_months: min_term_months, max_term_months: max_term_months,
+    });
+
+    fetch('{% url "add_loan_product" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body,
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      spinner.classList.add('d-none');
+      saveBtn.disabled = false;
+      if (data.ok) {
+        // Add to product dropdown and select it
+        var opt = new Option(data.name, data.id, true, true);
+        opt.dataset.min = min_amount;
+        opt.dataset.max = max_amount;
+        productSelect.appendChild(opt);
+        productSelect.value = data.id;
+        validateAmount();
+        // Add to sidebar list
+        var noMsg = document.getElementById('noProductsMsg');
+        if (noMsg) noMsg.remove();
+        var item = document.createElement('div');
+        item.className = 'border-bottom px-4 py-3';
+        item.innerHTML = '<div class="fw-semibold">' + name + '</div>' +
+          '<div class="text-muted small">₱' + parseInt(min_amount).toLocaleString() +
+          ' – ₱' + parseInt(max_amount).toLocaleString() +
+          ' · ' + interest_rate + '% p.a. · ' + min_term_months + '–' + max_term_months + ' mo</div>';
+        productList.appendChild(item);
+        // Close modal and reset
+        bootstrap.Modal.getInstance(document.getElementById('addProductModal')).hide();
+        ['p_name','p_min_amount','p_max_amount','p_interest_rate','p_min_term','p_max_term'].forEach(function(id){
+          document.getElementById(id).value = '';
+        });
+      } else {
+        var msgs = Object.values(data.errors).flat().join(' ');
+        errBox.textContent = msgs || 'Something went wrong.';
+        errBox.classList.remove('d-none');
+      }
+    })
+    .catch(function () {
+      spinner.classList.add('d-none');
+      saveBtn.disabled = false;
+      errBox.textContent = 'Request failed. Please try again.';
+      errBox.classList.remove('d-none');
+    });
+  });
+
+  // Confirm-before-submit for the main application form.
+  var appForm = document.getElementById('createApplicationBtn').closest('form');
+  var confirmModalEl = document.getElementById('confirmApplicationModal');
+  var confirmBtn = document.getElementById('confirmApplicationBtn');
+
+  function selectedText(select) {
+    var opt = select.options[select.selectedIndex];
+    return opt ? opt.text.trim() : '';
+  }
+
+  appForm.addEventListener('submit', function (e) {
+    if (appForm.dataset.confirmed === 'true') {
+      return;
+    }
+    e.preventDefault();
+
+    if (!appForm.checkValidity()) {
+      appForm.reportValidity();
+      return;
+    }
+
+    document.getElementById('confirmBorrower').textContent = selectedText(document.getElementById('{{ form.borrower.id_for_label }}')) || '—';
+    document.getElementById('confirmProduct').textContent = selectedText(productSelect) || '—';
+    document.getElementById('confirmAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
+    var termVal = document.getElementById('{{ form.term_months.id_for_label }}').value;
+    document.getElementById('confirmTerm').textContent = termVal ? termVal + ' month(s)' : '—';
+    var appliedOnVal = document.getElementById('{{ form.applied_on.id_for_label }}').value;
+    document.getElementById('confirmAppliedOn').textContent = appliedOnVal || '—';
+    document.getElementById('confirmFrequency').textContent = selectedText(document.getElementById('{{ form.payment_frequency.id_for_label }}')) || '—';
+
+    bootstrap.Modal.getOrCreateInstance(confirmModalEl).show();
+  });
+
+  confirmBtn.addEventListener('click', function () {
+    if (confirmBtn.disabled || appForm.dataset.submitting === 'true') return;
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Creating…';
+
+    // Disabled submit buttons are omitted from POST, and requestSubmit(disabled)
+    // is a no-op in some browsers. Always send an explicit confirmation flag.
+    var flag = appForm.querySelector('input[name="create_application"][type="hidden"]');
+    if (!flag) {
+      flag = document.createElement('input');
+      flag.type = 'hidden';
+      flag.name = 'create_application';
+      flag.value = '1';
+      appForm.appendChild(flag);
+    }
+
+    amountInput.value = amountInput.value.replace(/,/g, '');
+    appForm.dataset.confirmed = 'true';
+    appForm.dataset.submitting = 'true';
+    bootstrap.Modal.getOrCreateInstance(confirmModalEl).hide();
+    appForm.submit();
+  });
+})();
+</script>
+{% endblock %}

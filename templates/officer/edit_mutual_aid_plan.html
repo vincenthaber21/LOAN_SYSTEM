@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Edit {{ plan.name }}{% endblock %}
+{% block topbar_title %}Edit mutual aid plan{% endblock %}
+{% block topbar_context %}Changes apply to new enrollments immediately.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <a class="small" href="{% url 'officer_mutual_aid_plans' %}"><i class="bi bi-arrow-left me-1"></i>Back to mutual aid plans</a>
+    <h1 class="mt-3 mb-2">Edit {{ plan.name }}</h1>
+    <p>Existing memberships keep the terms they were enrolled under.</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "includes/form_errors.html" %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Plan identity</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label" for="{{ form.name.id_for_label }}">Plan name</label>
+              <input class="form-control {% if form.name.errors %}is-invalid{% endif %}" type="text" id="{{ form.name.id_for_label }}" name="{{ form.name.html_name }}" value="{{ form.name.value|default:'' }}" placeholder="e.g. Basic Family Aid" required>
+              {% for error in form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.description.id_for_label }}">Description</label>
+              <textarea class="form-control {% if form.description.errors %}is-invalid{% endif %}" id="{{ form.description.id_for_label }}" name="{{ form.description.html_name }}" rows="3" placeholder="Briefly describe what this plan covers and who it is for.">{{ form.description.value|default:'' }}</textarea>
+              {% for error in form.description.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Contribution</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.contribution_amount.id_for_label }}">Contribution amount (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.contribution_amount.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.contribution_amount.id_for_label }}" name="{{ form.contribution_amount.html_name }}" value="{{ form.contribution_amount.value|default:'' }}" placeholder="500.00" required>
+              </div>
+              {% for error in form.contribution_amount.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.contribution_frequency.id_for_label }}">Contribution frequency</label>
+              <select class="form-select {% if form.contribution_frequency.errors %}is-invalid{% endif %}" id="{{ form.contribution_frequency.id_for_label }}" name="{{ form.contribution_frequency.html_name }}" required>
+                {% for value, label in form.contribution_frequency.field.choices %}
+                <option value="{{ value }}" {% if form.contribution_frequency.value == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              {% for error in form.contribution_frequency.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Benefit &amp; eligibility</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.max_benefit_amount.id_for_label }}">Maximum benefit (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.max_benefit_amount.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.max_benefit_amount.id_for_label }}" name="{{ form.max_benefit_amount.html_name }}" value="{{ form.max_benefit_amount.value|default:'' }}" placeholder="50,000" required>
+              </div>
+              {% for error in form.max_benefit_amount.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <span class="helptext">Maximum payout per approved claim under this plan.</span>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.waiting_period_days.id_for_label }}">Waiting period (days)</label>
+              <input class="form-control {% if form.waiting_period_days.errors %}is-invalid{% endif %}" type="number" min="0" max="730" id="{{ form.waiting_period_days.id_for_label }}" name="{{ form.waiting_period_days.html_name }}" value="{{ form.waiting_period_days.value|default:'90' }}" placeholder="90" required>
+              {% for error in form.waiting_period_days.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <span class="helptext">Days after enrollment before a claim can be filed.</span>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.min_membership_months.id_for_label }}">Min. membership (months)</label>
+              <input class="form-control {% if form.min_membership_months.errors %}is-invalid{% endif %}" type="number" min="0" max="120" id="{{ form.min_membership_months.id_for_label }}" name="{{ form.min_membership_months.html_name }}" value="{{ form.min_membership_months.value|default:'0' }}" placeholder="0" required>
+              {% for error in form.min_membership_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <span class="helptext">Minimum active membership before eligibility.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Status</h2></div>
+        <div class="card-body">
+          <div class="form-check">
+            <input type="checkbox" id="{{ form.is_active.id_for_label }}" name="{{ form.is_active.html_name }}" class="form-check-input {% if form.is_active.errors %}is-invalid{% endif %}" {% if form.is_active.value %}checked{% endif %}>
+            <label class="form-check-label" for="{{ form.is_active.id_for_label }}">Active plan</label>
+            <span class="helptext d-block">Uncheck to hide this plan from new member enrollments.</span>
+            {% if form.is_active.errors %}<div class="invalid-feedback d-block">{{ form.is_active.errors|join:", " }}</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary px-4" type="submit"><i class="bi bi-check2 me-1"></i>Save changes</button>
+        <a class="btn btn-outline-secondary" href="{% url 'officer_mutual_aid_plans' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.form-label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; margin-bottom: .35rem; display: flex; align-items: center; gap: 8px; }
+.form-control, .input-group-text, .form-select { border-color: var(--line); border-radius: 9px; font-size: .9rem; }
+.form-control:focus, .form-select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(29, 124, 120, .12); }
+.helptext { font-size: .74rem; color: var(--ink-soft); margin-top: 4px; display: block; }
+.invalid-feedback { display: block; font-size: .76rem; }
+.btn-outline-secondary { border-color: var(--line); color: var(--ink-soft); }
+.btn-outline-secondary:hover { background: var(--canvas); border-color: var(--ink-soft); color: var(--ink); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  function formatAmount(raw) {
+    var clean = String(raw || '').replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + decPart;
+  }
+
+  var amountInputs = document.querySelectorAll('#{{ form.contribution_amount.id_for_label }}, #{{ form.max_benefit_amount.id_for_label }}');
+  var planForm = amountInputs[0] && amountInputs[0].closest('form');
+
+  amountInputs.forEach(function (input) {
+    input.addEventListener('input', function () {
+      var oldLength = input.value.length;
+      var oldPos = input.selectionStart;
+      input.value = formatAmount(input.value);
+      input.setSelectionRange(oldPos + (input.value.length - oldLength), oldPos + (input.value.length - oldLength));
+    });
+    if (input.value) {
+      input.value = formatAmount(input.value);
+    }
+  });
+
+  if (planForm) {
+    planForm.addEventListener('submit', function () {
+      amountInputs.forEach(function (input) {
+        input.value = input.value.replace(/,/g, '');
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

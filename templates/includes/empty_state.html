@@ -1,0 +1,6 @@
+<div class="empty-state">
+  <div class="empty-state-mark"><i class="bi {{ icon|default:'bi-inbox' }}"></i></div>
+  <h3>{{ title|default:"Nothing to show yet" }}</h3>
+  <p>{{ description|default:"When there is activity here, it will appear in one clear view." }}</p>
+  {% if action_url %}<a href="{{ action_url }}" class="btn btn-primary">{{ action_label|default:"Get started" }}</a>{% endif %}
+</div>

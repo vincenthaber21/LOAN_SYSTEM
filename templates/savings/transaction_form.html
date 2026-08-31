@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}{{ action_label }}{% endblock %}
+{% block topbar_title %}{{ action_label }}{% endblock %}
+{% block topbar_context %}{{ account.reference }} · Balance {{ account.balance|peso }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">{{ account.reference }}</div><h1>{{ action_label }} funds.</h1><p>{% if action == 'deposit' %}Add money to your {{ account.product_name }} account.{% else %}Withdraw from your available balance of {{ account.balance|peso }}.{% endif %}</p></div></div>
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">{{ action_label }} details</h2></div>
+      <div class="card-body">
+        <form method="post" novalidate>{% csrf_token %}{% include "includes/form_errors.html" %}
+          <div class="mb-3"><label class="form-label">{{ form.amount.label }}</label>{{ form.amount }}{% for error in form.amount.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+          <div class="mb-3"><label class="form-label">{{ form.method.label }}</label>{{ form.method }}</div>
+          <div class="mb-3"><label class="form-label">{{ form.reference_number.label }}</label>{{ form.reference_number }}</div>
+          <div class="mb-4"><label class="form-label">{{ form.notes.label }}</label>{{ form.notes }}</div>
+          <div class="d-flex justify-content-between"><a class="btn btn-outline-secondary" href="{% url 'savings_account_detail' account_id=account.id %}">Cancel</a><button class="btn btn-primary" type="submit">Record {{ action_label|lower }} <i class="bi bi-arrow-right ms-1"></i></button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5"><div class="callout"><div class="eyebrow">Account rules</div><h3 class="h5 mt-2">Minimum balance {{ account.product.min_balance|peso }}.</h3><p>Withdrawals must leave at least the minimum balance, or you may withdraw the full amount.</p></div></div>
+</div>
+{% endblock %}

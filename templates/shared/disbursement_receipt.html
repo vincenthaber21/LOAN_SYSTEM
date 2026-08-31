@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Receipt {{ loan.disbursement_receipt_number }}{% endblock %}
+{% block topbar_title %}Disbursement receipt{% endblock %}
+{% block topbar_context %}A transparent record of funds released.{% endblock %}
+{% block head %}
+<style>
+  @media print {
+    .app-sidebar, .sidebar-backdrop, .topbar, .no-print { display: none !important; }
+    .content-area, .page-wrap { margin: 0 !important; padding: 0 !important; }
+    body { background: #fff !important; }
+  }
+  .receipt-card { max-width: 640px; margin: 0 auto; }
+  .receipt-brand { display: flex; align-items: center; gap: .75rem; }
+  .receipt-mark { width: 44px; height: 44px; border-radius: 12px; background: var(--bs-primary, #0d6efd); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; }
+  .receipt-meta { text-align: right; }
+  .receipt-amount { font-size: 2.25rem; font-weight: 700; }
+  .receipt-row { display: flex; justify-content: space-between; padding: .5rem 0; border-bottom: 1px dashed var(--bs-border-color, #dee2e6); }
+  .receipt-row:last-child { border-bottom: none; }
+  .receipt-row dt { color: var(--bs-secondary-color, #6c757d); font-size: .85rem; margin: 0; }
+  .receipt-row dd { margin: 0; font-weight: 600; text-align: right; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-heading no-print">
+  <div>
+    <a class="small" href="{% if user.is_officer %}{% url 'disbursements' %}{% else %}{% url 'loan_detail' loan_id=loan.id %}{% endif %}"><i class="bi bi-arrow-left me-1"></i>{% if user.is_officer %}Back to disbursements{% else %}Back to {{ loan.reference }}{% endif %}</a>
+    <h1 class="mt-3 mb-2">Disbursement receipt</h1>
+    <p>Share or print this receipt as proof that funds were released.</p>
+  </div>
+  <button type="button" class="btn btn-primary" onclick="window.print()"><i class="bi bi-printer me-1"></i>Print / Save as PDF</button>
+</div>
+
+<div class="receipt-card card-soft p-4 p-md-5">
+  <div class="d-flex justify-content-between align-items-start mb-4">
+    <div class="receipt-brand">
+      <span class="receipt-mark"><i class="bi bi-water"></i></span>
+      <div>
+        <div class="fw-bold fs-5">{{ app_name }} Lending</div>
+        <div class="text-muted small">Official disbursement receipt</div>
+      </div>
+    </div>
+    <div class="receipt-meta">
+      <div class="text-muted small">Receipt No.</div>
+      <div class="fw-semibold">{{ loan.disbursement_receipt_number }}</div>
+      <div class="text-muted small mt-1">{{ loan.start_date }}</div>
+    </div>
+  </div>
+
+  <div class="text-center py-4 mb-4 border-top border-bottom">
+    <div class="text-muted small text-uppercase">Net amount released</div>
+    <div class="receipt-amount text-primary">{{ loan.net_release_amount|peso }}</div>
+    <span class="badge bg-primary-subtle text-primary-emphasis mt-2"><i class="bi bi-check-circle me-1"></i>Funds released</span>
+  </div>
+
+  <dl class="mb-0">
+    <div class="receipt-row"><dt>Borrower</dt><dd>{{ application.borrower_name }}</dd></div>
+    <div class="receipt-row"><dt>Application reference</dt><dd>{{ application.reference }}</dd></div>
+    <div class="receipt-row"><dt>Loan reference</dt><dd>{{ loan.reference }}</dd></div>
+    <div class="receipt-row"><dt>Loan product</dt><dd>{{ loan.product_name }}</dd></div>
+    <div class="receipt-row"><dt>Approved principal</dt><dd>{{ loan.principal|peso }}</dd></div>
+    {% if loan.total_deductions %}
+    <div class="receipt-row"><dt>Processing fee</dt><dd>{{ loan.processing_fee|peso }}</dd></div>
+    <div class="receipt-row"><dt>Other fees</dt><dd>{{ loan.other_fees|peso }}{% if loan.other_fees_description %} · {{ loan.other_fees_description }}{% endif %}</dd></div>
+    {% endif %}
+    <div class="receipt-row"><dt>Disbursement method</dt><dd>{{ loan.disbursement_method }}</dd></div>
+    <div class="receipt-row"><dt>Transaction reference</dt><dd>{{ loan.disbursement_reference|default:"—" }}</dd></div>
+    <div class="receipt-row"><dt>Interest rate</dt><dd>{{ loan.interest_rate }}% p.a.</dd></div>
+    <div class="receipt-row"><dt>Term</dt><dd>{{ loan.term_months }} months · {{ loan.payment_frequency }}</dd></div>
+    <div class="receipt-row"><dt>Total repayable</dt><dd>{{ loan.total_payable|peso }}</dd></div>
+    {% if application.reviewed_by %}
+    <div class="receipt-row"><dt>Approved by</dt><dd>{{ application.reviewed_by.display_name }}</dd></div>
+    {% endif %}
+  </dl>
+
+  <p class="text-muted small mt-4 mb-0 text-center">This receipt confirms that {{ loan.net_release_amount|peso }} was released to {{ application.borrower_name }} under loan {{ loan.reference }}. Keep it for your records.</p>
+</div>
+{% endblock %}

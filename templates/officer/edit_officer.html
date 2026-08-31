@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ officer.display_name }}{% endblock %}
+{% block topbar_title %}Edit loan officer{% endblock %}
+{% block topbar_context %}Administrator access only.{% endblock %}
+
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Administration</div>
+    <h1>Edit {{ officer.display_name }}.</h1>
+    <p>Changes take effect immediately — the officer will see them the next time they sign in.</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="{% url 'loan_officers' %}"><i class="bi bi-arrow-left me-1"></i>Back to loan officers</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="alert-box mb-4">{{ form.non_field_errors|join:", " }}</div>
+      {% endif %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="eyebrow">Step 1</div>
+          <h2 class="card-title mt-1"><i class="bi bi-person me-2 text-muted"></i>Personal information</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.full_name.id_for_label }}">Full name<span class="req">*</span></label>
+              <input type="text" id="{{ form.full_name.id_for_label }}" name="{{ form.full_name.html_name }}" value="{{ form.full_name.value|default:'' }}" class="form-control {% if form.full_name.errors %}is-invalid{% endif %}" placeholder="Avery Santos" autocomplete="off">
+              {% if form.full_name.errors %}<div class="invalid-feedback">{{ form.full_name.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.phone.id_for_label }}">Phone number</label>
+              <input type="text" id="{{ form.phone.id_for_label }}" name="{{ form.phone.html_name }}" value="{{ form.phone.value|default:'' }}" class="form-control {% if form.phone.errors %}is-invalid{% endif %}" placeholder="+63 917 555 0142">
+              {% if form.phone.errors %}<div class="invalid-feedback">{{ form.phone.errors|join:", " }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="eyebrow">Step 2</div>
+          <h2 class="card-title mt-1"><i class="bi bi-envelope me-2 text-muted"></i>Account</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.username.id_for_label }}">Username<span class="req">*</span></label>
+              <input type="text" id="{{ form.username.id_for_label }}" name="{{ form.username.html_name }}" value="{{ form.username.value|default:'' }}" class="form-control {% if form.username.errors %}is-invalid{% endif %}" autocomplete="off">
+              {% if form.username.errors %}<div class="invalid-feedback">{{ form.username.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.email.id_for_label }}">Email address<span class="req">*</span></label>
+              <input type="email" id="{{ form.email.id_for_label }}" name="{{ form.email.html_name }}" value="{{ form.email.value|default:'' }}" class="form-control {% if form.email.errors %}is-invalid{% endif %}" placeholder="avery@example.com">
+              {% if form.email.errors %}<div class="invalid-feedback">{{ form.email.errors|join:", " }}</div>{% else %}<span class="helptext">Used to sign in too — must be unique.</span>{% endif %}
+            </div>
+            <div class="col-12">
+              <div class="form-check">
+                <input type="checkbox" id="{{ form.is_active.id_for_label }}" name="{{ form.is_active.html_name }}" class="form-check-input {% if form.is_active.errors %}is-invalid{% endif %}" {% if form.is_active.value %}checked{% endif %}>
+                <label class="form-check-label" for="{{ form.is_active.id_for_label }}">Active account</label>
+                <span class="helptext d-block">Uncheck to suspend this officer's ability to sign in.</span>
+                {% if form.is_active.errors %}<div class="invalid-feedback d-block">{{ form.is_active.errors|join:", " }}</div>{% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 align-items-center">
+        <button type="submit" class="btn btn-primary px-4"><i class="bi bi-check2 me-1"></i>Save changes</button>
+        <a href="{% url 'loan_officers' %}" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.form-label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; margin-bottom: .35rem; display: flex; align-items: center; gap: 8px; }
+.req { color: var(--danger); margin-left: 2px; }
+.form-control, .input-group-text { border-color: var(--line); border-radius: 9px; font-size: .9rem; }
+.form-control:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(29, 124, 120, .12); }
+.helptext { display: block; font-size: .74rem; color: var(--ink-soft); margin-top: 4px; }
+.invalid-feedback { display: block; font-size: .76rem; }
+.btn-outline-secondary { border-color: var(--line); color: var(--ink-soft); }
+.btn-outline-secondary:hover { background: var(--canvas); border-color: var(--ink-soft); color: var(--ink); }
+.alert-box { background: var(--apricot-soft); border: 1px solid var(--apricot); color: var(--warning); border-radius: 9px; padding: 11px 14px; font-size: .84rem; }
+</style>
+{% endblock %}

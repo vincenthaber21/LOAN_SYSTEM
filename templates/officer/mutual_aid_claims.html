@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Mutual aid claims{% endblock %}
+{% block topbar_title %}Mutual aid claims{% endblock %}
+{% block topbar_context %}Review and disburse member benefit claims.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Mutual aid workspace</div>
+    <h1>Claims queue.</h1>
+    <p>{{ claim_count }} claim{{ claim_count|pluralize }} in view · {{ pending_count }} pending review.</p>
+  </div>
+  <a class="btn btn-outline-primary" href="{% url 'officer_mutual_aid_memberships' %}"><i class="bi bi-heart-pulse me-1"></i>Memberships</a>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-5">
+      <label class="form-label" for="claim_q">Search claims</label>
+      <div class="input-group">
+        <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+        <input class="form-control border-start-0" id="claim_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Member name, email, or membership number">
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="claim_status">Status</label>
+      <select class="form-select" id="claim_status" name="status">
+        <option value="">All statuses</option>
+        {% for value, label in status_filters %}
+        {% if value != 'draft' %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-outline-primary w-100" type="submit">Filter</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="card-body p-0">
+    {% if claims %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th>Claim</th><th>Member</th><th>Plan</th><th>Type</th><th>Requested</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for claim in claims %}
+          <tr>
+            <td><strong>{{ claim.reference }}</strong><div class="text-muted small">{{ claim.submitted_at|date:"M d, Y"|default:claim.created_at|date:"M d, Y" }}</div></td>
+            <td>{{ claim.member_name }}<div class="text-muted small">{{ claim.membership.reference }}</div></td>
+            <td>{{ claim.plan_name }}</td>
+            <td>{{ claim.claim_type_label }}</td>
+            <td>{{ claim.amount_requested|peso }}</td>
+            <td>{% include "includes/status_badge.html" with status=claim.status label=claim.status_label %}</td>
+            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{% url 'officer_mutual_aid_claim_review' claim_id=claim.id %}">Review</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-4">{% include "includes/empty_state.html" with icon="bi-inbox" title="No claims match those filters" description="Claims submitted by members will appear here for review." %}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

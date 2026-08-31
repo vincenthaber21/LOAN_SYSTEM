@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Loan application{% endblock %}
+{% block topbar_title %}New loan application{% endblock %}
+{% block topbar_context %}Save your progress and return when you are ready.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <a class="small" href="{% url 'borrower_dashboard' %}"><i class="bi bi-arrow-left me-1"></i>Back to overview</a>
+    <div class="eyebrow mt-3">Application · Step 1 of 4</div>
+    <h1 class="mt-2">Tell us what you need.</h1>
+    <p>A few thoughtful details help us make a careful decision. Your answers are private.</p>
+  </div>
+</div>
+
+<div class="stepper mb-4 fade-up-2">
+  {% for step in application_steps %}
+  <div class="step {% if forloop.first %}active{% endif %}">
+    <span class="step-circle">{{ step.number }}</span>
+    <small>{{ step.label }}</small>
+  </div>
+  {% endfor %}
+</div>
+
+{% if not products %}
+<div class="card-soft fade-up-3">
+  <div class="card-body">
+    {% url 'support' as support_url %}
+    {% if credit_score_blocked %}
+      {% include "includes/empty_state.html" with icon="bi-shield-exclamation" title="Loan applications unavailable" description=credit_score_block_message action_url=support_url action_label="Contact support" %}
+    {% else %}
+      {% include "includes/empty_state.html" with icon="bi-inbox" title="No loan products available right now" description="You may already have an open application or active loan. Check your overview or contact support if you need help." action_url=support_url action_label="Contact support" %}
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<form method="post" action="{% url 'loan_application' %}" enctype="multipart/form-data" data-client-validation novalidate>
+  {% csrf_token %}
+  {% if form.errors or profile_form.errors %}
+  <div class="alert alert-danger fade-up-3">
+    <i class="bi bi-exclamation-circle me-2"></i>Please review the highlighted fields below and try again.
+  </div>
+  {% endif %}
+  {% include "includes/form_errors.html" %}
+
+  <div class="row g-4 fade-up-3">
+    <div class="col-lg-8">
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="eyebrow">Step 1</div>
+          <h2 class="card-title mt-1">About your loan</h2>
+          <p class="text-muted small mb-0 mt-1">Choose a product and tell us how it will help.</p>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label" for="{{ form.loan_product.id_for_label }}">Loan product</label>
+            <select class="form-select {% if form.loan_product.errors %}is-invalid{% endif %}" id="{{ form.loan_product.id_for_label }}" name="{{ form.loan_product.html_name }}" required>
+              <option value="">Select a loan product…</option>
+              {% for product in products %}
+              <option value="{{ product.pk }}" data-min="{{ product.min_amount }}" data-max="{{ product.max_amount }}" data-min-term="{{ product.min_term_months }}" data-max-term="{{ product.max_term_months }}" data-rate="{{ product.interest_rate }}" {% if form.loan_product.value|stringformat:"s" == product.pk|stringformat:"s" %}selected{% endif %}>
+                {{ product.name }} — {{ product.get_loan_type_display }} ({{ product.interest_rate }}% p.a.)
+              </option>
+              {% endfor %}
+            </select>
+            {% for error in form.loan_product.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
+
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="{{ form.amount_requested.id_for_label }}">Amount requested</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.amount_requested.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.amount_requested.id_for_label }}" name="{{ form.amount_requested.html_name }}" value="{{ form.amount_requested.value|default:'' }}" placeholder="0.00" required>
+              </div>
+              <div class="form-text" id="amount-range-hint">
+                {% if selected_product %}Between {{ selected_product.min_amount|peso }} and {{ selected_product.max_amount|peso }}{% else %}Choose a product to see the allowed range{% endif %}
+              </div>
+              <div class="text-danger small mt-1 d-none" id="amount-range-error"></div>
+              {% for error in form.amount_requested.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="id_term_months">Repayment term</label>
+              <select class="form-select {% if form.term_months.errors %}is-invalid{% endif %}" id="id_term_months" name="{{ form.term_months.html_name }}" required>
+                <option value="">Select term…</option>
+                {% for term in loan_terms %}
+                <option value="{{ term.months }}" {% if form.term_months.value|stringformat:"s" == term.months|stringformat:"s" %}selected{% endif %}>{{ term.label }}</option>
+                {% endfor %}
+              </select>
+              {% for error in form.term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+
+          <div class="row g-3 mt-1">
+            <div class="col-sm-6">
+              <label class="form-label" for="{{ form.payment_frequency.id_for_label }}">Payment frequency</label>
+              <select class="form-select {% if form.payment_frequency.errors %}is-invalid{% endif %}" id="{{ form.payment_frequency.id_for_label }}" name="{{ form.payment_frequency.html_name }}" required>
+                {% for value, label in form.payment_frequency.field.choices %}
+                <option value="{{ value }}" {% if form.payment_frequency.value == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              {% for error in form.payment_frequency.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Estimated monthly payment</label>
+              <div class="estimate-box">
+                <strong id="estimate-payment">₱—</strong>
+                <span id="estimate-meta">Choose details to calculate</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label" for="{{ form.purpose.id_for_label }}">What will the loan help you do?</label>
+            <textarea class="form-control {% if form.purpose.errors %}is-invalid{% endif %}" id="{{ form.purpose.id_for_label }}" name="{{ form.purpose.html_name }}" rows="3" placeholder="Briefly describe how you plan to use the funds." required>{{ form.purpose.value|default:'' }}</textarea>
+            {% for error in form.purpose.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="eyebrow">Step 2</div>
+          <h2 class="card-title mt-1">Your profile</h2>
+          <p class="text-muted small mb-0 mt-1">We've filled in what we already know from your account. Update anything that has changed.</p>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="{{ profile_form.full_name.id_for_label }}">{{ profile_form.full_name.label }}</label>
+              <input type="text" class="form-control {% if profile_form.full_name.errors %}is-invalid{% endif %}" id="{{ profile_form.full_name.id_for_label }}" name="{{ profile_form.full_name.html_name }}" value="{{ profile_form.full_name.value|default_if_none:'' }}" placeholder="Your legal full name">
+              {% for error in profile_form.full_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="{{ profile_form.phone.id_for_label }}">{{ profile_form.phone.label }}</label>
+              <input type="text" class="form-control {% if profile_form.phone.errors %}is-invalid{% endif %}" id="{{ profile_form.phone.id_for_label }}" name="{{ profile_form.phone.html_name }}" value="{{ profile_form.phone.value|default_if_none:'' }}" placeholder="+63 9XX XXX XXXX">
+              {% for error in profile_form.phone.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="{{ profile_form.date_of_birth.id_for_label }}">{{ profile_form.date_of_birth.label }}</label>
+              <input type="date" class="form-control {% if profile_form.date_of_birth.errors %}is-invalid{% endif %}" id="{{ profile_form.date_of_birth.id_for_label }}" name="{{ profile_form.date_of_birth.html_name }}" value="{% if profile_form.date_of_birth.value %}{{ profile_form.date_of_birth.value|date:'Y-m-d' }}{% endif %}">
+              {% for error in profile_form.date_of_birth.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="{{ profile_form.employment_status.id_for_label }}">{{ profile_form.employment_status.label }}</label>
+              <input type="text" class="form-control {% if profile_form.employment_status.errors %}is-invalid{% endif %}" id="{{ profile_form.employment_status.id_for_label }}" name="{{ profile_form.employment_status.html_name }}" value="{{ profile_form.employment_status.value|default_if_none:'' }}" placeholder="e.g. Employed, Self-employed">
+              {% for error in profile_form.employment_status.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="{{ profile_form.monthly_income.id_for_label }}">{{ profile_form.monthly_income.label }}</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input type="number" step="0.01" class="form-control {% if profile_form.monthly_income.errors %}is-invalid{% endif %}" id="{{ profile_form.monthly_income.id_for_label }}" name="{{ profile_form.monthly_income.html_name }}" value="{{ profile_form.monthly_income.value|default_if_none:'' }}" placeholder="0.00">
+              </div>
+              {% for error in profile_form.monthly_income.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ profile_form.address.id_for_label }}">{{ profile_form.address.label }}</label>
+              <textarea class="form-control {% if profile_form.address.errors %}is-invalid{% endif %}" id="{{ profile_form.address.id_for_label }}" name="{{ profile_form.address.html_name }}" rows="3" placeholder="Street, Barangay, City, Province">{{ profile_form.address.value|default_if_none:'' }}</textarea>
+              {% for error in profile_form.address.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft">
+        <div class="card-header">
+          <div class="eyebrow">Step 3</div>
+          <h2 class="card-title mt-1">Supporting documents</h2>
+          <p class="text-muted small mb-0 mt-1">Upload a valid ID and proof of income when ready. You can also add these later.</p>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            {% for spec, document_form in document_fields %}
+            <div class="col-md-6">
+              <label class="form-label" for="{{ document_form.file.id_for_label }}">
+                <i class="bi {{ spec.3 }} me-1"></i>{{ spec.2 }}
+              </label>
+              <input type="hidden" name="{{ document_form.prefix }}-doc_type" value="{{ spec.1 }}">
+              <div class="file-upload-card">
+                <input class="form-control {% if document_form.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_form.file.id_for_label }}" name="{{ document_form.file.html_name }}">
+                <div class="file-upload-hint text-muted">JPG, PNG, PDF, or Word · optional</div>
+              </div>
+              {% for error in document_form.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="card-footer bg-transparent border-top p-3 d-flex flex-wrap justify-content-between gap-2">
+          <a class="btn btn-outline-secondary" href="{% url 'borrower_dashboard' %}">Save &amp; exit</a>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-light" name="save_draft" value="1" type="submit">Save draft</button>
+            <button class="btn btn-primary" name="continue" value="1" type="submit">Submit application <i class="bi bi-arrow-right ms-1"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card-soft mb-4 application-summary">
+        <div class="card-header">
+          <div class="eyebrow">Summary</div>
+          <h2 class="card-title mt-1">Your request</h2>
+        </div>
+        <div class="card-body">
+          <div class="summary-row">
+            <span class="summary-label">Product</span>
+            <span class="summary-value" id="summary-product">{% if selected_product %}{{ selected_product.name }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Amount</span>
+            <span class="summary-value" id="summary-amount">—</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Term</span>
+            <span class="summary-value" id="summary-term">—</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Est. payment</span>
+            <span class="summary-value text-teal" id="summary-payment">₱—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout mb-3">
+        <div class="eyebrow">Good to know</div>
+        <h3 class="h5 mt-2">Clarity is part of the process.</h3>
+        <p>There is no penalty for taking your time. We will show you what you need and why.</p>
+        <a href="{% url 'support' %}" class="btn btn-outline-light btn-sm">Ask a question</a>
+      </div>
+
+      <div class="card-soft p-3">
+        <div class="d-flex gap-2">
+          <i class="bi bi-shield-check text-teal"></i>
+          <div>
+            <strong class="d-block" style="font-size:.8rem;">Private by design</strong>
+            <span class="text-muted" style="font-size:.73rem;">Your information is used only to review and service your account.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if products %}
+<script>
+(() => {
+  const product = document.getElementById('{{ form.loan_product.id_for_label }}');
+  const amount = document.getElementById('{{ form.amount_requested.id_for_label }}');
+  const amountForm = amount?.closest('form');
+  const term = document.getElementById('id_term_months');
+  const payment = document.getElementById('estimate-payment');
+  const meta = document.getElementById('estimate-meta');
+  const amountHint = document.getElementById('amount-range-hint');
+  const amountRangeError = document.getElementById('amount-range-error');
+  const summaryProduct = document.getElementById('summary-product');
+  const summaryAmount = document.getElementById('summary-amount');
+  const summaryTerm = document.getElementById('summary-term');
+  const summaryPayment = document.getElementById('summary-payment');
+
+  const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  function formatAmount(raw) {
+    const clean = String(raw).replace(/[^\d.]/g, '');
+    const firstDot = clean.indexOf('.');
+    const normalized = firstDot !== -1
+      ? clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '')
+      : clean;
+    const parts = normalized.split('.');
+    const intPart = parts[0].replace(/^0+(?=\d)/, '');
+    const decPart = parts.length > 1 ? `.${parts[1].slice(0, 2)}` : '';
+    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + decPart;
+  }
+
+  function rawAmount() {
+    return amount?.value.replace(/,/g, '') || '';
+  }
+
+  function selectedOption() {
+    return product?.selectedOptions?.[0];
+  }
+
+  function validateAmount() {
+    const option = selectedOption();
+    const raw = rawAmount();
+    const value = parseFloat(raw);
+
+    amountRangeError?.classList.add('d-none');
+    if (amountRangeError) amountRangeError.textContent = '';
+    amount?.classList.remove('is-invalid');
+    amount?.setCustomValidity('');
+
+    if (!option?.value || !raw) return true;
+
+    const min = parseFloat(option.dataset.min);
+    const max = parseFloat(option.dataset.max);
+    if (Number.isNaN(min) || Number.isNaN(max)) return true;
+
+    if (Number.isNaN(value) || value < min || value > max) {
+      const message = `Enter an amount between ${peso(min)} and ${peso(max)}.`;
+      if (amountRangeError) {
+        amountRangeError.textContent = message;
+        amountRangeError.classList.remove('d-none');
+      }
+      amount?.classList.add('is-invalid');
+      amount?.setCustomValidity(message);
+      return false;
+    }
+    return true;
+  }
+
+  function updateTermOptions() {
+    const option = selectedOption();
+    if (!option || !term) return;
+    const minTerm = Number(option.dataset.minTerm || 3);
+    const maxTerm = Number(option.dataset.maxTerm || 24);
+    const current = term.value;
+    term.innerHTML = '<option value="">Select term…</option>';
+    for (let months = minTerm; months <= maxTerm; months += 3) {
+      const item = document.createElement('option');
+      item.value = String(months);
+      item.textContent = `${months} months`;
+      if (String(months) === String(current)) item.selected = true;
+      term.appendChild(item);
+    }
+    if (!term.value && term.options.length > 1) {
+      term.selectedIndex = 1;
+    }
+  }
+
+  function updateSummary() {
+    const option = selectedOption();
+    const raw = rawAmount();
+    if (summaryProduct) summaryProduct.textContent = option?.value ? option.textContent.split(' — ')[0] : '—';
+    if (summaryAmount) summaryAmount.textContent = raw ? peso(raw) : '—';
+    if (summaryTerm) summaryTerm.textContent = term?.value ? `${term.value} months` : '—';
+    if (summaryPayment && payment) summaryPayment.textContent = payment.textContent;
+  }
+
+  async function updateEstimate() {
+    const option = selectedOption();
+    if (option?.dataset.min && option?.dataset.max && amountHint) {
+      amountHint.textContent = `Between ${peso(option.dataset.min)} and ${peso(option.dataset.max)}`;
+    }
+    validateAmount();
+    const raw = rawAmount();
+    if (!product?.value || !raw || !term?.value || !validateAmount()) {
+      if (payment) payment.textContent = '₱—';
+      if (meta) meta.textContent = 'Choose details to calculate';
+      updateSummary();
+      return;
+    }
+    const response = await fetch(`{% url 'estimate' %}?product=${product.value}&amount=${raw}&term=${term.value}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    if (payment) payment.textContent = peso(data.monthly_payment);
+    if (meta) meta.textContent = `${data.interest_rate}% annual interest · ${peso(data.processing_fee)} processing fee`;
+    updateSummary();
+  }
+
+  amount?.addEventListener('input', () => {
+    const oldLength = amount.value.length;
+    const oldPos = amount.selectionStart;
+    const formatted = formatAmount(amount.value);
+    amount.value = formatted;
+    const newPos = Math.max(0, oldPos + (formatted.length - oldLength));
+    amount.setSelectionRange(newPos, newPos);
+    updateEstimate();
+  });
+
+  if (amount?.value) {
+    amount.value = formatAmount(amount.value);
+  }
+
+  amountForm?.addEventListener('submit', () => {
+    if (amount) amount.value = rawAmount();
+  });
+
+  product?.addEventListener('change', () => {
+    updateTermOptions();
+    updateEstimate();
+  });
+  term?.addEventListener('change', updateEstimate);
+
+  updateTermOptions();
+  updateEstimate();
+})();
+</script>
+{% endif %}
+{% endblock %}

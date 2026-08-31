@@ -1,0 +1,178 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .hl-wrap { max-width: 940px; }
+  .hl-hero {
+    background: linear-gradient(135deg, #0f2e38 0%, #1d7c78 65%, #a9ded0 100%);
+    border-radius: 14px;
+    padding: 26px 28px;
+    color: #f5faf7;
+    margin-bottom: 26px;
+  }
+  .hl-hero .hl-eyebrow {
+    font-size: .68rem; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: rgba(223,241,235,.75);
+  }
+  .hl-hero h1 { margin: 6px 0 8px; font-size: 1.7rem; color: #fff; font-weight: 700; }
+  .hl-hero p { margin: 0; max-width: 60ch; color: rgba(245,250,247,.85); font-size: .92rem; line-height: 1.5; }
+  .hl-hero .hl-role-chip {
+    display: inline-block; margin-top: 14px; background: rgba(255,255,255,.16);
+    border: 1px solid rgba(255,255,255,.28); border-radius: 999px;
+    padding: 4px 12px; font-size: .75rem; font-weight: 600;
+  }
+
+  .hl-card {
+    background: var(--body-bg, #fff);
+    border: 1px solid var(--hairline-color, #e0e0e0);
+    border-radius: 12px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .hl-card-head {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--hairline-color, #e0e0e0);
+    background: var(--darkened-bg, #f8f8f8);
+  }
+  .hl-step {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+    background: #1d7c78; color: #fff; font-size: .74rem; font-weight: 700;
+    display: grid; place-items: center; align-self: center;
+  }
+  .hl-card-head h2 { margin: 0; font-size: 1rem; font-weight: 650; }
+  .hl-card-head .hl-hint { margin-left: auto; font-size: .78rem; color: var(--body-quiet-color, #666); }
+  .hl-card-body { padding: 20px; }
+
+  .hl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+  .hl-field.hl-full { grid-column: 1 / -1; }
+  .hl-field label { display: block; font-weight: 600; font-size: .82rem; margin-bottom: 5px; }
+  .hl-field input[type=text], .hl-field input[type=email], .hl-field input[type=password],
+  .hl-field input[type=number], .hl-field input[type=date], .hl-field textarea, .hl-field select {
+    width: 100%; box-sizing: border-box; padding: 8px 10px;
+    border: 1px solid var(--border-color, #ccc); border-radius: 8px;
+    font-size: .9rem; background: var(--body-bg, #fff); color: var(--body-fg, #333);
+  }
+  .hl-field input:focus, .hl-field textarea:focus, .hl-field select:focus {
+    border-color: #1d7c78; outline: 0; box-shadow: 0 0 0 3px rgba(29,124,120,.16);
+  }
+  .hl-field .help, .hl-field .helptext {
+    display: block; font-size: .74rem; color: var(--body-quiet-color, #666); margin-top: 4px; padding: 0;
+  }
+  .hl-required { color: #ba2121; margin-left: 2px; }
+  .hl-field.hl-has-error input, .hl-field.hl-has-error textarea { border-color: #ba2121; }
+  .hl-field .errorlist {
+    list-style: none; margin: 5px 0 0; padding: 0; color: #ba2121; font-size: .76rem; font-weight: 600;
+  }
+
+  .hl-alert {
+    background: #dff1eb; border: 1px solid #a9ded0; color: #155d5d;
+    border-radius: 9px; padding: 11px 14px; font-size: .82rem; margin-bottom: 20px;
+  }
+  .hl-errors-top {
+    background: #fdecec; border: 1px solid #f0b7b7; color: #a11b1b;
+    border-radius: 9px; padding: 11px 14px; font-size: .84rem; margin-bottom: 20px;
+  }
+  .hl-errors-top ul { margin: 6px 0 0; padding-left: 18px; }
+
+  .hl-actions {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 16px 20px; border-radius: 12px;
+    border: 1px solid var(--hairline-color, #e0e0e0);
+    background: var(--darkened-bg, #f8f8f8);
+  }
+  .hl-actions input[type=submit] {
+    background: #1d7c78; color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 18px; font-size: .87rem; font-weight: 600; cursor: pointer;
+  }
+  .hl-actions input[type=submit]:hover { background: #155d5d; }
+  .hl-actions input[name="_addanother"], .hl-actions input[name="_continue"] {
+    background: transparent; color: #155d5d; border: 1px solid #a9ded0;
+  }
+  .hl-actions input[name="_addanother"]:hover, .hl-actions input[name="_continue"]:hover {
+    background: #dff1eb; color: #0f2e38;
+  }
+  .hl-actions .hl-cancel { margin-left: auto; font-size: .83rem; }
+
+  @media (max-width: 767px) { .hl-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} change-form{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {% translate 'Add' %} {{ opts.verbose_name }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="hl-wrap">
+
+  <div class="hl-hero">
+    <div class="hl-eyebrow">{{ app_name }} Lending</div>
+    <h1>Add a new member</h1>
+    <p>Create a borrower account. The role is set to <strong>Member</strong> automatically &mdash; you only need their sign-in details and whatever profile information you already have.</p>
+    <span class="hl-role-chip">Role &middot; Member</span>
+  </div>
+
+  {% if adminform.form.errors %}
+    <div class="hl-errors-top">
+      <strong>Please correct the {{ adminform.form.errors|length }} problem{{ adminform.form.errors|length|pluralize }} below.</strong>
+      {% if adminform.form.non_field_errors %}
+        <ul>{% for error in adminform.form.non_field_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="hl-alert">
+      <strong>Tip:</strong> only the username, email, full name and password are required. Everything else can be filled in later by the member from their profile page.
+    </div>
+  {% endif %}
+
+  <form method="post" action="" id="member_form" novalidate>
+    {% csrf_token %}
+
+    {% for fieldset in adminform %}
+      <div class="hl-card">
+        <div class="hl-card-head">
+          <span class="hl-step">{{ forloop.counter }}</span>
+          <h2>{{ fieldset.name|default:"Details" }}</h2>
+          {% if fieldset.description %}<span class="hl-hint">{{ fieldset.description }}</span>{% endif %}
+        </div>
+        <div class="hl-card-body">
+          <div class="hl-grid">
+            {% for line in fieldset %}
+              {% for field in line %}
+                <div class="hl-field {% if field.errors %}hl-has-error{% endif %} {% if field.field.name == 'address' %}hl-full{% endif %}">
+                  {% if field.field.label %}
+                    <label for="{{ field.field.id_for_label }}">
+                      {{ field.field.label }}{% if field.field.field.required %}<span class="hl-required">*</span>{% endif %}
+                    </label>
+                  {% endif %}
+                  {{ field.field }}
+                  {{ field.errors }}
+                  {% if field.field.help_text %}
+                    <span class="helptext">{{ field.field.help_text|safe }}</span>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+
+    <div class="hl-actions">
+      <input type="submit" value="Save member" name="_save">
+      <input type="submit" value="Save and add another" name="_addanother">
+      <input type="submit" value="Save and continue editing" name="_continue">
+      <a class="hl-cancel" href="{% url opts|admin_urlname:'changelist' %}">Cancel</a>
+    </div>
+  </form>
+
+</div>
+{% endblock %}

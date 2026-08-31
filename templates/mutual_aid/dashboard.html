@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}My mutual aid{% endblock %}
+{% block topbar_title %}My mutual aid{% endblock %}
+{% block topbar_context %}Your mutual aid memberships and benefit activity.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Mutual aid workspace</div>
+    <h1>Your mutual aid.</h1>
+    <p>{{ membership_count }} active membership{{ membership_count|pluralize }} · {{ total_contributed|peso }} total contributions · {{ total_benefits|peso }} benefits received.</p>
+  </div>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Total contributions</div>
+      <div class="metric-value">{{ total_contributed|peso }}</div>
+      <div class="metric-note positive">Across all active memberships</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Benefits received</div>
+      <div class="metric-value text-success">{{ total_benefits|peso }}</div>
+      <div class="metric-note">Approved and disbursed claims</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Active memberships</div>
+      <div class="metric-value">{{ membership_count }}</div>
+      <div class="metric-note">Plans you are enrolled in</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft h-100 fade-up-3">
+      <div class="card-header">
+        <div class="eyebrow">Your memberships</div>
+        <h2 class="card-title mt-1">Mutual aid plans</h2>
+      </div>
+      <div class="card-body">
+        {% if memberships %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Membership</th>
+                <th>Plan</th>
+                <th class="text-end">Contributed</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for membership in memberships %}
+              <tr>
+                <td>
+                  <strong>{{ membership.reference }}</strong>
+                  <div class="text-muted small">{{ membership.status_label }} · since {{ membership.enrolled_at|date:"M d, Y" }}</div>
+                </td>
+                <td>
+                  {{ membership.plan_name }}
+                  <div class="text-muted small">{{ membership.plan.contribution_summary }}</div>
+                </td>
+                <td class="text-end fw-semibold">{{ membership.total_contributed|peso }}</td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'mutual_aid_membership_detail' membership_id=membership.id %}">View</a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-heart-pulse" title="No mutual aid memberships yet" description="Contact your cooperative officer to enroll in a mutual aid plan." %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card-soft mb-4 fade-up-3">
+      <div class="card-header">
+        <div class="eyebrow">Recent activity</div>
+        <h2 class="card-title mt-1">Latest contributions</h2>
+      </div>
+      <div class="card-body">
+        {% if recent_contributions %}
+        {% for tx in recent_contributions %}
+        <div class="d-flex justify-content-between gap-3 {% if not forloop.last %}mb-3 pb-3 border-bottom{% endif %}">
+          <div>
+            <div class="fw-semibold text-success" style="font-size:.85rem;">+{{ tx.amount|peso }}</div>
+            <div class="text-muted" style="font-size:.75rem;">{% if tx.period %}{{ tx.period.date_range_short }}{% else %}Contribution{% endif %} · {{ tx.membership.reference }}</div>
+            <div class="text-muted" style="font-size:.68rem;">{{ tx.created_at|date:"M d, Y · g:i A" }}</div>
+          </div>
+          <div class="text-end text-muted small">{{ tx.membership.plan_name }}</div>
+        </div>
+        {% endfor %}
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-cash-stack" title="No contributions yet" description="Your contribution history will appear here once recorded." %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card-soft fade-up-3">
+      <div class="card-header">
+        <div class="eyebrow">Benefit claims</div>
+        <h2 class="card-title mt-1">Recent claims</h2>
+      </div>
+      <div class="card-body">
+        {% if recent_claims %}
+        {% for claim in recent_claims %}
+        <div class="d-flex justify-content-between align-items-start gap-3 {% if not forloop.last %}mb-3 pb-3 border-bottom{% endif %}">
+          <div>
+            <div class="fw-semibold" style="font-size:.85rem;">{{ claim.reference }}</div>
+            <div class="text-muted" style="font-size:.75rem;">{{ claim.claim_type_label }} · {{ claim.amount_requested|peso }}</div>
+            <div class="text-muted" style="font-size:.68rem;">{{ claim.created_at|date:"M d, Y" }}</div>
+          </div>
+          <div class="text-end">
+            {% include "includes/status_badge.html" with status=claim.status label=claim.status_label %}
+            <a class="small d-block mt-1" href="{% url 'mutual_aid_claim_detail' claim_id=claim.id %}">View</a>
+          </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-inbox" title="No claims filed" description="Claims you submit will appear here with their review status." %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

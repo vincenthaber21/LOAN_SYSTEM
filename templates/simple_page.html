@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block topbar_title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">{{ app_name }}</div><h1>{{ title }}</h1><p>{{ description }}</p></div></div>
+<div class="card-soft col-lg-8"><div class="card-body">{% if form %}<form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary" type="submit">Save changes</button></form>{% else %}<div class="empty-state"><i class="bi bi-check2-circle"></i><h2 class="h5">You are all set</h2><p class="text-muted mb-0">{{ description }}</p></div>{% endif %}</div></div>
+{% endblock %}

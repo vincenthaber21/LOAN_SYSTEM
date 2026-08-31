@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Loan officers{% endblock %}
+{% block topbar_title %}Loan officers{% endblock %}
+{% block topbar_context %}Staff with access to the officer workspace.{% endblock %}
+{% block content %}
+
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Officer workspace</div>
+    <h1>Loan officers.</h1>
+    <p>{{ officer_count }} officer{{ officer_count|pluralize }} · {{ active_count }} active.</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'add_officer' %}"><i class="bi bi-person-plus me-1"></i>Add loan officer</a>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-6">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Total loan officers</div>
+      <div class="metric-value">{{ officer_count }}</div>
+      <div class="metric-note">Matching your current filters</div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Active accounts</div>
+      <div class="metric-value">{{ active_count }}</div>
+      <div class="metric-note positive">Can currently sign in</div>
+    </div>
+  </div>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get" action="{% url 'loan_officers' %}">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-7">
+      <label class="form-label" for="officer_q">Search loan officers</label>
+      <div class="input-group">
+        <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+        <input class="form-control border-start-0" id="officer_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Search by name, email, or username">
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="officer_status">Account status</label>
+      <select class="form-select" id="officer_status" name="status">
+        <option value="">All statuses</option>
+        {% for option in officer_status_filters %}
+          <option value="{{ option.value }}" {% if filters.status == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-primary w-100" type="submit">Search</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Loan officer</th>
+          <th>Username</th>
+          <th>Phone</th>
+          <th>Applications reviewed</th>
+          <th>Joined</th>
+          <th>Account status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for officer in officers %}
+          <tr>
+            <td>
+              <span class="person">
+                <span class="avatar">{{ officer.initials }}</span>
+                <span>
+                  <span class="person-name d-block">{{ officer.display_name }}</span>
+                  <span class="person-sub">{{ officer.email }}</span>
+                </span>
+              </span>
+            </td>
+            <td class="text-muted">{{ officer.username }}</td>
+            <td class="text-muted">{{ officer.phone|default:"—" }}</td>
+            <td><strong>{{ officer.applications_reviewed }}</strong> application{{ officer.applications_reviewed|pluralize }}</td>
+            <td class="text-muted">{{ officer.joined_at }}</td>
+            <td>{% include "includes/status_badge.html" with status=officer.status label=officer.status_label %}</td>
+            <td class="text-nowrap">
+              <a class="btn btn-sm btn-light" href="{% url 'officer_activity_log' officer_id=officer.id %}"><i class="bi bi-clock-history me-1"></i>Activity log</a>
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'edit_officer' officer_id=officer.id %}"><i class="bi bi-pencil"></i></a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="7">
+              {% include "includes/empty_state.html" with icon="bi-person-badge" title="No loan officers found" description="Try a different name, email, or account status." %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

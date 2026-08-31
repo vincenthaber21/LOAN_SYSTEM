@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}{{ account.reference }}{% endblock %}
+{% block topbar_title %}{{ account.product_name }}{% endblock %}
+{% block topbar_context %}{{ account.reference }} · {{ account.status_label }}{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">{{ account.reference }}</div>
+    <h1>{{ account.product_name }}.</h1>
+    <p>{{ account.product.interest_rate }}% annual interest · Min. balance {{ account.product.min_balance|peso }}</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-primary" href="{% url 'savings_deposit' account_id=account.id %}"><i class="bi bi-plus-lg me-1"></i>Deposit</a>
+    <a class="btn btn-outline-primary" href="{% url 'savings_withdraw' account_id=account.id %}">Withdraw</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Available balance</div>
+      <div class="metric-value">{{ account.balance|peso }}</div>
+      <div class="metric-note positive">{{ account.status_label }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Interest rate</div>
+      <div class="metric-value">{{ account.product.interest_rate }}%</div>
+      <div class="metric-note">Per annum</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Opened</div>
+      <div class="metric-value" style="font-size:1.35rem;">{{ account.opened_at|date:"M d, Y" }}</div>
+      <div class="metric-note">Account start date</div>
+    </div>
+  </div>
+</div>
+
+<div class="card-soft fade-up-3">
+  <div class="card-header"><div class="eyebrow">Transaction history</div><h2 class="card-title mt-1">Recent activity</h2></div>
+  <div class="card-body">
+    {% if transactions %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th>Date</th><th>Type</th><th>Method</th><th class="text-end">Amount</th><th class="text-end">Balance after</th></tr></thead>
+        <tbody>
+          {% for tx in transactions %}
+          <tr>
+            <td>{{ tx.created_at|date:"M d, Y · g:i A" }}</td>
+            <td>{{ tx.type_label }}</td>
+            <td>{{ tx.get_method_display }}</td>
+            <td class="text-end {% if tx.is_credit %}text-success{% else %}text-danger{% endif %}">{% if tx.is_credit %}+{% else %}−{% endif %}{{ tx.amount|peso }}</td>
+            <td class="text-end">{{ tx.balance_after|peso }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    {% include "includes/empty_state.html" with icon="bi-receipt" title="No transactions yet" description="Make your first deposit to get started." %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

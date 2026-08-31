@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Loan {{ loan.reference }}{% endblock %}
+{% block topbar_context %}A plain-language view of your loan.{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">My loan · {{ loan.reference }}</div><h1>{{ loan.product_name }}</h1><p>Opened {{ loan.start_date }} · {{ loan.term_months }} month term</p></div><div class="d-flex gap-2"><a class="btn btn-outline-primary" href="{% url 'disbursement_receipt' disbursement_id=loan.application_id %}"><i class="bi bi-receipt me-1"></i>Disbursement receipt</a><a class="btn btn-outline-primary" href="{% url 'repayment_schedule' loan_id=loan.id %}"><i class="bi bi-calendar3 me-1"></i>Schedule</a><button class="btn btn-light" data-copy-value="{{ loan.reference }}"><i class="bi bi-copy me-1"></i><span data-copy-label>Copy reference</span></button></div></div>
+<div class="row g-4"><div class="col-lg-8"><div class="loan-hero mb-4"><div class="row g-4 align-items-end position-relative" style="z-index:1;"><div class="col-sm-7"><div class="eyebrow">Remaining balance</div><div class="amount">{{ loan.remaining_balance|peso }}</div><p class="mt-2">Original amount {{ loan.original_amount|peso }} · {{ loan.status_label }}</p></div><div class="col-sm-5 text-sm-end"><div class="amount-label">Next payment</div><div class="text-white fw-semibold mt-1">{{ loan.next_payment_amount|peso }}</div><div class="small text-white-50">{{ loan.next_payment_date }}</div></div></div></div><div class="card-soft"><div class="card-header d-flex justify-content-between"><h2 class="card-title">Loan details</h2>{% include "includes/status_badge.html" with status=loan.status label=loan.status_label %}</div><div class="card-body"><div class="row g-4"><div class="col-sm-4"><div class="detail-label">Interest rate</div><div class="detail-value">{{ loan.interest_rate }}% fixed</div></div><div class="col-sm-4"><div class="detail-label">Payment frequency</div><div class="detail-value">{{ loan.payment_frequency }}</div></div><div class="col-sm-4"><div class="detail-label">Payments remaining</div><div class="detail-value">{{ loan.payments_remaining }}</div></div><div class="col-sm-4"><div class="detail-label">Origination date</div><div class="detail-value">{{ loan.start_date }}</div></div><div class="col-sm-4"><div class="detail-label">Maturity date</div><div class="detail-value">{{ loan.maturity_date }}</div></div><div class="col-sm-4"><div class="detail-label">Loan reference</div><div class="detail-value">{{ loan.reference }}</div></div></div></div></div>
+<div class="card-soft mt-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h2 class="card-title">Payment history</h2>
+    <span class="small text-muted">{{ payments|length }} payment{{ payments|length|pluralize }}</span>
+  </div>
+  {% if payments %}
+  <div class="table-responsive">
+    <table class="table table-hover">
+      <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th></th></tr></thead>
+      <tbody>
+        {% for payment in payments %}
+        <tr>
+          <td>{{ payment.payment_date }}</td>
+          <td><strong>{{ payment.amount|peso }}</strong></td>
+          <td>{{ payment.get_method_display }}</td>
+          <td>{{ payment.reference_number|default:"—" }}</td>
+          <td><a href="{% url 'payment_receipt' payment_id=payment.id %}" class="btn btn-sm btn-light"><i class="bi bi-receipt me-1"></i>Receipt</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  {% include "includes/empty_state.html" with icon="bi-receipt" title="No payments yet" description="Your payments will appear here once recorded." %}
+  {% endif %}
+</div>
+</div><div class="col-lg-4"><div class="card-soft mb-4"><div class="card-header"><h2 class="card-title">Progress</h2></div><div class="card-body"><div class="d-flex justify-content-between small mb-2"><span>Paid down</span><strong>{{ loan.paid_percentage }}%</strong></div><div class="progress mb-3"><div class="progress-bar" style="width:{{ loan.paid_percentage }}%"></div></div><p class="text-muted small mb-0">{{ loan.total_paid|peso }} paid across {{ loan.payments_made }} payments.</p></div></div><div class="info-strip"><i class="bi bi-info-circle me-2"></i><span>Need to talk through your payment? <a href="{% url 'support' %}">We are here to help.</a></span></div></div></div>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Savings products{% endblock %}
+{% block topbar_title %}Savings products{% endblock %}
+{% block topbar_context %}Products members can open as savings accounts.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Savings settings</div>
+    <h1>Savings products.</h1>
+    <p>{{ product_count }} product{{ product_count|pluralize }} · {{ active_count }} active.</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'officer_add_savings_product' %}"><i class="bi bi-plus-lg me-1"></i>Add product</a>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-5">
+      <label class="form-label" for="product_q">Search products</label>
+      <input class="form-control" id="product_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Product name">
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="product_status">Status</label>
+      <select class="form-select" id="product_status" name="status">
+        <option value="">All</option>
+        <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+        <option value="inactive" {% if filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-outline-primary w-100" type="submit">Filter</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="card-body p-0">
+    {% if products %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th>Product</th><th>Rate</th><th>Interest term</th><th>Min. balance</th><th>Min. deposit</th><th>Accounts</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for product in products %}
+          <tr>
+            <td><strong>{{ product.name }}</strong>{% if product.description %}<div class="text-muted small">{{ product.description|truncatewords:12 }}</div>{% endif %}</td>
+            <td>{{ product.interest_rate }}%</td>
+            <td>{{ product.interest_credit_label }}</td>
+            <td>{{ product.min_balance|peso }}</td>
+            <td>{{ product.min_deposit|peso }}</td>
+            <td>{{ product.accounts_count }}</td>
+            <td>{% if product.is_active %}<span class="badge status-approved">Active</span>{% else %}<span class="badge status-inactive">Inactive</span>{% endif %}</td>
+            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{% url 'officer_edit_savings_product' product_id=product.id %}">Edit</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-4">{% include "includes/empty_state.html" with icon="bi-tags" title="No savings products" description="Add a product so members can open savings accounts." %}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

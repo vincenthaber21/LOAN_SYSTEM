@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Open savings account{% endblock %}
+{% block topbar_title %}Open savings account{% endblock %}
+{% block topbar_context %}Choose a product and optional opening deposit.{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">Savings</div><h1>Open an account.</h1><p>Pick the savings product that fits your goals.</p></div></div>
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Account details</h2></div>
+      <div class="card-body">
+        <form method="post" novalidate>{% csrf_token %}{% include "includes/form_errors.html" %}
+          <div class="mb-3"><label class="form-label">{{ form.product.label }}</label>{{ form.product }}{% for error in form.product.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+          <div class="mb-4"><label class="form-label">{{ form.initial_deposit.label }}</label>{{ form.initial_deposit }}{% for error in form.initial_deposit.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+          <div class="d-flex justify-content-between"><a class="btn btn-outline-secondary" href="{% url 'savings_dashboard' %}">Cancel</a><button class="btn btn-primary" type="submit">Open account <i class="bi bi-arrow-right ms-1"></i></button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5"><div class="callout"><div class="eyebrow">Before you start</div><h3 class="h5 mt-2">One account per product.</h3><p>You can hold one active account for each savings product. Minimum deposit rules apply when you add your first funds.</p></div></div>
+</div>
+{% endblock %}

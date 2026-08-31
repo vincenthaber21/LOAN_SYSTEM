@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}My overview{% endblock %}
+{% block topbar_context %}Your funding path, at a glance.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Borrower workspace</div>
+    <h1>{{ greeting }}, {{ first_name }}.</h1>
+    <p>Here is the current status of your applications, loans, and documents.</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'loan_application' %}"><i class="bi bi-plus-lg me-1"></i>Start an application</a>
+</div>
+{% if active_loan %}
+<div class="loan-hero mb-4 fade-up-2">
+  <div class="row align-items-center g-4 position-relative" style="z-index:1;">
+    <div class="col-lg-7">
+      <div class="eyebrow">Active loan · {{ active_loan.reference }}</div>
+      <h2>{{ active_loan.product_name }}</h2>
+      <p>{{ active_loan.next_step_text }}</p>
+      <div class="d-flex gap-2 mt-4">
+        <a class="btn btn-light" href="{% url 'loan_detail' loan_id=active_loan.id %}">View loan details <i class="bi bi-arrow-up-right ms-1"></i></a>
+        <a class="btn btn-outline-light" href="{% url 'repayment_schedule' loan_id=active_loan.id %}">Repayment schedule</a>
+      </div>
+    </div>
+    <div class="col-lg-5 text-lg-end">
+      <div class="amount-label">Remaining balance</div>
+      <div class="amount">{{ active_loan.remaining_balance|peso }}</div>
+      <div class="small text-white-50 mt-2">Next payment · {{ active_loan.next_payment_date }}</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+<div class="row g-3 mb-4 fade-up-3">
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Application status</div>
+      <div class="metric-value" style="font-size:1.55rem;">{{ application_status_label }}</div>
+      <div class="metric-note">{{ application_status_note }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Paid toward balance</div>
+      <div class="metric-value">{{ total_paid|peso }}</div>
+      <div class="metric-note positive">{% if payment_progress %}{{ payment_progress }}% of total payable{% else %}No payments recorded yet{% endif %}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Documents on file</div>
+      <div class="metric-value">{{ verified_document_count }} <span class="text-muted" style="font-size:1rem;">/ {{ required_document_count }}</span></div>
+      <div class="metric-note">{% if required_document_count %}{{ outstanding_document_count }} required document{{ outstanding_document_count|pluralize }} still needed{% else %}Documents appear after you apply{% endif %}</div>
+    </div>
+  </div>
+</div>
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+          <div class="eyebrow">Your next steps</div>
+          <h2 class="card-title mt-1">Keep your application moving</h2>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if next_steps %}
+        <div class="timeline">
+          {% for step in next_steps %}
+          <div class="timeline-item {% if step.complete %}complete{% endif %}">
+            <span class="timeline-dot"></span>
+            <div class="timeline-label">{{ step.title }} {% if step.complete %}<span class="badge status-approved ms-2">Complete</span>{% endif %}</div>
+            <div class="timeline-date">{{ step.due_label }}</div>
+            <div class="timeline-copy">{{ step.description }}</div>
+            {% if not step.complete and step.action_url %}
+            <a class="small d-inline-block mt-2" href="{{ step.action_url }}">{{ step.action_label|default:"Take this step" }} <i class="bi bi-arrow-right"></i></a>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-check2-circle" title="You are all caught up" description="There are no outstanding actions on your account right now." %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card-soft mb-4">
+      <div class="card-header">
+        <div class="eyebrow">Recent activity</div>
+        <h2 class="card-title mt-1">From your account</h2>
+      </div>
+      <div class="card-body">
+        {% if recent_activity %}
+          {% for activity in recent_activity %}
+          <div class="d-flex gap-3 {% if not forloop.last %}mb-4{% endif %}">
+            <span class="avatar" style="width:28px;height:28px;"><i class="bi {{ activity.icon|default:'bi-dot' }}"></i></span>
+            <div>
+              <div class="fw-semibold" style="font-size:.8rem;">{{ activity.title }}</div>
+              <div class="text-muted" style="font-size:.73rem;">{{ activity.description }}</div>
+              <div class="text-muted mt-1" style="font-size:.68rem;">{{ activity.created_at }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity yet" description="Updates about your applications and loans will appear here." %}
+        {% endif %}
+      </div>
+    </div>
+    <div class="info-strip">
+      <div class="d-flex gap-2">
+        <i class="bi bi-shield-check mt-1"></i>
+        <div>
+          <strong class="d-block" style="font-size:.8rem;">Questions are welcome.</strong>
+          <span style="font-size:.75rem;">Our team is here to explain every part of your application.</span>
+          <a href="{% url 'support' %}" class="d-block small mt-2">Contact support <i class="bi bi-arrow-right"></i></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

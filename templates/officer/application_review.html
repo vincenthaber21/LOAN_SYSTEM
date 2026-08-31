@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Review {{ application.reference }}{% endblock %}
+{% block topbar_title %}Application review{% endblock %}
+{% block topbar_context %}{{ application.reference }} · Keep the decision explainable.{% endblock %}
+{% block content %}
+<div class="page-heading"><div><a class="small" href="{% url 'applications_queue' %}"><i class="bi bi-arrow-left me-1"></i>Back to applications</a><h1 class="mt-3 mb-2">{{ application.borrower_name }}</h1><p>{{ application.product_name }} · requested {{ application.amount|peso }} over {{ application.term_months }} months</p></div><div class="text-end">{% include "includes/status_badge.html" with status=application.status label=application.status_label %}<div class="small text-muted mt-2">Submitted {{ application.submitted_at }}</div></div></div>
+<div class="row g-4"><div class="col-xl-8"><div class="card-soft mb-4"><div class="card-header d-flex justify-content-between align-items-center"><h2 class="card-title">Applicant snapshot</h2><a class="small" href="{% url 'borrower_detail' borrower_id=application.borrower_id %}">Open borrower profile <i class="bi bi-arrow-up-right"></i></a></div><div class="card-body"><div class="row g-4">{% for field in applicant_snapshot %}<div class="col-sm-4"><div class="detail-label">{{ field.label }}</div><div class="detail-value">{{ field.value }}</div></div>{% endfor %}</div></div></div><div class="card-soft mb-4"><div class="card-header d-flex justify-content-between align-items-center"><h2 class="card-title">Payment history</h2>{% if credit_summary.risk_level == "good" %}{% include "includes/status_badge.html" with status="paid" label=credit_summary.risk_label %}{% elif credit_summary.risk_level == "poor" %}{% include "includes/status_badge.html" with status="overdue" label=credit_summary.risk_label %}{% elif credit_summary.risk_level == "fair" %}{% include "includes/status_badge.html" with status="submitted" label=credit_summary.risk_label %}{% else %}{% include "includes/status_badge.html" with status="neutral" label=credit_summary.risk_label %}{% endif %}</div><div class="card-body">{% if credit_summary.flags %}<div class="info-strip mb-4" style="background:#fff0dc;border-color:#f0d9b8;"><i class="bi bi-exclamation-triangle me-2"></i><span>{% for flag in credit_summary.flags %}{{ flag }}{% if not forloop.last %} · {% endif %}{% endfor %}</span></div>{% endif %}<div class="row g-3 mb-4"><div class="col-sm-3"><div class="detail-label">Prior loans</div><div class="detail-value">{{ credit_summary.prior_loan_count }}</div></div><div class="col-sm-3"><div class="detail-label">Paid in full</div><div class="detail-value">{{ credit_summary.paid_loan_count }}</div></div><div class="col-sm-3"><div class="detail-label">On-time payments</div><div class="detail-value">{{ credit_summary.on_time_payment_count }}</div></div><div class="col-sm-3"><div class="detail-label">Late / overdue</div><div class="detail-value">{% if credit_summary.late_payment_count or credit_summary.overdue_installment_count %}{{ credit_summary.late_payment_count }} late · {{ credit_summary.overdue_installment_count }} overdue{% else %}None{% endif %}</div></div></div>{% if credit_summary.prior_loans %}<div class="table-responsive"><table class="table mb-0"><thead><tr><th>Reference</th><th>Product</th><th>Amount</th><th>Balance</th><th>Status</th><th></th></tr></thead><tbody>{% for loan in credit_summary.prior_loans %}<tr><td class="fw-semibold">{{ loan.reference }}</td><td>{{ loan.product_name }}</td><td>{{ loan.original_amount|peso }}</td><td>{{ loan.remaining_balance|peso }}</td><td>{% include "includes/status_badge.html" with status=loan.status label=loan.status_label %}</td><td><a href="{% url 'officer_loan_detail' loan_id=loan.id %}" class="btn btn-sm btn-light">View</a></td></tr>{% endfor %}</tbody></table></div>{% else %}{% include "includes/empty_state.html" with icon="bi-clock-history" title="No prior loan history" description="This is the borrower's first application, or they have no disbursed loans yet." %}{% endif %}</div></div><div class="card-soft mb-4"><div class="card-header"><ul class="nav nav-tabs card-header-tabs" role="tablist"><li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#documents" role="tab">Documents <span class="badge status-neutral ms-1">{{ documents|length }}</span></a></li><li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#notes" role="tab">Notes & history</a></li></ul></div><div class="card-body tab-content"><div class="tab-pane fade show active" id="documents" role="tabpanel">{% for document in documents %}<div class="d-flex align-items-center justify-content-between border-bottom py-3"><div class="person"><span class="avatar"><i class="bi bi-file-earmark-text"></i></span><span><span class="person-name d-block">{{ document.name }}</span><span class="person-sub">{{ document.file_size }} · uploaded {{ document.uploaded_at }}</span></span></div><div class="d-flex align-items-center gap-2">{% include "includes/status_badge.html" with status=document.status label=document.status_label %}<a href="{{ document.download_url }}" class="btn btn-sm btn-light" target="_blank">View</a></div></div>{% empty %}{% include "includes/empty_state.html" with icon="bi-file-earmark" title="No documents uploaded" description="The applicant has not provided supporting documents yet." %}{% endfor %}</div><div class="tab-pane fade" id="notes" role="tabpanel">{% for note in review_notes %}<div class="border-bottom py-3"><div class="d-flex justify-content-between"><strong style="font-size:.8rem;">{{ note.author }}</strong><span class="text-muted small">{{ note.created_at }}</span></div><p class="small text-muted mb-0 mt-1">{{ note.body }}</p></div>{% empty %}{% include "includes/empty_state.html" with icon="bi-chat-left-text" title="No review notes" description="Add a note to keep the decision trail useful for the team." %}{% endfor %}<form class="mt-3" method="post" action="{% url 'add_review_note' application_id=application.id %}">{% csrf_token %}<label class="form-label" for="review_note">Add a private note</label><textarea class="form-control mb-2" id="review_note" name="body" rows="3" placeholder="What should the next reviewer know?"></textarea><button class="btn btn-outline-primary btn-sm" type="submit">Add note</button></form></div></div></div></div><div class="col-xl-4"><div class="card-soft mb-4"><div class="card-header"><h2 class="card-title">Decision</h2></div><div class="card-body">{% if application.status == "submitted" or application.status == "under_review" or application.status == "draft" %}<div class="decision-panel mb-4"><div class="eyebrow">Recommended action</div><div class="fw-semibold mt-1">{{ credit_summary.recommendation|default:application.recommendation }}</div><p class="text-muted small mb-0 mt-1">{{ credit_summary.recommendation_reason|default:application.recommendation_reason }}</p></div><form method="post" action="{% url 'application_decision' application_id=application.id %}">{% csrf_token %}<label class="form-label" for="decision_reason">Decision note <span class="text-muted fw-normal">(shared with applicant if required)</span></label><textarea class="form-control mb-3" id="decision_reason" name="reason" rows="4" placeholder="Explain the decision in plain language." required></textarea><div class="d-grid gap-2"><button class="btn btn-primary" name="decision" value="approve" type="submit"><i class="bi bi-check2 me-1"></i>Approve application</button><button class="btn btn-outline-secondary" name="decision" value="request_info" type="submit">Request more information</button><button class="btn btn-outline-danger" name="decision" value="decline" type="submit">Decline application</button></div></form>{% else %}<div class="decision-panel mb-0"><div class="eyebrow">Decision recorded</div><div class="fw-semibold mt-1">{{ application.status_label }}{% if application.assigned_officer %} by {{ application.assigned_officer }}{% endif %}</div>{% if application.decision_date %}<p class="text-muted small mb-0 mt-1">{{ application.decision_date|date:"M d, Y, g:i A" }}</p>{% endif %}{% if application.review_notes %}<p class="small mb-0 mt-2">{{ application.review_notes }}</p>{% endif %}</div>{% endif %}</div></div><div class="info-strip"><i class="bi bi-shield-check me-2"></i><span>Decisions are logged with your name and timestamp for a clear audit trail.</span></div></div></div>
+
+<div class="modal fade" id="confirmDecisionModal" tabindex="-1" aria-labelledby="confirmDecisionModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmDecisionModalLabel"><i class="bi bi-shield-check me-2"></i>Confirm decision</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmDecisionMessage" class="mb-3"></p>
+        <dl class="row mb-0">
+          <dt class="col-5">Application</dt><dd class="col-7">{{ application.reference }} — {{ application.borrower_name }}</dd>
+          <dt class="col-5">Decision note</dt><dd class="col-7" id="confirmDecisionReason">—</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
+        <button type="button" class="btn btn-primary" id="confirmDecisionBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var decisionForm = document.querySelector('form[action="{% url "application_decision" application_id=application.id %}"]');
+  if (!decisionForm) {
+    return;
+  }
+  var reasonInput = document.getElementById('decision_reason');
+  var modalEl = document.getElementById('confirmDecisionModal');
+  var messageEl = document.getElementById('confirmDecisionMessage');
+  var reasonPreview = document.getElementById('confirmDecisionReason');
+  var confirmBtn = document.getElementById('confirmDecisionBtn');
+  var pendingSubmitter = null;
+
+  var copy = {
+    approve: {
+      message: 'This will approve the application and take you to the disbursement page to release funds. Are you sure you want to continue?',
+      label: 'Approve application',
+      btnClass: 'btn-primary'
+    },
+    request_info: {
+      message: 'This will send the applicant a request for more information. Are you sure you want to continue?',
+      label: 'Request more information',
+      btnClass: 'btn-outline-secondary'
+    },
+    decline: {
+      message: 'This will decline the application and notify the borrower. This action cannot be undone.',
+      label: 'Decline application',
+      btnClass: 'btn-danger'
+    }
+  };
+
+  decisionForm.addEventListener('submit', function (e) {
+    if (decisionForm.dataset.confirmed === 'true') {
+      return;
+    }
+    e.preventDefault();
+
+    if (!decisionForm.checkValidity()) {
+      decisionForm.reportValidity();
+      return;
+    }
+
+    pendingSubmitter = e.submitter;
+    var decision = pendingSubmitter ? pendingSubmitter.value : null;
+    var info = copy[decision] || { message: 'Are you sure you want to submit this decision?', label: 'Confirm', btnClass: 'btn-primary' };
+
+    messageEl.textContent = info.message;
+    reasonPreview.textContent = reasonInput.value.trim() || '—';
+    confirmBtn.className = 'btn ' + info.btnClass;
+    confirmBtn.textContent = info.label;
+
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  });
+
+  confirmBtn.addEventListener('click', function () {
+    decisionForm.dataset.confirmed = 'true';
+    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    if (decisionForm.requestSubmit) {
+      decisionForm.requestSubmit(pendingSubmitter);
+    } else {
+      decisionForm.submit();
+    }
+  });
+})();
+</script>
+{% endblock %}

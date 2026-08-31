@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Record payment{% endblock %}
+{% block topbar_title %}Record a payment{% endblock %}
+{% block topbar_context %}Applied to the oldest unpaid installment first.{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'borrower_detail' borrower_id=loan.application.borrower_id %}"><i class="bi bi-arrow-left me-1"></i>Back to {{ loan.application.borrower_name }}</a>
+    <h1 class="mt-3">{{ loan.reference }}</h1>
+    <p>{{ loan.application.borrower_name }} · {{ loan.product_name }}</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Payment details</h2></div>
+      <div class="card-body">
+        <form method="post" data-client-validation novalidate id="paymentForm">
+          {% csrf_token %}
+          {% include "includes/form_errors.html" %}
+          <div class="mb-3">
+            <label class="form-label" for="id_amount">Amount</label>
+            <div class="input-group"><span class="input-group-text">₱</span><input class="form-control {% if form.amount.errors %}is-invalid{% endif %}" id="id_amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="{{ form.amount.value|default:'' }}" data-max-amount="{{ max_payment_amount }}" data-max-label="{{ max_payment_label }}" required></div>
+            <div class="invalid-feedback d-block{% if not form.amount.errors %} d-none{% endif %}" id="amountError">{% for error in form.amount.errors %}{{ error }}{% endfor %}</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">{{ form.method.label }}</label>
+            {{ form.method }}
+          </div>
+          <div class="mb-4">
+            <label class="form-label">{{ form.reference_number.label }}</label>
+            {{ form.reference_number }}
+          </div>
+          <div class="d-flex justify-content-between">
+            <a class="btn btn-outline-secondary" href="{% url 'borrower_detail' borrower_id=loan.application.borrower_id %}">Cancel</a>
+            <button class="btn btn-primary" type="submit" id="submitPaymentBtn">Record payment <i class="bi bi-arrow-right ms-1"></i></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Loan summary</h2></div>
+      <div class="card-body">
+        <div class="detail-label">Outstanding balance</div>
+        <div class="detail-value" id="outstandingBalance" data-base="{{ loan.outstanding_balance }}">{{ loan.outstanding_balance|peso }}</div>
+        <div class="text-muted small mb-3" id="outstandingAfter"></div>
+        {% if installment %}
+        <div class="detail-label">Applying to</div><div class="detail-value mb-3">Installment #{{ installment.installment_number }} · due {{ installment.due_date }}</div>
+        <div class="detail-label">Remaining on this installment</div>
+        <div class="detail-value" id="installmentRemaining" data-base="{{ installment.remaining }}">{{ installment.remaining|peso }}</div>
+        <div class="text-muted small" id="installmentAfter"></div>
+        {% elif loan.next_installment %}
+        <div class="detail-label">Next installment due</div><div class="detail-value mb-3">{{ loan.next_installment.due_date }}</div>
+        <div class="detail-label">Remaining on this installment</div>
+        <div class="detail-value" id="installmentRemaining" data-base="{{ loan.next_installment.remaining }}">{{ loan.next_installment.remaining|peso }}</div>
+        <div class="text-muted small" id="installmentAfter"></div>
+        {% else %}
+        <p class="text-muted mb-0">This loan has no unpaid installments left.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Payment Modal -->
+<div class="modal fade" id="confirmPaymentModal" tabindex="-1" aria-labelledby="confirmPaymentModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmPaymentModalLabel"><i class="bi bi-shield-check me-2"></i>Confirm payment</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">Please review the details below before recording this payment.</p>
+        <dl class="row mb-0 confirm-summary">
+          <dt class="col-5">Loan</dt><dd class="col-7">{{ loan.reference }}</dd>
+          <dt class="col-5">Borrower</dt><dd class="col-7">{{ loan.application.borrower_name }}</dd>
+          <dt class="col-5">Amount</dt><dd class="col-7" id="confirmPaymentAmount">—</dd>
+          <dt class="col-5">Method</dt><dd class="col-7" id="confirmPaymentMethod">—</dd>
+          <dt class="col-5">Reference number</dt><dd class="col-7" id="confirmPaymentReference">—</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
+        <button type="button" class="btn btn-primary" id="confirmPaymentBtn"><i class="bi bi-check2 me-1"></i>Confirm & record</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var amountInput = document.getElementById('id_amount');
+  if (!amountInput) { return; }
+  var amountForm = amountInput.closest('form');
+  var amountError = document.getElementById('amountError');
+  var maxAmount = parseFloat(amountInput.dataset.maxAmount) || 0;
+  var maxLabel = amountInput.dataset.maxLabel || 'outstanding balance';
+
+  function formatAmount(raw) {
+    var clean = raw.replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    var formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return formattedInt + decPart;
+  }
+
+  var outstandingEl = document.getElementById('outstandingBalance');
+  var outstandingAfterEl = document.getElementById('outstandingAfter');
+  var installmentEl = document.getElementById('installmentRemaining');
+  var installmentAfterEl = document.getElementById('installmentAfter');
+  var outstandingBase = outstandingEl ? parseFloat(outstandingEl.dataset.base) || 0 : 0;
+  var installmentBase = installmentEl ? parseFloat(installmentEl.dataset.base) || 0 : 0;
+
+  function peso(value) {
+    return '₱' + formatAmount(value.toFixed(2));
+  }
+
+  function validateAmount() {
+    var amount = parseFloat(amountInput.value.replace(/,/g, '')) || 0;
+    amountInput.classList.remove('is-invalid');
+    amountInput.setCustomValidity('');
+    if (amountError) {
+      amountError.classList.add('d-none');
+      amountError.textContent = '';
+    }
+    if (amount > maxAmount) {
+      var msg = 'Amount cannot exceed the ' + maxLabel + ' (₱' + formatAmount(maxAmount.toFixed(2)) + ').';
+      if (amountError) {
+        amountError.textContent = msg;
+        amountError.classList.remove('d-none');
+      }
+      amountInput.classList.add('is-invalid');
+      amountInput.setCustomValidity(msg);
+      return false;
+    }
+    return true;
+  }
+
+  function updateSummary() {
+    var amount = parseFloat(amountInput.value.replace(/,/g, '')) || 0;
+    if (outstandingAfterEl) {
+      outstandingAfterEl.textContent = amount > 0 ? peso(Math.max(0, outstandingBase - amount)) + ' after this payment' : '';
+    }
+    if (installmentAfterEl) {
+      installmentAfterEl.textContent = amount > 0 ? peso(Math.max(0, installmentBase - amount)) + ' after this payment' : '';
+    }
+    validateAmount();
+  }
+
+  amountInput.addEventListener('input', function () {
+    var oldLength = amountInput.value.length;
+    var oldPos = amountInput.selectionStart;
+    var formatted = formatAmount(amountInput.value);
+    amountInput.value = formatted;
+    var newPos = Math.max(0, oldPos + (formatted.length - oldLength));
+    amountInput.setSelectionRange(newPos, newPos);
+    updateSummary();
+  });
+
+  if (amountInput.value) {
+    amountInput.value = formatAmount(amountInput.value);
+  }
+  updateSummary();
+  if (amountInput.classList.contains('is-invalid')) {
+    validateAmount();
+  }
+
+  if (amountForm) {
+    amountForm.addEventListener('submit', function () {
+      amountInput.value = amountInput.value.replace(/,/g, '');
+    });
+  }
+
+  // Confirm-before-submit for the payment form.
+  var paymentForm = document.getElementById('paymentForm');
+  var methodSelect = document.getElementById('id_method');
+  var referenceInput = document.getElementById('id_reference_number');
+  var confirmModalEl = document.getElementById('confirmPaymentModal');
+  var confirmBtn = document.getElementById('confirmPaymentBtn');
+  var submitBtn = document.getElementById('submitPaymentBtn');
+
+  function selectedText(select) {
+    var opt = select.options[select.selectedIndex];
+    return opt ? opt.text.trim() : '';
+  }
+
+  paymentForm.addEventListener('submit', function (e) {
+    if (paymentForm.dataset.confirmed === 'true') {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Recording…';
+      return;
+    }
+    e.preventDefault();
+
+    if (!paymentForm.checkValidity()) {
+      paymentForm.reportValidity();
+      return;
+    }
+
+    document.getElementById('confirmPaymentAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
+    document.getElementById('confirmPaymentMethod').textContent = methodSelect ? selectedText(methodSelect) : '—';
+    document.getElementById('confirmPaymentReference').textContent = (referenceInput && referenceInput.value.trim()) || '—';
+
+    bootstrap.Modal.getOrCreateInstance(confirmModalEl).show();
+  });
+
+  confirmBtn.addEventListener('click', function () {
+    paymentForm.dataset.confirmed = 'true';
+    confirmBtn.disabled = true;
+    bootstrap.Modal.getOrCreateInstance(confirmModalEl).hide();
+    if (paymentForm.requestSubmit) {
+      paymentForm.requestSubmit();
+    } else {
+      paymentForm.submit();
+    }
+  });
+})();
+</script>
+{% endblock %}

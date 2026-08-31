@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Savings accounts{% endblock %}
+{% block topbar_title %}Savings accounts{% endblock %}
+{% block topbar_context %}Member savings accounts across the cooperative.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Savings workspace</div>
+    <h1>Savings accounts.</h1>
+    <p>{{ account_count }} account{{ account_count|pluralize }} · {{ active_count }} active · {{ total_balance|peso }} total balance · {{ total_interest_all_time|peso }} total interest earned.</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'officer_open_savings_account' %}"><i class="bi bi-plus-lg me-1"></i>Open account</a>
+</div>
+
+<div class="card-soft mb-4 fade-up-2">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+    <div>
+      <div class="eyebrow">Reports</div>
+      <h2 class="card-title mt-1 mb-1">Download member interest</h2>
+      <p class="text-muted small mb-0">Export interest credited to all members for a date range.</p>
+    </div>
+    <i class="bi bi-file-earmark-spreadsheet text-muted fs-4"></i>
+  </div>
+  <div class="card-body">
+    <form class="row g-2 align-items-end" method="get" action="{% url 'officer_export_savings_interest' %}">
+      <div class="col-sm-6 col-lg-3">
+        <label class="form-label" for="{{ interest_export_form.date_from.id_for_label }}">From</label>
+        {{ interest_export_form.date_from }}
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <label class="form-label" for="{{ interest_export_form.date_to.id_for_label }}">To</label>
+        {{ interest_export_form.date_to }}
+      </div>
+      <div class="col-lg-6 d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-primary csv-link" type="submit" name="format" value="csv"><i class="bi bi-download"></i>Download CSV</button>
+        <button class="btn btn-primary" type="submit" name="format" value="pdf" formtarget="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Total accounts</div><div class="metric-value">{{ account_count }}</div></div></div>
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Active accounts</div><div class="metric-value">{{ active_count }}</div></div></div>
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Total balance</div><div class="metric-value">{{ total_balance|peso }}</div></div></div>
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Total interest earned</div><div class="metric-value text-success">{{ total_interest_all_time|peso }}</div><div class="metric-note">All time across accounts in view</div></div></div>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-5">
+      <label class="form-label" for="account_q">Search accounts</label>
+      <div class="input-group">
+        <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+        <input class="form-control border-start-0" id="account_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Account number, member name, or email">
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="account_status">Status</label>
+      <select class="form-select" id="account_status" name="status">
+        <option value="">All statuses</option>
+        {% for value, label in status_filters %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-outline-primary w-100" type="submit">Filter</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="card-body p-0">
+    {% if accounts %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th>Account</th><th>Member</th><th>Product</th><th>Status</th><th class="text-end">Balance</th><th class="text-end">Interest earned</th><th></th></tr></thead>
+        <tbody>
+          {% for account in accounts %}
+          <tr>
+            <td><strong>{{ account.reference }}</strong><div class="text-muted small">{{ account.opened_at|date:"M d, Y" }}</div></td>
+            <td>{{ account.member.display_name }}<div class="text-muted small">{{ account.member.email }}</div></td>
+            <td>{{ account.product_name }}</td>
+            <td><span class="badge status-{{ account.status }}">{{ account.status_label }}</span></td>
+            <td class="text-end fw-semibold">{{ account.balance|peso }}</td>
+            <td class="text-end fw-semibold text-success">{{ account.total_interest_earned|peso }}</td>
+            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{% url 'officer_savings_account_detail' account_id=account.id %}">Manage</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-4">{% include "includes/empty_state.html" with icon="bi-piggy-bank" title="No savings accounts" description="Open an account for a member to get started." %}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

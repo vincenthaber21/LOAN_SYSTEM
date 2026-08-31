@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Mutual aid memberships{% endblock %}
+{% block topbar_title %}Mutual aid{% endblock %}
+{% block topbar_context %}Member mutual aid enrollments across the cooperative.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Mutual aid workspace</div>
+    <h1>Mutual aid memberships.</h1>
+    <p>{{ membership_count }} membership{{ membership_count|pluralize }} · {{ active_count }} active · {{ total_contributed|peso }} total contributions · {{ total_benefits|peso }} benefits disbursed.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-primary" href="{% url 'officer_mutual_aid_claims' %}"><i class="bi bi-inbox me-1"></i>Claims queue</a>
+    <a class="btn btn-primary" href="{% url 'officer_enroll_mutual_aid' %}"><i class="bi bi-plus-lg me-1"></i>Enroll member</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Total memberships</div><div class="metric-value">{{ membership_count }}</div></div></div>
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Active memberships</div><div class="metric-value">{{ active_count }}</div></div></div>
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Total contributions</div><div class="metric-value">{{ total_contributed|peso }}</div></div></div>
+  <div class="col-md-3"><div class="card-soft metric-card"><div class="metric-label">Benefits disbursed</div><div class="metric-value text-success">{{ total_benefits|peso }}</div></div></div>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-5">
+      <label class="form-label" for="membership_q">Search memberships</label>
+      <div class="input-group">
+        <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+        <input class="form-control border-start-0" id="membership_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Membership number, member name, or email">
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="membership_status">Status</label>
+      <select class="form-select" id="membership_status" name="status">
+        <option value="">All statuses</option>
+        {% for value, label in status_filters %}
+        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-outline-primary w-100" type="submit">Filter</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="card-body p-0">
+    {% if memberships %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th>Membership</th><th>Member</th><th>Plan</th><th>Status</th><th class="text-end">Contributed</th><th class="text-end">Benefits claimed</th><th></th></tr></thead>
+        <tbody>
+          {% for membership in memberships %}
+          <tr>
+            <td><strong>{{ membership.reference }}</strong><div class="text-muted small">{{ membership.enrolled_at|date:"M d, Y" }}</div></td>
+            <td>{{ membership.member.display_name }}<div class="text-muted small">{{ membership.member.email }}</div></td>
+            <td>{{ membership.plan_name }}<div class="text-muted small">{{ membership.plan.contribution_summary }}</div></td>
+            <td><span class="badge status-{{ membership.status }}">{{ membership.status_label }}</span></td>
+            <td class="text-end fw-semibold">{{ membership.total_contributed|peso }}</td>
+            <td class="text-end fw-semibold text-success">{{ membership.benefits_claimed|peso }}</td>
+            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{% url 'officer_mutual_aid_membership_detail' membership_id=membership.id %}">Manage</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-4">{% include "includes/empty_state.html" with icon="bi-heart-pulse" title="No mutual aid memberships" description="Enroll a member in a mutual aid plan to get started." %}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Review {{ claim.reference }}{% endblock %}
+{% block topbar_title %}Claim review{% endblock %}
+{% block topbar_context %}{{ claim.reference }} · Keep the decision explainable.{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'officer_mutual_aid_claims' %}"><i class="bi bi-arrow-left me-1"></i>Back to claims</a>
+    <h1 class="mt-3 mb-2">{{ claim.member_name }}</h1>
+    <p>{{ claim.plan_name }} · {{ claim.claim_type_label }} · requested {{ claim.amount_requested|peso }}</p>
+  </div>
+  <div class="text-end">
+    {% include "includes/status_badge.html" with status=claim.status label=claim.status_label %}
+    {% if claim.submitted_at %}<div class="small text-muted mt-2">Submitted {{ claim.submitted_at|date:"M d, Y, g:i A" }}</div>{% endif %}
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <div class="card-soft mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="card-title">Member snapshot</h2>
+        <a class="small" href="{% url 'officer_mutual_aid_membership_detail' membership_id=membership.id %}">Open membership <i class="bi bi-arrow-up-right"></i></a>
+      </div>
+      <div class="card-body">
+        <div class="row g-4">
+          <div class="col-sm-4"><div class="detail-label">Membership</div><div class="detail-value">{{ membership.reference }}</div></div>
+          <div class="col-sm-4"><div class="detail-label">Total contributed</div><div class="detail-value">{{ membership.total_contributed|peso }}</div></div>
+          <div class="col-sm-4"><div class="detail-label">Benefits claimed</div><div class="detail-value">{{ membership.benefits_claimed|peso }}</div></div>
+          <div class="col-sm-4"><div class="detail-label">Enrolled since</div><div class="detail-value">{{ membership.enrolled_at|date:"M d, Y" }}</div></div>
+          <div class="col-sm-4"><div class="detail-label">Plan max benefit</div><div class="detail-value">{{ membership.plan.max_benefit_amount|peso }}</div></div>
+          <div class="col-sm-4"><div class="detail-label">Eligibility</div><div class="detail-value">{% if membership.is_eligible_for_claim %}Eligible{% else %}Not eligible{% endif %}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Claim details</h2></div>
+      <div class="card-body">
+        <div class="detail-label">Reason</div>
+        <p class="mb-0">{{ claim.reason|linebreaksbr }}</p>
+      </div>
+    </div>
+
+    {% if claim.review_notes or claim.decision_date %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Review history</h2></div>
+      <div class="card-body">
+        {% if claim.reviewed_by %}<div class="detail-label">Reviewed by</div><div class="detail-value mb-3">{{ claim.reviewed_by.display_name }}{% if claim.decision_date %} · {{ claim.decision_date|date:"M d, Y, g:i A" }}{% endif %}</div>{% endif %}
+        {% if claim.review_notes %}<div class="detail-label">Notes</div><p class="mb-0">{{ claim.review_notes|linebreaksbr }}</p>{% endif %}
+        {% if claim.amount_approved %}<div class="detail-label mt-3">Approved amount</div><div class="detail-value">{{ claim.amount_approved|peso }}</div>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-xl-4">
+    {% if claim.is_pending_review %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Decision</h2></div>
+      <div class="card-body">
+        <form method="post">{% csrf_token %}
+          <div class="mb-3"><label class="form-label">Review notes</label>{{ review_form.review_notes }}</div>
+          <div class="mb-4"><label class="form-label">Approved amount</label>{{ review_form.amount_approved }}<div class="form-text">Required when approving. Max {{ membership.plan.max_benefit_amount|peso }}.</div></div>
+          <div class="d-grid gap-2">
+            <button class="btn btn-primary" name="action" value="approve" type="submit"><i class="bi bi-check2 me-1"></i>Approve claim</button>
+            <button class="btn btn-outline-secondary" name="action" value="review" type="submit">Mark under review</button>
+            <button class="btn btn-outline-danger" name="action" value="reject" type="submit">Reject claim</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% elif claim.is_ready_for_disbursement %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Disburse benefit</h2></div>
+      <div class="card-body">
+        <div class="decision-panel mb-4">
+          <div class="eyebrow">Approved amount</div>
+          <div class="fw-semibold mt-1">{{ claim.amount_approved|peso }}</div>
+        </div>
+        <form method="post">{% csrf_token %}
+          <input type="hidden" name="action" value="disburse">
+          <div class="mb-4"><label class="form-label">Disbursement reference</label>{{ disburse_form.disbursement_reference }}</div>
+          <button class="btn btn-primary w-100" type="submit"><i class="bi bi-arrow-down-left-circle me-1"></i>Record disbursement</button>
+        </form>
+      </div>
+    </div>
+    {% elif claim.status == 'disbursed' %}
+    <div class="card-soft mb-4">
+      <div class="card-body">
+        <div class="decision-panel mb-0">
+          <div class="eyebrow">Disbursed</div>
+          <div class="fw-semibold mt-1">{{ claim.amount_approved|peso }}</div>
+          {% if claim.disbursed_at %}<p class="text-muted small mb-0 mt-1">{{ claim.disbursed_at|date:"M d, Y, g:i A" }}{% if claim.disbursed_by %} by {{ claim.disbursed_by.display_name }}{% endif %}</p>{% endif %}
+          {% if claim.disbursement_reference %}<p class="small mb-0 mt-2">Ref: {{ claim.disbursement_reference }}</p>{% endif %}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="card-soft mb-4">
+      <div class="card-body">
+        <div class="decision-panel mb-0">
+          <div class="eyebrow">Decision recorded</div>
+          <div class="fw-semibold mt-1">{{ claim.status_label }}{% if claim.reviewed_by %} by {{ claim.reviewed_by.display_name }}{% endif %}</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="info-strip">
+      <i class="bi bi-shield-check me-2"></i>
+      <span>Decisions are logged with your name and timestamp for a clear audit trail.</span>
+    </div>
+  </div>
+</div>
+{% endblock %}

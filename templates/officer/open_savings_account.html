@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Open savings account{% endblock %}
+{% block topbar_title %}Open savings account{% endblock %}
+{% block topbar_context %}Create a savings account on behalf of a member.{% endblock %}
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<style>
+  .member-combobox .ts-wrapper { width: 100%; }
+  .member-combobox .ts-wrapper .ts-control {
+    border-radius: var(--radius);
+    border-color: var(--line);
+    min-height: calc(1.5em + .75rem + 2px);
+    padding: .375rem .75rem;
+    font-size: .94rem;
+  }
+  .member-combobox .ts-wrapper.focus .ts-control {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 .2rem rgba(29, 124, 120, .15);
+  }
+  .member-combobox .ts-wrapper.is-invalid .ts-control {
+    border-color: var(--danger);
+  }
+  .member-combobox .ts-dropdown {
+    border-radius: 12px;
+    border-color: var(--line);
+    box-shadow: var(--shadow-sm);
+  }
+  .member-combobox .ts-dropdown .option.active {
+    background: var(--mint);
+    color: var(--ink);
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'officer_savings_accounts' %}"><i class="bi bi-arrow-left me-1"></i>Back to savings accounts</a>
+    <h1 class="mt-3 mb-2">Open savings account</h1>
+    <p>Fill in the details below to open a savings account on behalf of a member.</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <form method="post" action="{% url 'officer_open_savings_account' %}" novalidate>
+      {% csrf_token %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Member</h2></div>
+        <div class="card-body">
+          {% include "includes/form_errors.html" %}
+          <div class="mb-0 member-combobox">
+            <label class="form-label" for="{{ form.member.id_for_label }}">{{ form.member.label }}</label>
+            <select class="form-select {% if form.member.errors %}is-invalid{% endif %}" id="{{ form.member.id_for_label }}" name="{{ form.member.html_name }}" required>
+              <option value="">Select a member…</option>
+              {% for member in form.member.field.queryset %}
+              <option value="{{ member.pk }}" {% if form.member.value|stringformat:"s" == member.pk|stringformat:"s" %}selected{% endif %}>
+                {{ member.display_name }} — {{ member.email }}
+              </option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Type a name or email to search active members.</div>
+            {% for error in form.member.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Account details</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label class="form-label mb-0" for="{{ form.product.id_for_label }}">{{ form.product.label }}</label>
+                <a class="btn btn-link btn-sm p-0 text-decoration-none" href="{% url 'officer_add_savings_product' %}">
+                  <i class="bi bi-plus-circle me-1"></i>Add product
+                </a>
+              </div>
+              <select class="form-select {% if form.product.errors %}is-invalid{% endif %}" id="{{ form.product.id_for_label }}" name="{{ form.product.html_name }}" required>
+                <option value="">Select product…</option>
+                {% for product in products %}
+                <option value="{{ product.pk }}" data-min-deposit="{{ product.min_deposit }}" data-min-balance="{{ product.min_balance }}" data-rate="{{ product.interest_rate }}" {% if form.product.value|stringformat:"s" == product.pk|stringformat:"s" %}selected{% endif %}>
+                  {{ product.name }} ({{ product.interest_rate }}% p.a.)
+                </option>
+                {% endfor %}
+              </select>
+              {% for error in form.product.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <div class="text-muted small mt-1 d-none" id="productAvailabilityHint"></div>
+              <div class="text-muted small mt-1 d-none" id="productHint"></div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.opened_on.id_for_label }}">{{ form.opened_on.label }}</label>
+              <input class="form-control {% if form.opened_on.errors %}is-invalid{% endif %}" type="date" id="{{ form.opened_on.id_for_label }}" name="{{ form.opened_on.html_name }}" value="{{ form.opened_on.value|default:'' }}" required>
+              <div class="form-text">{{ form.opened_on.help_text }}</div>
+              {% for error in form.opened_on.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.initial_deposit.id_for_label }}">Initial deposit (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.initial_deposit.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.initial_deposit.id_for_label }}" name="{{ form.initial_deposit.html_name }}" value="{{ form.initial_deposit.value|default:'' }}" placeholder="0.00">
+              </div>
+              {% for error in form.initial_deposit.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <div class="text-danger small mt-1 d-none" id="depositMinError"></div>
+              <div class="form-text">Optional. Leave blank to open with zero balance.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary px-4" type="submit" id="openAccountBtn"><i class="bi bi-check2 me-1"></i>Open account</button>
+        <a class="btn btn-outline-secondary" href="{% url 'officer_savings_accounts' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="card-soft mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="card-title mb-0">Active savings products</h2>
+        <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_add_savings_product' %}">
+          <i class="bi bi-plus-lg me-1"></i>Add
+        </a>
+      </div>
+      <div class="card-body p-0">
+        {% for product in products %}
+        <div class="border-bottom px-4 py-3">
+          <div class="fw-semibold">{{ product.name }}</div>
+          <div class="text-muted small">{{ product.min_deposit|peso }} min. deposit · {{ product.min_balance|peso }} min. balance · {{ product.interest_rate }}% p.a. · {{ product.interest_credit_label }}</div>
+        </div>
+        {% empty %}
+        <div class="p-4 text-muted small">No active savings products.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="info-strip"><i class="bi bi-shield-check me-2"></i><span>This account will be linked to your officer account and recorded in the savings ledger.</span></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/js/tom-select.complete.min.js"></script>
+<script>
+(function () {
+  var depositInput = document.getElementById('{{ form.initial_deposit.id_for_label }}');
+  var depositForm = depositInput && depositInput.closest('form');
+  var productSelect = document.getElementById('{{ form.product.id_for_label }}');
+  var memberSelect = document.getElementById('{{ form.member.id_for_label }}');
+  var productHint = document.getElementById('productHint');
+  var productAvailabilityHint = document.getElementById('productAvailabilityHint');
+  var depositMinError = document.getElementById('depositMinError');
+  var openAccountBtn = document.getElementById('openAccountBtn');
+  var availableProductsToken = 0;
+
+  function renderProductOptions(products, selectedId, memberInactive, blockedProductCount) {
+    var currentValue = selectedId != null ? String(selectedId) : productSelect.value;
+    productSelect.innerHTML = '';
+    productSelect.appendChild(new Option('Select product…', ''));
+    products.forEach(function (product) {
+      var opt = new Option(product.label, product.id);
+      opt.dataset.minDeposit = product.min_deposit;
+      opt.dataset.minBalance = product.min_balance;
+      opt.dataset.rate = product.rate;
+      if (String(product.id) === currentValue) opt.selected = true;
+      productSelect.appendChild(opt);
+    });
+    updateProductHint();
+    validateDeposit();
+    if (memberInactive) {
+      productAvailabilityHint.textContent = 'This member\'s account is inactive. Only active members can open a savings account.';
+      productAvailabilityHint.classList.remove('d-none');
+      openAccountBtn.disabled = true;
+    } else if (products.length === 0 && memberSelect.value) {
+      if (blockedProductCount > 0) {
+        productAvailabilityHint.textContent = 'This member already has active accounts for all available savings products.';
+      } else {
+        productAvailabilityHint.textContent = 'No active savings products are available right now.';
+      }
+      productAvailabilityHint.classList.remove('d-none');
+      openAccountBtn.disabled = true;
+    } else if (memberSelect.value) {
+      if (blockedProductCount > 0) {
+        productAvailabilityHint.textContent = 'Products this member already has an active account for are hidden.';
+      } else {
+        productAvailabilityHint.textContent = 'All active savings products are available for this member.';
+      }
+      productAvailabilityHint.classList.remove('d-none');
+      openAccountBtn.disabled = false;
+    } else {
+      productAvailabilityHint.classList.add('d-none');
+      openAccountBtn.disabled = false;
+    }
+  }
+
+  function refreshAvailableProducts(selectedId) {
+    var token = ++availableProductsToken;
+    var memberId = memberSelect.value;
+    var url = '{% url "officer_available_savings_products" %}' + (memberId ? ('?member=' + encodeURIComponent(memberId)) : '');
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (token !== availableProductsToken) return;
+        renderProductOptions(
+          data.products,
+          selectedId,
+          data.member_inactive,
+          data.blocked_product_count || 0
+        );
+      })
+      .catch(function () { /* ignore — server-side validation still applies on submit */ });
+  }
+
+  function formatAmount(raw) {
+    var clean = raw.replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + decPart;
+  }
+
+  function moneyFmt(n) {
+    return '₱' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function updateProductHint() {
+    var product = productSelect.options[productSelect.selectedIndex];
+    if (!product || !product.value) {
+      productHint.classList.add('d-none');
+      productHint.textContent = '';
+      return;
+    }
+    productHint.textContent = 'Min. deposit ' + moneyFmt(product.dataset.minDeposit) +
+      ' · Min. balance ' + moneyFmt(product.dataset.minBalance) +
+      ' · ' + product.dataset.rate + '% p.a.';
+    productHint.classList.remove('d-none');
+  }
+
+  function validateDeposit() {
+    if (!depositInput || !productSelect) return;
+    var product = productSelect.options[productSelect.selectedIndex];
+    var raw = depositInput.value.replace(/,/g, '');
+    depositMinError.classList.add('d-none');
+    depositMinError.textContent = '';
+    depositInput.classList.remove('is-invalid');
+    depositInput.setCustomValidity('');
+
+    if (!product || !product.value || !raw) return;
+    var minDeposit = parseFloat(product.dataset.minDeposit);
+    var amount = parseFloat(raw);
+    if (isNaN(amount) || amount <= 0) return;
+    if (!isNaN(minDeposit) && amount < minDeposit) {
+      var msg = 'Initial deposit must be at least ' + moneyFmt(minDeposit) + '.';
+      depositMinError.textContent = msg;
+      depositMinError.classList.remove('d-none');
+      depositInput.classList.add('is-invalid');
+      depositInput.setCustomValidity(msg);
+    }
+  }
+
+  if (depositInput) {
+    depositInput.addEventListener('input', function () {
+      var oldLength = depositInput.value.length;
+      var oldPos = depositInput.selectionStart;
+      depositInput.value = formatAmount(depositInput.value);
+      depositInput.setSelectionRange(oldPos + (depositInput.value.length - oldLength), oldPos + (depositInput.value.length - oldLength));
+      validateDeposit();
+    });
+    if (depositInput.value) {
+      depositInput.value = formatAmount(depositInput.value);
+    }
+  }
+
+  if (depositForm) {
+    depositForm.addEventListener('submit', function () {
+      if (depositInput) {
+        depositInput.value = depositInput.value.replace(/,/g, '');
+      }
+    });
+  }
+
+  if (productSelect) {
+    productSelect.addEventListener('change', function () {
+      updateProductHint();
+      validateDeposit();
+    });
+  }
+
+  if (memberSelect && window.TomSelect) {
+    new TomSelect(memberSelect, {
+      create: false,
+      maxOptions: null,
+      allowEmptyOption: true,
+      placeholder: 'Type a name or email to search…',
+      sortField: { field: 'text', direction: 'asc' },
+      onChange: function () {
+        refreshAvailableProducts(null);
+      },
+    });
+  } else if (memberSelect) {
+    memberSelect.addEventListener('change', function () { refreshAvailableProducts(null); });
+  }
+
+  refreshAvailableProducts(productSelect ? productSelect.value : null);
+})();
+</script>
+{% endblock %}

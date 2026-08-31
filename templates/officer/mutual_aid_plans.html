@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Mutual aid plans{% endblock %}
+{% block topbar_title %}Mutual aid plans{% endblock %}
+{% block topbar_context %}Plans members can enroll in for mutual aid coverage.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Mutual aid settings</div>
+    <h1>Mutual aid plans.</h1>
+    <p>{{ plan_count }} plan{{ plan_count|pluralize }} · {{ active_count }} active.</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'officer_add_mutual_aid_plan' %}"><i class="bi bi-plus-lg me-1"></i>Add plan</a>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-5">
+      <label class="form-label" for="plan_q">Search plans</label>
+      <input class="form-control" id="plan_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Plan name">
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="plan_status">Status</label>
+      <select class="form-select" id="plan_status" name="status">
+        <option value="">All</option>
+        <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+        <option value="inactive" {% if filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-outline-primary w-100" type="submit">Filter</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="card-body p-0">
+    {% if plans %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th>Plan</th><th>Contribution</th><th>Max benefit</th><th>Waiting period</th><th>Min. months</th><th>Members</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for plan in plans %}
+          <tr>
+            <td><strong>{{ plan.name }}</strong>{% if plan.description %}<div class="text-muted small">{{ plan.description|truncatewords:12 }}</div>{% endif %}</td>
+            <td>{{ plan.contribution_summary }}</td>
+            <td>{{ plan.max_benefit_amount|peso }}</td>
+            <td>{{ plan.waiting_period_days }} days</td>
+            <td>{{ plan.min_membership_months }}</td>
+            <td>{{ plan.memberships_count }}</td>
+            <td>{% if plan.is_active %}<span class="badge status-approved">Active</span>{% else %}<span class="badge status-inactive">Inactive</span>{% endif %}</td>
+            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{% url 'officer_edit_mutual_aid_plan' plan_id=plan.id %}">Edit</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-4">{% include "includes/empty_state.html" with icon="bi-tags" title="No mutual aid plans" description="Add a plan so members can enroll in mutual aid." %}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,11 @@
+<span class="brand-mark{% if site_logo %} brand-mark-has-logo{% endif %}">
+  {% if site_logo %}
+    <img src="{{ site_logo.url }}" alt="" class="brand-logo">
+  {% else %}
+    <i class="bi bi-water"></i>
+  {% endif %}
+</span>
+<span>
+  <span class="brand-name d-block">{{ app_name }}</span>
+  {% if app_tagline %}<span class="brand-caption">{{ app_tagline }}</span>{% endif %}
+</span>

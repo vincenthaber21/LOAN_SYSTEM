@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Edit {{ product.name }}{% endblock %}
+{% block topbar_title %}Edit savings product{% endblock %}
+{% block topbar_context %}Changes apply to new accounts immediately.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <a class="small" href="{% url 'officer_savings_products' %}"><i class="bi bi-arrow-left me-1"></i>Back to savings products</a>
+    <h1 class="mt-3 mb-2">Edit {{ product.name }}</h1>
+    <p>Existing accounts keep the terms they were opened under.</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "includes/form_errors.html" %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Product identity</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label" for="{{ form.name.id_for_label }}">Product name</label>
+              <input class="form-control {% if form.name.errors %}is-invalid{% endif %}" type="text" id="{{ form.name.id_for_label }}" name="{{ form.name.html_name }}" value="{{ form.name.value|default:'' }}" placeholder="e.g. Regular Savings" required>
+              {% for error in form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.description.id_for_label }}">Description</label>
+              <textarea class="form-control {% if form.description.errors %}is-invalid{% endif %}" id="{{ form.description.id_for_label }}" name="{{ form.description.html_name }}" rows="3" placeholder="Briefly describe this savings product and who it is for.">{{ form.description.value|default:'' }}</textarea>
+              {% for error in form.description.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Balance requirements</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.min_balance.id_for_label }}">Minimum balance (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.min_balance.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.min_balance.id_for_label }}" name="{{ form.min_balance.html_name }}" value="{{ form.min_balance.value|default:'' }}" placeholder="500" required>
+              </div>
+              {% for error in form.min_balance.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <span class="helptext">Minimum balance required to earn interest.</span>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.min_deposit.id_for_label }}">Minimum deposit (₱)</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control amount-input {% if form.min_deposit.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.min_deposit.id_for_label }}" name="{{ form.min_deposit.html_name }}" value="{{ form.min_deposit.value|default:'' }}" placeholder="100" required>
+              </div>
+              {% for error in form.min_deposit.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <span class="helptext">Minimum amount for opening deposits and top-ups.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Rate &amp; term</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.interest_rate.id_for_label }}">Interest rate (% p.a.)</label>
+              <div class="input-group">
+                <input class="form-control {% if form.interest_rate.errors %}is-invalid{% endif %}" type="number" step="0.01" min="0" id="{{ form.interest_rate.id_for_label }}" name="{{ form.interest_rate.html_name }}" value="{{ form.interest_rate.value|default:'' }}" placeholder="2.00" required>
+                <span class="input-group-text">%</span>
+              </div>
+              {% for error in form.interest_rate.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.interest_term_months.id_for_label }}">{{ form.interest_term_months.label }}</label>
+              <input class="form-control {% if form.interest_term_months.errors %}is-invalid{% endif %}" type="number" min="1" max="120" step="1" id="{{ form.interest_term_months.id_for_label }}" name="{{ form.interest_term_months.html_name }}" value="{{ form.interest_term_months.value|default:'' }}" placeholder="1" required>
+              {% for error in form.interest_term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <span class="helptext">{{ form.interest_term_months.help_text }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Status</h2></div>
+        <div class="card-body">
+          <div class="form-check">
+            <input type="checkbox" id="{{ form.is_active.id_for_label }}" name="{{ form.is_active.html_name }}" class="form-check-input {% if form.is_active.errors %}is-invalid{% endif %}" {% if form.is_active.value %}checked{% endif %}>
+            <label class="form-check-label" for="{{ form.is_active.id_for_label }}">Active product</label>
+            <span class="helptext d-block">Uncheck to hide this product when opening new savings accounts.</span>
+            {% if form.is_active.errors %}<div class="invalid-feedback d-block">{{ form.is_active.errors|join:", " }}</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary px-4" type="submit"><i class="bi bi-check2 me-1"></i>Save changes</button>
+        <a class="btn btn-outline-secondary" href="{% url 'officer_savings_products' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.form-label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; margin-bottom: .35rem; display: flex; align-items: center; gap: 8px; }
+.form-control, .input-group-text, .form-select { border-color: var(--line); border-radius: 9px; font-size: .9rem; }
+.form-control:focus, .form-select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(29, 124, 120, .12); }
+.helptext { font-size: .74rem; color: var(--ink-soft); margin-top: 4px; display: block; }
+.invalid-feedback { display: block; font-size: .76rem; }
+.btn-outline-secondary { border-color: var(--line); color: var(--ink-soft); }
+.btn-outline-secondary:hover { background: var(--canvas); border-color: var(--ink-soft); color: var(--ink); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  function formatAmount(raw) {
+    var clean = String(raw || '').replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + decPart;
+  }
+
+  var amountInputs = document.querySelectorAll('#{{ form.min_balance.id_for_label }}, #{{ form.min_deposit.id_for_label }}');
+  var productForm = amountInputs[0] && amountInputs[0].closest('form');
+
+  amountInputs.forEach(function (input) {
+    input.addEventListener('input', function () {
+      var oldLength = input.value.length;
+      var oldPos = input.selectionStart;
+      input.value = formatAmount(input.value);
+      input.setSelectionRange(oldPos + (input.value.length - oldLength), oldPos + (input.value.length - oldLength));
+    });
+    if (input.value) {
+      input.value = formatAmount(input.value);
+    }
+  });
+
+  if (productForm) {
+    productForm.addEventListener('submit', function () {
+      amountInputs.forEach(function (input) {
+        input.value = input.value.replace(/,/g, '');
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

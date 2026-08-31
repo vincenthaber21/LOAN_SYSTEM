@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}{{ claim.reference }}{% endblock %}
+{% block topbar_title %}{{ claim.reference }}{% endblock %}
+{% block topbar_context %}{{ claim.claim_type_label }} · {{ membership.plan_name }}{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <a class="small" href="{% url 'mutual_aid_membership_detail' membership_id=membership.id %}"><i class="bi bi-arrow-left me-1"></i>Back to membership</a>
+    <div class="eyebrow mt-3">{{ claim.reference }}</div>
+    <h1>{{ claim.claim_type_label }}</h1>
+    <p>Requested {{ claim.amount_requested|peso }} · submitted {{ claim.submitted_at|date:"M d, Y"|default:claim.created_at|date:"M d, Y" }}</p>
+  </div>
+  <div class="text-end">
+    {% include "includes/status_badge.html" with status=claim.status label=claim.status_label %}
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Your request</h2></div>
+      <div class="card-body">
+        <div class="detail-label">Reason</div>
+        <p class="mb-4">{{ claim.reason|linebreaksbr }}</p>
+        <div class="row g-3">
+          <div class="col-sm-4">
+            <div class="detail-label">Amount requested</div>
+            <div class="detail-value">{{ claim.amount_requested|peso }}</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Approved amount</div>
+            <div class="detail-value">{% if claim.amount_approved %}{{ claim.amount_approved|peso }}{% else %}—{% endif %}</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Membership</div>
+            <div class="detail-value">{{ membership.reference }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if claim.review_notes or claim.decision_date %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Officer response</h2></div>
+      <div class="card-body">
+        {% if claim.decision_date %}
+        <div class="detail-label">Decision date</div>
+        <div class="detail-value mb-3">{{ claim.decision_date|date:"M d, Y, g:i A" }}</div>
+        {% endif %}
+        {% if claim.review_notes %}
+        <div class="detail-label">Notes</div>
+        <p class="mb-0">{{ claim.review_notes|linebreaksbr }}</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if claim.status == 'disbursed' %}
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Disbursement</h2></div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-sm-4">
+            <div class="detail-label">Amount disbursed</div>
+            <div class="detail-value text-success">{{ claim.amount_approved|peso }}</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Disbursed on</div>
+            <div class="detail-value">{{ claim.disbursed_at|date:"M d, Y" }}</div>
+          </div>
+          {% if claim.disbursement_reference %}
+          <div class="col-sm-4">
+            <div class="detail-label">Reference</div>
+            <div class="detail-value">{{ claim.disbursement_reference }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Status timeline</h2></div>
+      <div class="card-body">
+        <div class="timeline">
+          <div class="timeline-item complete">
+            <span class="timeline-dot"></span>
+            <div class="timeline-label">Submitted</div>
+            <div class="timeline-date">{{ claim.submitted_at|date:"M d, Y"|default:claim.created_at|date:"M d, Y" }}</div>
+          </div>
+          <div class="timeline-item {% if claim.status != 'submitted' %}complete{% endif %}">
+            <span class="timeline-dot"></span>
+            <div class="timeline-label">Under review</div>
+            <div class="timeline-copy">An officer is evaluating your claim.</div>
+          </div>
+          <div class="timeline-item {% if claim.status == 'approved' or claim.status == 'disbursed' %}complete{% elif claim.status == 'rejected' %}complete{% endif %}">
+            <span class="timeline-dot"></span>
+            <div class="timeline-label">Decision</div>
+            <div class="timeline-copy">{{ claim.status_label }}</div>
+          </div>
+          {% if claim.status == 'disbursed' %}
+          <div class="timeline-item complete">
+            <span class="timeline-dot"></span>
+            <div class="timeline-label">Disbursed</div>
+            <div class="timeline-date">{{ claim.disbursed_at|date:"M d, Y" }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="info-strip">
+      <i class="bi bi-info-circle me-2"></i>
+      <span>Questions about your claim? Contact your cooperative officer through support.</span>
+    </div>
+  </div>
+</div>
+{% endblock %}

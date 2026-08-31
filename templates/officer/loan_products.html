@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Loan products{% endblock %}
+{% block topbar_title %}Loan products{% endblock %}
+{% block topbar_context %}Products available to borrowers when applying.{% endblock %}
+{% block content %}
+
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Officer workspace</div>
+    <h1>Loan products.</h1>
+    <p>{{ product_count }} product{{ product_count|pluralize }} · {{ active_count }} active.</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'add_loan_product_page' %}"><i class="bi bi-plus-lg me-1"></i>Add loan product</a>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-6">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Total loan products</div>
+      <div class="metric-value">{{ product_count }}</div>
+      <div class="metric-note">Matching your current filters</div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Active products</div>
+      <div class="metric-value">{{ active_count }}</div>
+      <div class="metric-note positive">Visible to borrowers when applying</div>
+    </div>
+  </div>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get" action="{% url 'loan_products' %}">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-5">
+      <label class="form-label" for="product_q">Search loan products</label>
+      <div class="input-group">
+        <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+        <input class="form-control border-start-0" id="product_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Search by product name">
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="product_type">Loan type</label>
+      <select class="form-select" id="product_type" name="loan_type">
+        <option value="">All types</option>
+        {% for value, label in product_type_filters %}
+          <option value="{{ value }}" {% if filters.loan_type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2">
+      <label class="form-label" for="product_status">Status</label>
+      <select class="form-select" id="product_status" name="status">
+        <option value="">All statuses</option>
+        {% for option in product_status_filters %}
+          <option value="{{ option.value }}" {% if filters.status == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-primary w-100" type="submit">Search</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Type</th>
+          <th>Amount range</th>
+          <th>Rate</th>
+          <th>Term</th>
+          <th>Applications</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for product in products %}
+          <tr>
+            <td><span class="person-name d-block">{{ product.name }}</span></td>
+            <td class="text-muted">{{ product.get_loan_type_display }}</td>
+            <td class="text-muted">₱{{ product.min_amount|floatformat:0 }} – ₱{{ product.max_amount|floatformat:0 }}</td>
+            <td class="text-muted">{{ product.interest_rate }}% p.a.</td>
+            <td class="text-muted">{{ product.min_term_months }}–{{ product.max_term_months }} mo</td>
+            <td><strong>{{ product.applications_count }}</strong> application{{ product.applications_count|pluralize }}</td>
+            <td>{% include "includes/status_badge.html" with status=product.is_active|yesno:"active,inactive" label=product.is_active|yesno:"Active,Inactive" %}</td>
+            <td>
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'edit_loan_product' product_id=product.id %}"><i class="bi bi-pencil"></i></a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="8">
+              {% include "includes/empty_state.html" with icon="bi-tags" title="No loan products found" description="Try a different name, type, or status." %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

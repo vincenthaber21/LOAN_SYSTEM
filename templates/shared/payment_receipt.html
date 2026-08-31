@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Receipt {{ payment.reference_number }}{% endblock %}
+{% block topbar_title %}Payment receipt{% endblock %}
+{% block topbar_context %}A transparent record of this transaction.{% endblock %}
+{% block head %}
+<style>
+  @media print {
+    .app-sidebar, .sidebar-backdrop, .topbar, .no-print { display: none !important; }
+    .content-area, .page-wrap { margin: 0 !important; padding: 0 !important; }
+    body { background: #fff !important; }
+  }
+  .receipt-card { max-width: 640px; margin: 0 auto; }
+  .receipt-brand { display: flex; align-items: center; gap: .75rem; }
+  .receipt-mark { width: 44px; height: 44px; border-radius: 12px; background: var(--bs-primary, #0d6efd); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; }
+  .receipt-meta { text-align: right; }
+  .receipt-amount { font-size: 2.25rem; font-weight: 700; }
+  .receipt-row { display: flex; justify-content: space-between; padding: .5rem 0; border-bottom: 1px dashed var(--bs-border-color, #dee2e6); }
+  .receipt-row:last-child { border-bottom: none; }
+  .receipt-row dt { color: var(--bs-secondary-color, #6c757d); font-size: .85rem; margin: 0; }
+  .receipt-row dd { margin: 0; font-weight: 600; text-align: right; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-heading no-print">
+  <div>
+    <a class="small" href="{% if user.is_officer %}{% url 'officer_loan_detail' loan_id=loan.id %}{% else %}{% url 'loan_detail' loan_id=loan.id %}{% endif %}"><i class="bi bi-arrow-left me-1"></i>Back to {{ loan.reference }}</a>
+    <h1 class="mt-3 mb-2">Payment receipt</h1>
+    <p>Share or print this receipt as proof of the transaction.</p>
+  </div>
+  <button type="button" class="btn btn-primary" onclick="window.print()"><i class="bi bi-printer me-1"></i>Print / Save as PDF</button>
+</div>
+
+<div class="receipt-card card-soft p-4 p-md-5">
+  <div class="d-flex justify-content-between align-items-start mb-4">
+    <div class="receipt-brand">
+      <span class="receipt-mark"><i class="bi bi-water"></i></span>
+      <div>
+        <div class="fw-bold fs-5">{{ app_name }} Lending</div>
+        <div class="text-muted small">Official payment receipt</div>
+      </div>
+    </div>
+    <div class="receipt-meta">
+      <div class="text-muted small">Receipt No.</div>
+      <div class="fw-semibold">{{ payment.reference_number }}</div>
+      <div class="text-muted small mt-1">{{ payment.payment_date }}</div>
+    </div>
+  </div>
+
+  <div class="text-center py-4 mb-4 border-top border-bottom">
+    <div class="text-muted small text-uppercase">Amount paid</div>
+    <div class="receipt-amount text-success">{{ payment.amount|peso }}</div>
+    <span class="badge bg-success-subtle text-success-emphasis mt-2"><i class="bi bi-check-circle me-1"></i>Payment confirmed</span>
+  </div>
+
+  <dl class="mb-0">
+    <div class="receipt-row"><dt>Borrower</dt><dd>{{ loan.application.borrower_name }}</dd></div>
+    <div class="receipt-row"><dt>Loan reference</dt><dd>{{ loan.reference }}</dd></div>
+    <div class="receipt-row"><dt>Loan product</dt><dd>{{ loan.product_name }}</dd></div>
+    <div class="receipt-row"><dt>Payment method</dt><dd>{{ payment.get_method_display }}</dd></div>
+    <div class="receipt-row"><dt>Applied to</dt><dd>{% if payment.installment %}Installment #{{ payment.installment.installment_number }} · due {{ payment.installment.due_date }}{% else %}Oldest unpaid installments first{% endif %}</dd></div>
+    <div class="receipt-row"><dt>Recorded by</dt><dd>{{ payment.recorded_by.display_name|default:"Borrower self-service" }}</dd></div>
+    <div class="receipt-row"><dt>Outstanding balance before</dt><dd>{{ balance_before|peso }}</dd></div>
+    <div class="receipt-row"><dt>Outstanding balance after</dt><dd>{{ balance_after|peso }}</dd></div>
+  </dl>
+
+  <p class="text-muted small mt-4 mb-0 text-center">This receipt confirms the payment above has been recorded against {{ loan.reference }}. Keep it for your records.</p>
+</div>
+{% endblock %}

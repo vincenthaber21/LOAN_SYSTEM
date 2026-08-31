@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Members with loans{% endblock %}
+{% block topbar_title %}Members with loans{% endblock %}
+{% block topbar_context %}Members who currently have active loans.{% endblock %}
+{% block content %}
+
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Officer workspace</div>
+    <h1>Members with loans.</h1>
+    <p>{{ member_count }} member{{ member_count|pluralize }} with active loan{{ member_count|pluralize }} · {{ total_active_loans }} active loan{{ total_active_loans|pluralize }} · {{ total_outstanding|peso }} outstanding.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{% url 'all_members' %}"><i class="bi bi-people me-1"></i>All members</a>
+    <a class="btn btn-primary" href="{% url 'add_member' %}"><i class="bi bi-person-plus me-1"></i>Add member</a>
+    <a class="btn btn-outline-primary csv-link" href="{% url 'export_borrowers_csv' %}?q={{ filters.q }}&status={{ filters.status }}"><i class="bi bi-download"></i>Export CSV</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Members with loans</div>
+      <div class="metric-value">{{ member_count }}</div>
+      <div class="metric-note">Matching your current filters</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Active loans</div>
+      <div class="metric-value">{{ total_active_loans }}</div>
+      <div class="metric-note">Across all members shown</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Outstanding balance</div>
+      <div class="metric-value" style="font-size:1.55rem;">{{ total_outstanding|peso }}</div>
+      <div class="metric-note positive">Still owed on active loans</div>
+    </div>
+  </div>
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get" action="{% url 'borrowers' %}">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-7">
+      <label class="form-label" for="borrower_q">Search members</label>
+      <div class="input-group">
+        <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+        <input class="form-control border-start-0" id="borrower_q" name="q" value="{{ filters.q|default:'' }}" placeholder="Search by name, email, or member ID">
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="borrower_status">Account status</label>
+      <select class="form-select" id="borrower_status" name="status">
+        <option value="">All statuses</option>
+        {% for option in borrower_status_filters %}
+          <option value="{{ option.value }}" {% if filters.status == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-primary w-100" type="submit">Search</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Member</th>
+          <th>Member ID</th>
+          <th>Loans</th>
+          <th>Credit score</th>
+          <th>Loan availability</th>
+          <th>Outstanding</th>
+          <th>Last activity</th>
+          <th>Account status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for member in members %}
+          <tr>
+            <td>
+              <a class="person" href="{% url 'borrower_detail' borrower_id=member.id %}">
+                <span class="avatar">{{ member.initials }}</span>
+                <span>
+                  <span class="person-name d-block">{{ member.full_name|default:member.email }}</span>
+                  <span class="person-sub">{{ member.email }}</span>
+                </span>
+              </a>
+            </td>
+            <td class="text-muted">{{ member.reference }}</td>
+            <td>
+              <strong>{{ member.active_loan_count }}</strong> loan{{ member.active_loan_count|pluralize }}
+            </td>
+            <td>
+              <strong>{{ member.credit_score|credit_score }}</strong>
+              <span class="text-muted small d-block">Starts at 100 · −0.1 per late payment</span>
+            </td>
+            <td>{% include "includes/status_badge.html" with status=member.loan_availability_status label=member.loan_availability_label %}</td>
+            <td>{{ member.total_balance|peso }}</td>
+            <td class="text-muted">{{ member.last_activity }}</td>
+            <td>{% include "includes/status_badge.html" with status=member.account_status label=member.account_status|title %}</td>
+            <td>
+              <a class="btn btn-sm btn-light" href="{% url 'borrower_detail' borrower_id=member.id %}">{% if member.active_loan_count > 1 %}View loans{% else %}View loan{% endif %}</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="9">
+              {% include "includes/empty_state.html" with icon="bi-people" title="No members with active loans" description="No members match your search, or none currently have an active loan. View all members to browse the full directory." %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

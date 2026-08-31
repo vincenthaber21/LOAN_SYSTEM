@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}My savings{% endblock %}
+{% block topbar_title %}My savings{% endblock %}
+{% block topbar_context %}Your savings accounts and recent activity.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Savings workspace</div>
+    <h1>Your savings.</h1>
+    <p>{{ account_count }} active account{{ account_count|pluralize }} · {{ total_balance|peso }} total balance.</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'savings_open_account' %}"><i class="bi bi-plus-lg me-1"></i>Open account</a>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Total savings balance</div>
+      <div class="metric-value">{{ total_balance|peso }}</div>
+      <div class="metric-note positive">Across all active accounts</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Active accounts</div>
+      <div class="metric-value">{{ account_count }}</div>
+      <div class="metric-note">Ready for deposits and withdrawals</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Products available</div>
+      <div class="metric-value">{{ available_products.count }}</div>
+      <div class="metric-note">You can open more account types</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft h-100 fade-up-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+          <div class="eyebrow">Your accounts</div>
+          <h2 class="card-title mt-1">Savings accounts</h2>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if accounts %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Product</th>
+                <th class="text-end">Balance</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for account in accounts %}
+              <tr>
+                <td><strong>{{ account.reference }}</strong><div class="text-muted small">{{ account.status_label }}</div></td>
+                <td>{{ account.product_name }}<div class="text-muted small">{{ account.product.interest_rate }}% p.a.</div></td>
+                <td class="text-end fw-semibold">{{ account.balance|peso }}</td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'savings_account_detail' account_id=account.id %}">View</a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-piggy-bank" title="No savings accounts yet" description="Open your first savings account to start building your balance." %}
+        <div class="text-center mt-3">
+          <a class="btn btn-primary" href="{% url 'savings_open_account' %}">Open an account</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card-soft fade-up-3">
+      <div class="card-header">
+        <div class="eyebrow">Recent activity</div>
+        <h2 class="card-title mt-1">Latest transactions</h2>
+      </div>
+      <div class="card-body">
+        {% if recent_transactions %}
+        {% for tx in recent_transactions %}
+        <div class="d-flex justify-content-between gap-3 {% if not forloop.last %}mb-3 pb-3 border-bottom{% endif %}">
+          <div>
+            <div class="fw-semibold" style="font-size:.85rem;">
+              {% if tx.is_credit %}<span class="text-success">+{% else %}<span class="text-danger">−{% endif %}{{ tx.amount|peso }}</span>
+            </div>
+            <div class="text-muted" style="font-size:.75rem;">{{ tx.type_label }} · {{ tx.account.reference }}</div>
+            <div class="text-muted" style="font-size:.68rem;">{{ tx.created_at|date:"M d, Y · g:i A" }}</div>
+          </div>
+          <div class="text-end text-muted small">{{ tx.account.product_name }}</div>
+        </div>
+        {% endfor %}
+        {% else %}
+        {% include "includes/empty_state.html" with icon="bi-clock-history" title="No transactions yet" description="Deposits and withdrawals will appear here." %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

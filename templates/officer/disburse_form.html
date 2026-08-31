@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Release {{ application.reference }}{% endblock %}
+{% block topbar_title %}Release approved funds{% endblock %}
+{% block topbar_context %}A final check before the funds move.{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'disbursements' %}"><i class="bi bi-arrow-left me-1"></i>Back to disbursements</a>
+    <h1 class="mt-3">{{ application.reference }}</h1>
+    <p>{{ application.borrower_name }} · {{ application.product_name }}</p>
+  </div>
+</div>
+
+{% if existing_loan %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft">
+      <div class="card-body text-center py-5">
+        <div style="font-size:2.5rem;line-height:1;" class="mb-3"><i class="bi bi-check-circle-fill text-success"></i></div>
+        <h2 class="h4 mb-1">Already disbursed</h2>
+        <p class="text-muted mb-4">{{ existing_loan.reference }} was released on {{ existing_loan.start_date }}. The repayment schedule is active.</p>
+        <div class="d-flex gap-2 justify-content-center">
+          <a class="btn btn-primary" href="{% url 'disbursement_receipt' disbursement_id=application.id %}"><i class="bi bi-receipt me-1"></i>View receipt</a>
+          <a class="btn btn-outline-secondary" href="{% url 'disbursements' %}">Back to disbursements</a>
+          <a class="btn btn-outline-secondary" href="{% url 'repayment_schedule' loan_id=existing_loan.id %}">View schedule</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Loan summary</h2></div>
+      <div class="card-body">
+        <div class="detail-label">Loan reference</div><div class="detail-value mb-3">{{ existing_loan.reference }}</div>
+        <div class="detail-label">Principal released</div><div class="detail-value mb-3">{{ existing_loan.principal|peso }}</div>
+        <div class="detail-label">Interest rate</div><div class="detail-value mb-3">{{ existing_loan.interest_rate }}% p.a.</div>
+        <div class="detail-label">Term</div><div class="detail-value mb-3">{{ existing_loan.term_months }} months</div>
+        <div class="detail-label">Disbursement method</div><div class="detail-value mb-3">{{ existing_loan.disbursement_method }}</div>
+        {% if existing_loan.total_deductions %}
+        <div class="detail-label">Processing fee</div><div class="detail-value mb-3">{{ existing_loan.processing_fee|peso }}</div>
+        <div class="detail-label">Other fees</div><div class="detail-value mb-3">{{ existing_loan.other_fees|peso }}{% if existing_loan.other_fees_description %} · {{ existing_loan.other_fees_description }}{% endif %}</div>
+        <div class="detail-label">Net amount released</div><div class="detail-value mb-3">{{ existing_loan.net_release_amount|peso }}</div>
+        {% endif %}
+        <div class="detail-label">Outstanding balance</div><div class="detail-value">{{ existing_loan.outstanding_balance|peso }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Disbursement details</h2></div>
+      <div class="card-body">
+        <form method="post" data-client-validation novalidate id="disburseForm">
+          {% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label" for="amount">Amount to release</label>
+            <div class="input-group"><span class="input-group-text">₱</span><input class="form-control" id="amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="{{ application.amount }}" readonly></div>
+            <div class="form-text">Locked to the approved amount. To release a different amount, revise the application.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="disbursed_date">Disbursement date</label>
+            <input class="form-control" id="disbursed_date" name="disbursed_date" type="date" value="{{ form_data.disbursed_date|default:default_disbursed_date }}">
+            <div class="form-text">Interest and the first payment due date are calculated from this date.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="method">Method</label>
+            <select class="form-select" id="method" name="method">
+              <option{% if not form_data.method or form_data.method == "Bank transfer" %} selected{% endif %}>Bank transfer</option>
+              <option{% if form_data.method == "GCash" %} selected{% endif %}>GCash</option>
+              <option{% if form_data.method == "Cash" %} selected{% endif %}>Cash</option>
+            </select>
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="reference">Reference</label>
+            <input class="form-control" id="reference" name="reference" placeholder="e.g. LUMEN-240617" value="{{ form_data.reference|default:'' }}">
+          </div>
+          <hr class="my-4">
+          <h3 class="h6 mb-1">Deductions</h3>
+          <p class="text-muted small mb-3">Fees deducted from the amount released. The loan principal and interest are still calculated on the full approved amount above.</p>
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="processing_fee">Processing fee</label>
+              <div class="input-group"><span class="input-group-text">₱</span><input class="form-control{% if processing_fee_error %} is-invalid{% endif %}" id="processing_fee" name="processing_fee" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" value="{{ form_data.processing_fee|default:'' }}"></div>
+              <div class="invalid-feedback d-block{% if not processing_fee_error %} d-none{% endif %}" id="processingFeeError">{% if processing_fee_error %}{{ processing_fee_error }}{% endif %}</div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="other_fees">Other fees</label>
+              <div class="input-group"><span class="input-group-text">₱</span><input class="form-control" id="other_fees" name="other_fees" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" value="{{ form_data.other_fees|default:'' }}"></div>
+            </div>
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="other_fees_description">Other fees description</label>
+            <input class="form-control" id="other_fees_description" name="other_fees_description" placeholder="e.g. Notarial fee" value="{{ form_data.other_fees_description|default:'' }}">
+          </div>
+          <div class="d-flex justify-content-between align-items-center mb-4">
+            <span class="text-muted small">Net amount to release</span>
+            <strong id="netAmount">₱0.00</strong>
+          </div>
+          <div class="d-flex justify-content-between">
+            <a class="btn btn-outline-secondary" href="{% url 'disbursements' %}">Cancel</a>
+            <button class="btn btn-primary" type="submit" id="submitDisburseBtn">Confirm disbursement <i class="bi bi-arrow-right ms-1"></i></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Approved terms</h2></div>
+      <div class="card-body">
+        <div class="detail-label">Borrower</div><div class="detail-value mb-3">{{ application.borrower_name }}</div>
+        <div class="detail-label">Rate</div><div class="detail-value mb-3">{{ application.final_interest_rate|default:application.loan_product.interest_rate }}% annual</div>
+        <div class="detail-label">Term</div><div class="detail-value">{{ application.final_term_months|default:application.term_months }} months</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="confirmDisbursementModal" tabindex="-1" aria-labelledby="confirmDisbursementModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmDisbursementModalLabel"><i class="bi bi-shield-check me-2"></i>Confirm disbursement</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">This will release funds and generate the repayment schedule. This action cannot be undone.</p>
+        <dl class="row mb-0 confirm-summary">
+          <dt class="col-5">Application</dt><dd class="col-7">{{ application.reference }} — {{ application.borrower_name }}</dd>
+          <dt class="col-5">Amount to release</dt><dd class="col-7" id="confirmDisburseAmount">—</dd>
+          <dt class="col-5">Disbursement date</dt><dd class="col-7" id="confirmDisburseDate">—</dd>
+          <dt class="col-5">Method</dt><dd class="col-7" id="confirmDisburseMethod">—</dd>
+          <dt class="col-5">Reference</dt><dd class="col-7" id="confirmDisburseReference">—</dd>
+          <dt class="col-5">Net amount to release</dt><dd class="col-7" id="confirmDisburseNet">—</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
+        <button type="button" class="btn btn-primary" id="confirmDisbursementBtn"><i class="bi bi-check2 me-1"></i>Confirm & release</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+<script>
+(function () {
+  var amountInput = document.getElementById('amount');
+  if (!amountInput) { return; }
+  var processingFeeInput = document.getElementById('processing_fee');
+  var otherFeesInput = document.getElementById('other_fees');
+  var netAmountEl = document.getElementById('netAmount');
+  var amountForm = amountInput.closest('form');
+  var feeInputs = [processingFeeInput, otherFeesInput];
+
+  function formatAmount(raw) {
+    var clean = raw.replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    var formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return formattedInt + decPart;
+  }
+
+  function toNumber(input) {
+    if (!input) { return 0; }
+    return parseFloat(input.value.replace(/,/g, '')) || 0;
+  }
+
+  var processingFeeError = document.getElementById('processingFeeError');
+
+  function validateProcessingFee() {
+    if (!processingFeeInput) { return true; }
+    var amount = toNumber(amountInput);
+    var fee = toNumber(processingFeeInput);
+    processingFeeInput.classList.remove('is-invalid');
+    processingFeeInput.setCustomValidity('');
+    if (processingFeeError) {
+      processingFeeError.classList.add('d-none');
+      processingFeeError.textContent = '';
+    }
+    if (fee > amount) {
+      var msg = 'Processing fee cannot exceed the amount to release (₱' + formatAmount(amount.toFixed(2)) + ').';
+      if (processingFeeError) {
+        processingFeeError.textContent = msg;
+        processingFeeError.classList.remove('d-none');
+      }
+      processingFeeInput.classList.add('is-invalid');
+      processingFeeInput.setCustomValidity(msg);
+      return false;
+    }
+    return true;
+  }
+
+  function updateNetAmount() {
+    if (!netAmountEl) { return; }
+    var net = toNumber(amountInput) - toNumber(processingFeeInput) - toNumber(otherFeesInput);
+    netAmountEl.textContent = '₱' + formatAmount(net.toFixed(2));
+    validateProcessingFee();
+  }
+
+  [amountInput, processingFeeInput, otherFeesInput].forEach(function (input) {
+    if (!input) { return; }
+    input.addEventListener('input', function () {
+      var oldLength = input.value.length;
+      var oldPos = input.selectionStart;
+      var formatted = formatAmount(input.value);
+      input.value = formatted;
+      var newPos = Math.max(0, oldPos + (formatted.length - oldLength));
+      input.setSelectionRange(newPos, newPos);
+      updateNetAmount();
+    });
+    if (input.value) {
+      input.value = formatAmount(input.value);
+    }
+  });
+
+  updateNetAmount();
+  if (processingFeeInput && processingFeeInput.classList.contains('is-invalid')) {
+    validateProcessingFee();
+  }
+
+  if (amountForm) {
+    amountForm.addEventListener('submit', function () {
+      [amountInput].concat(feeInputs).forEach(function (input) {
+        if (input) { input.value = input.value.replace(/,/g, ''); }
+      });
+    });
+  }
+
+  // Confirm-before-submit for the disbursement form.
+  var disburseForm = document.getElementById('disburseForm');
+  var methodSelect = document.getElementById('method');
+  var disbursedDateInput = document.getElementById('disbursed_date');
+  var referenceInput = document.getElementById('reference');
+  var confirmModalEl = document.getElementById('confirmDisbursementModal');
+  var confirmBtn = document.getElementById('confirmDisbursementBtn');
+  var submitBtn = document.getElementById('submitDisburseBtn');
+
+  function selectedText(select) {
+    var opt = select.options[select.selectedIndex];
+    return opt ? opt.text.trim() : '';
+  }
+
+  if (disburseForm && confirmModalEl) {
+    disburseForm.addEventListener('submit', function (e) {
+      if (disburseForm.dataset.confirmed === 'true') {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Releasing…';
+        return;
+      }
+      e.preventDefault();
+
+      if (!disburseForm.checkValidity()) {
+        disburseForm.reportValidity();
+        return;
+      }
+
+      document.getElementById('confirmDisburseAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
+      document.getElementById('confirmDisburseDate').textContent = (disbursedDateInput && disbursedDateInput.value) || '—';
+      document.getElementById('confirmDisburseMethod').textContent = methodSelect ? selectedText(methodSelect) : '—';
+      document.getElementById('confirmDisburseReference').textContent = (referenceInput && referenceInput.value.trim()) || '—';
+      document.getElementById('confirmDisburseNet').textContent = netAmountEl ? netAmountEl.textContent : '—';
+
+      bootstrap.Modal.getOrCreateInstance(confirmModalEl).show();
+    });
+
+    confirmBtn.addEventListener('click', function () {
+      disburseForm.dataset.confirmed = 'true';
+      confirmBtn.disabled = true;
+      bootstrap.Modal.getOrCreateInstance(confirmModalEl).hide();
+      if (disburseForm.requestSubmit) {
+        disburseForm.requestSubmit();
+      } else {
+        disburseForm.submit();
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

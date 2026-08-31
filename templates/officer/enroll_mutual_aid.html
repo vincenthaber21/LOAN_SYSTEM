@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Enroll member{% endblock %}
+{% block topbar_title %}Enroll in mutual aid{% endblock %}
+{% block topbar_context %}Add a member to a mutual aid plan.{% endblock %}
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<style>
+  .member-combobox .ts-wrapper { width: 100%; }
+  .member-combobox .ts-wrapper .ts-control {
+    border-radius: var(--radius);
+    border-color: var(--line);
+    min-height: calc(1.5em + .75rem + 2px);
+    padding: .375rem .75rem;
+    font-size: .94rem;
+  }
+  .member-combobox .ts-wrapper.focus .ts-control {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 .2rem rgba(29, 124, 120, .15);
+  }
+  .member-combobox .ts-dropdown {
+    border-radius: 12px;
+    border-color: var(--line);
+    box-shadow: var(--shadow-sm);
+  }
+  .member-combobox .ts-dropdown .option.active {
+    background: var(--mint);
+    color: var(--ink);
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <a class="small" href="{% url 'officer_mutual_aid_memberships' %}"><i class="bi bi-arrow-left me-1"></i>Back to mutual aid</a>
+    <h1 class="mt-3 mb-2">Enroll member</h1>
+    <p>Add a member to a mutual aid plan on their behalf.</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Member</h2></div>
+        <div class="card-body">
+          {% include "includes/form_errors.html" %}
+          <div class="mb-0 member-combobox">
+            <label class="form-label" for="{{ form.member.id_for_label }}">{{ form.member.label }}</label>
+            <select class="form-select {% if form.member.errors %}is-invalid{% endif %}" id="{{ form.member.id_for_label }}" name="{{ form.member.html_name }}" required>
+              <option value="">Select a member…</option>
+              {% for member in form.member.field.queryset %}
+              <option value="{{ member.pk }}" {% if form.member.value|stringformat:"s" == member.pk|stringformat:"s" %}selected{% endif %}>
+                {{ member.display_name }} — {{ member.email }}
+              </option>
+              {% endfor %}
+            </select>
+            {% for error in form.member.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Plan details</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label class="form-label mb-0" for="{{ form.plan.id_for_label }}">{{ form.plan.label }}</label>
+                <a class="btn btn-link btn-sm p-0 text-decoration-none" href="{% url 'officer_add_mutual_aid_plan' %}"><i class="bi bi-plus-circle me-1"></i>Add plan</a>
+              </div>
+              <select class="form-select {% if form.plan.errors %}is-invalid{% endif %}" id="{{ form.plan.id_for_label }}" name="{{ form.plan.html_name }}" required>
+                <option value="">Select plan…</option>
+                {% for plan in plans %}
+                <option value="{{ plan.pk }}" {% if form.plan.value|stringformat:"s" == plan.pk|stringformat:"s" %}selected{% endif %}>
+                  {{ plan.name }} ({{ plan.contribution_summary }})
+                </option>
+                {% endfor %}
+              </select>
+              {% for error in form.plan.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <div class="text-muted small mt-1 d-none" id="planAvailabilityHint"></div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.notes.id_for_label }}">Notes</label>
+              {{ form.notes }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary px-4" type="submit" id="enrollMemberBtn"><i class="bi bi-check2 me-1"></i>Enroll member</button>
+        <a class="btn btn-outline-secondary" href="{% url 'officer_mutual_aid_memberships' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="card-soft mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="card-title mb-0">Active plans</h2>
+        <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_add_mutual_aid_plan' %}"><i class="bi bi-plus-lg me-1"></i>Add</a>
+      </div>
+      <div class="card-body p-0">
+        {% for plan in plans %}
+        <div class="border-bottom px-4 py-3">
+          <div class="fw-semibold">{{ plan.name }}</div>
+          <div class="text-muted small">{{ plan.contribution_summary }} · max benefit {{ plan.max_benefit_amount|peso }} · {{ plan.waiting_period_days }}-day waiting period</div>
+        </div>
+        {% empty %}
+        <div class="p-4 text-muted small">No active mutual aid plans.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/js/tom-select.complete.min.js"></script>
+<script>
+(function () {
+  var memberSelect = document.getElementById('{{ form.member.id_for_label }}');
+  var planSelect = document.getElementById('{{ form.plan.id_for_label }}');
+  var planAvailabilityHint = document.getElementById('planAvailabilityHint');
+  var enrollMemberBtn = document.getElementById('enrollMemberBtn');
+  var memberTomSelect = null;
+  var availablePlansToken = 0;
+
+  function getMemberId() {
+    if (memberTomSelect) {
+      return memberTomSelect.getValue();
+    }
+    return memberSelect ? memberSelect.value : '';
+  }
+
+  function renderPlanOptions(plans, selectedId, memberInactive, blockedPlanCount, memberId) {
+    var currentValue = selectedId != null ? String(selectedId) : planSelect.value;
+    var availablePlans = plans.filter(function (plan) { return plan.available; });
+    planSelect.innerHTML = '';
+    planSelect.appendChild(new Option('Select plan…', ''));
+    plans.forEach(function (plan) {
+      var label = plan.available ? plan.label : plan.label + ' (already enrolled)';
+      var opt = new Option(label, plan.id);
+      opt.disabled = !plan.available;
+      if (String(plan.id) === currentValue && plan.available) opt.selected = true;
+      planSelect.appendChild(opt);
+    });
+    if (!availablePlans.some(function (plan) { return String(plan.id) === currentValue; })) {
+      planSelect.value = '';
+    }
+    if (memberInactive) {
+      planAvailabilityHint.textContent = 'This member\'s account is inactive. Only active members can be enrolled.';
+      planAvailabilityHint.classList.remove('d-none');
+      enrollMemberBtn.disabled = true;
+    } else if (availablePlans.length === 0 && memberId) {
+      if (blockedPlanCount > 0) {
+        planAvailabilityHint.textContent = 'This member is already enrolled in all available mutual aid plans.';
+      } else {
+        planAvailabilityHint.textContent = 'No active mutual aid plans are available right now.';
+      }
+      planAvailabilityHint.classList.remove('d-none');
+      enrollMemberBtn.disabled = true;
+    } else if (memberId) {
+      if (blockedPlanCount > 0) {
+        planAvailabilityHint.textContent = 'Plans this member is already enrolled in are disabled. Other plans remain available.';
+      } else {
+        planAvailabilityHint.textContent = 'All active mutual aid plans are available for this member.';
+      }
+      planAvailabilityHint.classList.remove('d-none');
+      enrollMemberBtn.disabled = false;
+    } else {
+      planAvailabilityHint.classList.add('d-none');
+      enrollMemberBtn.disabled = false;
+    }
+  }
+
+  function refreshAvailablePlans(selectedId, memberId) {
+    var token = ++availablePlansToken;
+    memberId = memberId != null ? memberId : getMemberId();
+    var url = '{% url "officer_available_mutual_aid_plans" %}' + (memberId ? ('?member=' + encodeURIComponent(memberId)) : '');
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (token !== availablePlansToken) return;
+        renderPlanOptions(
+          data.plans,
+          selectedId,
+          data.member_inactive,
+          data.blocked_plan_count || 0,
+          memberId
+        );
+      })
+      .catch(function () { /* ignore — server-side validation still applies on submit */ });
+  }
+
+  if (memberSelect && window.TomSelect) {
+    memberTomSelect = new TomSelect(memberSelect, {
+      create: false,
+      maxOptions: null,
+      allowEmptyOption: true,
+      placeholder: 'Type a name or email to search…',
+      sortField: { field: 'text', direction: 'asc' },
+      onChange: function (value) {
+        refreshAvailablePlans(null, value);
+      },
+    });
+  } else if (memberSelect) {
+    memberSelect.addEventListener('change', function () { refreshAvailablePlans(null, memberSelect.value); });
+  }
+
+  if (planSelect) {
+    refreshAvailablePlans(planSelect.value, getMemberId());
+  }
+})();
+</script>
+{% endblock %}
