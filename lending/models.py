@@ -39,6 +39,11 @@ class User(AbstractUser):
     def is_member(self):
         return self.role == self.Role.MEMBER and not self.is_staff
 
+    @classmethod
+    def member_accounts(cls):
+        """Borrower accounts visible to loan officers — role member only, no staff/admin."""
+        return cls.objects.filter(role=cls.Role.MEMBER, is_staff=False, is_superuser=False)
+
     @property
     def is_admin(self):
         return self.role == self.Role.ADMIN or self.is_superuser

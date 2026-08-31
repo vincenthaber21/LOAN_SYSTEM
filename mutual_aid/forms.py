@@ -73,8 +73,8 @@ class OfficerEnrollForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["member"].queryset = User.objects.filter(
-            role=User.Role.MEMBER, is_active=True
+        self.fields["member"].queryset = User.member_accounts().filter(
+            is_active=True
         ).order_by("full_name", "username")
 
     def clean(self):

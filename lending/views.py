@@ -741,7 +741,7 @@ def application_delete(request, application_id):
 @role_required("officer")
 def officer_available_products(request):
     borrower_id = request.GET.get("borrower")
-    borrower = User.objects.filter(pk=borrower_id, role=User.Role.MEMBER, is_active=True).first()
+    borrower = User.member_accounts().filter(pk=borrower_id, is_active=True).first()
     borrower_inactive = bool(borrower_id) and not borrower
     borrower_has_active_loan = bool(borrower and borrower.has_active_loan)
     credit_score_blocked = bool(borrower and credit_score_blocks_loans(borrower))
@@ -888,7 +888,7 @@ def officer_apply_loan(request):
 
 
 def _members_queryset(query="", status="", active_loans_only=False):
-    qs = User.objects.filter(role=User.Role.MEMBER).annotate(
+    qs = User.member_accounts().annotate(
         active_loans=Count("loan_applications__loan", filter=Q(loan_applications__loan__status__in=["active", "overdue"])),
     ).prefetch_related("loan_applications__loan")
     if query:
@@ -982,7 +982,7 @@ def add_member(request):
 @login_required
 @role_required("officer")
 def edit_member(request, borrower_id):
-    borrower = get_object_or_404(User, pk=borrower_id, role=User.Role.MEMBER)
+    borrower = get_object_or_404(User.member_accounts(), pk=borrower_id)
     form = OfficerMemberEditForm(request.POST or None, instance=borrower)
     if request.method == "POST" and form.is_valid():
         member = form.save()
@@ -1087,7 +1087,7 @@ def _activity_sort_key(value):
 @login_required
 @role_required("officer")
 def borrower_detail(request, borrower_id):
-    borrower = get_object_or_404(User, pk=borrower_id, role=User.Role.MEMBER)
+    borrower = get_object_or_404(User.member_accounts(), pk=borrower_id)
     loans = Loan.objects.filter(application__borrower=borrower).select_related("application", "application__loan_product")
     applications = borrower.loan_applications.select_related("loan_product", "reviewed_by")
 
@@ -1447,7 +1447,7 @@ def export_applications_csv(request):
 @login_required
 @role_required("officer")
 def export_borrowers_csv(request):
-    members = User.objects.filter(role=User.Role.MEMBER)
+    members = User.member_accounts()
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
     if query:

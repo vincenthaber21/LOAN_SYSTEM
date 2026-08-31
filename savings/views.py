@@ -350,7 +350,7 @@ def officer_savings_account_detail(request, account_id):
 @role_required("officer")
 def officer_available_savings_products(request):
     member_id = request.GET.get("member")
-    member = User.objects.filter(pk=member_id, role=User.Role.MEMBER, is_active=True).first()
+    member = User.member_accounts().filter(pk=member_id, is_active=True).first()
     member_inactive = bool(member_id) and not member
     blocked_product_count = len(unavailable_savings_product_ids_for_member(member)) if member else 0
     if member_inactive:

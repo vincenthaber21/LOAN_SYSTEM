@@ -197,7 +197,7 @@ class OfficerOpenAccountForm(forms.Form):
         from lending.models import User
 
         super().__init__(*args, **kwargs)
-        self.fields["member"].queryset = User.objects.filter(role=User.Role.MEMBER, is_active=True).order_by("full_name", "username")
+        self.fields["member"].queryset = User.member_accounts().filter(is_active=True).order_by("full_name", "username")
 
     def clean(self):
         cleaned = super().clean()

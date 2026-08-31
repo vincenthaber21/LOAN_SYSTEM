@@ -453,7 +453,7 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             if data.get("amount_requested"):
                 data["amount_requested"] = str(data["amount_requested"]).replace(",", "")
             self.data = data
-        self.fields["borrower"].queryset = User.objects.filter(role=User.Role.MEMBER, is_active=True).order_by("full_name", "email")
+        self.fields["borrower"].queryset = User.member_accounts().filter(is_active=True).order_by("full_name", "email")
         borrower = None
         if self.is_bound:
             borrower_id = self.data.get(self.add_prefix("borrower") if self.prefix else "borrower")
@@ -489,7 +489,7 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         term = cleaned.get("term_months")
         borrower_id = self.data.get("borrower")
         if borrower_id and not borrower:
-            inactive_member = User.objects.filter(pk=borrower_id, role=User.Role.MEMBER, is_active=False).first()
+            inactive_member = User.member_accounts().filter(pk=borrower_id, is_active=False).first()
             if inactive_member:
                 self.add_error("borrower", f"{inactive_member.display_name()}'s account is inactive and cannot receive a new loan application.")
         elif borrower and not borrower.is_active:

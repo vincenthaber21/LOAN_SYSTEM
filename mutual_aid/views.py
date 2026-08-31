@@ -85,7 +85,7 @@ def officer_mutual_aid_memberships(request):
 @role_required("officer")
 def officer_available_mutual_aid_plans(request):
     member_id = request.GET.get("member")
-    member = User.objects.filter(pk=member_id, role=User.Role.MEMBER, is_active=True).first()
+    member = User.member_accounts().filter(pk=member_id, is_active=True).first()
     member_inactive = bool(member_id) and not member
     blocked_plan_ids = unavailable_mutual_aid_plan_ids_for_member(member) if member else set()
     all_plans = MutualAidPlan.objects.filter(is_active=True).order_by("name")

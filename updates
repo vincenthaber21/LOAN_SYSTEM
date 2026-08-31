@@ -1,0 +1,16 @@
+
+Your PC
+   ↓
+git add .
+git commit -m "Update loan system"
+git push origin main
+   ↓
+GitHub
+   ↓
+PythonAnywhere
+   ↓
+git pull origin main
+   ↓
+migrate / collectstatic if needed
+   ↓
+Web → Reload
