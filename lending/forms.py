@@ -380,11 +380,21 @@ class ProfileForm(forms.ModelForm):
 class LoanProductForm(forms.ModelForm):
     class Meta:
         model = LoanProduct
-        fields = ("name", "loan_type", "min_amount", "max_amount", "interest_rate", "min_term_months", "max_term_months")
+        fields = (
+            "name",
+            "loan_type",
+            "min_amount",
+            "max_amount",
+            "interest_rate",
+            "min_term_months",
+            "max_term_months",
+            "grace_period_days",
+        )
         widgets = {
             "interest_rate": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
             "min_term_months": forms.NumberInput(attrs={"min": "1"}),
             "max_term_months": forms.NumberInput(attrs={"min": "1"}),
+            "grace_period_days": forms.NumberInput(attrs={"min": "0"}),
         }
 
     def __init__(self, *args, **kwargs):

@@ -171,6 +171,10 @@ class LoanProduct(models.Model):
     min_term_months = models.PositiveIntegerField(default=3)
     max_term_months = models.PositiveIntegerField(default=24)
     processing_fee_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    grace_period_days = models.PositiveIntegerField(
+        default=0,
+        help_text="Days after disbursement before interest starts accruing.",
+    )
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -325,6 +329,10 @@ class Loan(models.Model):
         null=True,
         blank=True,
         related_name="disbursed_loans",
+    )
+    grace_period_days = models.PositiveIntegerField(
+        default=0,
+        help_text="Days after disbursement before interest starts accruing.",
     )
 
     class Meta:

@@ -70,6 +70,7 @@ class Command(BaseCommand):
                 "min_term_months": 3,
                 "max_term_months": 24,
                 "processing_fee_percent": Decimal("1.50"),
+                "grace_period_days": 0,
                 "is_active": True,
             },
         )
@@ -83,6 +84,7 @@ class Command(BaseCommand):
                 "min_term_months": 6,
                 "max_term_months": 36,
                 "processing_fee_percent": Decimal("1.00"),
+                "grace_period_days": 30,
                 "is_active": True,
             },
         )

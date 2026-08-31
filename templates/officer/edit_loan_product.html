@@ -87,6 +87,12 @@
               <input class="form-control {% if form.max_term_months.errors %}is-invalid{% endif %}" type="number" min="1" id="{{ form.max_term_months.id_for_label }}" name="{{ form.max_term_months.html_name }}" value="{{ form.max_term_months.value|default:'' }}" placeholder="24" required>
               {% for error in form.max_term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.grace_period_days.id_for_label }}">Grace period (days)</label>
+              <input class="form-control {% if form.grace_period_days.errors %}is-invalid{% endif %}" type="number" min="0" id="{{ form.grace_period_days.id_for_label }}" name="{{ form.grace_period_days.html_name }}" value="{{ form.grace_period_days.value|default:'0' }}" placeholder="0">
+              <span class="helptext d-block">Days after disbursement before interest starts accruing.</span>
+              {% for error in form.grace_period_days.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
           </div>
         </div>
       </div>

@@ -266,7 +266,7 @@ class AdministratorAdmin(RoleScopedUserAdmin):
 
 @admin.register(LoanProduct)
 class LoanProductAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
-    list_display = ("name", "loan_type", "min_amount", "max_amount", "interest_rate", "is_active", "application_count")
+    list_display = ("name", "loan_type", "min_amount", "max_amount", "interest_rate", "grace_period_days", "is_active", "application_count")
     list_filter = ("loan_type", "is_active")
     search_fields = ("name",)
     actions = ("delete_selected",)

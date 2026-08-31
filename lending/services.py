@@ -97,9 +97,10 @@ def calculate_periodic_payment(principal, interest_rate, term_months, payment_fr
 
 
 def _first_installment_due_date(loan):
+    base = loan.disbursed_date + timedelta(days=loan.grace_period_days)
     if _is_monthly_frequency(loan.application.payment_frequency):
-        return loan.disbursed_date + relativedelta(months=1)
-    return loan.disbursed_date + timedelta(days=14)
+        return base + relativedelta(months=1)
+    return base + timedelta(days=14)
 
 
 def schedule_is_stale(loan):
@@ -124,11 +125,14 @@ def generate_schedule(loan):
     )
     periodic_rate = (loan.interest_rate / Decimal("100")) / (Decimal("12") if is_monthly else Decimal("26"))
     balance = loan.principal
-    due_date = loan.disbursed_date
+    due_date = loan.disbursed_date + timedelta(days=loan.grace_period_days)
     installments = []
     for number in range(1, periods + 1):
         due_date = due_date + (relativedelta(months=1) if is_monthly else timedelta(days=14))
-        interest = (balance * periodic_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if number == 1 and loan.grace_period_days > 0:
+            interest = Decimal("0.00")
+        else:
+            interest = (balance * periodic_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         principal = payment - interest
         if number == periods:
             principal = balance
@@ -185,6 +189,7 @@ def disburse_application(
         return application.loan
     rate = application.final_interest_rate or application.loan_product.interest_rate
     term = application.final_term_months or application.term_months
+    grace_period_days = application.loan_product.grace_period_days if application.loan_product else 0
     installment, periods = calculate_periodic_payment(amount, rate, term, application.payment_frequency)
     total_payable = (installment * periods).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     loan = Loan.objects.create(
@@ -192,6 +197,7 @@ def disburse_application(
         principal=amount,
         interest_rate=rate,
         term_months=term,
+        grace_period_days=grace_period_days,
         disbursed_date=disbursed_date or timezone.localdate(),
         total_payable=total_payable,
         outstanding_balance=total_payable,
