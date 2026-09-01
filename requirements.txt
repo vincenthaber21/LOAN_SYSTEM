@@ -1,5 +1,6 @@
 # Core framework
 Django==5.2.16
+python-dotenv==1.2.2
 
 # Database drivers (MySQL default in settings; PostgreSQL via DATABASE_URL)
 mysqlclient==2.2.8

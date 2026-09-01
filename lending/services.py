@@ -84,7 +84,29 @@ def expected_period_count(term_months, payment_frequency):
 
 
 def calculate_periodic_payment(principal, interest_rate, term_months, payment_frequency):
-    """Amortized payment per period for the given loan terms."""
+    """Amortized (reducing-balance) payment per period for the given loan terms.
+
+    interest_rate is an annual percentage (e.g. 18 = 18%/year). It is converted to a
+    periodic rate r by dividing by the number of periods per year: 12 for monthly
+    (r = annual%/100/12), 26 for biweekly (r = annual%/100/26, since there are 26
+    biweekly periods in a year).
+
+    The payment is the standard loan-amortization (annuity) formula, which finds the
+    single payment amount that is identical every period and fully retires the loan
+    over `periods` payments while charging interest only on the balance still owed:
+
+        payment = P * r * (1 + r)^n / ((1 + r)^n - 1)
+
+    where P = principal, r = periodic rate, n = number of periods (`periods`).
+    This is derived by requiring the present value of `n` equal payments, discounted
+    at rate r, to equal P. Because interest each period is r * (current balance) and
+    the balance shrinks as principal is repaid, the interest portion of each payment
+    shrinks over time and the principal portion grows — even though the payment
+    itself stays constant. See generate_schedule() for the per-period split.
+
+    If r is 0 (a 0%-interest product), the formula divides by zero, so we fall back
+    to a straight-line split: payment = principal / periods.
+    """
     periods = expected_period_count(term_months, payment_frequency)
     is_monthly = _is_monthly_frequency(payment_frequency)
     periodic_rate = (interest_rate / Decimal("100")) / (Decimal("12") if is_monthly else Decimal("26"))
@@ -116,6 +138,31 @@ def schedule_is_stale(loan):
 
 
 def generate_schedule(loan):
+    """Build the RepaymentSchedule rows (one Installment per period) for a loan.
+
+    `payment` (from calculate_periodic_payment) is the same fixed amount due every
+    period. Within each period we split it into interest vs. principal:
+
+        interest_this_period  = outstanding_balance * periodic_rate   # reducing balance
+        principal_this_period = payment - interest_this_period
+        outstanding_balance  -= principal_this_period
+
+    Because `balance` only ever goes down, interest_this_period shrinks each period
+    and principal_this_period grows to compensate — that's what "amortized" /
+    "reducing balance" means, as opposed to flat interest (which would charge
+    interest on the *original* principal every period regardless of how much has
+    already been repaid).
+
+    A grace period (loan.grace_period_days, added to the disbursement date before
+    the first due date) waives interest for installment #1 only — that period's
+    "interest" is forced to 0.00 and the whole payment is principal.
+
+    The final installment forces principal = whatever balance is left and
+    payment_for_period = principal + interest, rather than reusing the fixed
+    `payment` amount. This absorbs the few cents of rounding drift that accumulate
+    from quantizing interest to the cent every period, guaranteeing the schedule
+    sums to exactly zero balance instead of leaving a stray centavo owed or overpaid.
+    """
     Installment.objects.filter(loan=loan).delete()
     frequency = loan.application.payment_frequency
     is_monthly = _is_monthly_frequency(frequency)
@@ -135,7 +182,7 @@ def generate_schedule(loan):
             interest = (balance * periodic_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         principal = payment - interest
         if number == periods:
-            principal = balance
+            principal = balance  # last period: pay off exactly what's left, not the rounded fixed payment
             payment_for_period = principal + interest
         else:
             payment_for_period = payment
@@ -191,6 +238,10 @@ def disburse_application(
     term = application.final_term_months or application.term_months
     grace_period_days = application.loan_product.grace_period_days if application.loan_product else 0
     installment, periods = calculate_periodic_payment(amount, rate, term, application.payment_frequency)
+    # Total repayable = fixed periodic payment x number of periods. Since the periodic
+    # payment already balances principal + interest so it's identical every period
+    # (see calculate_periodic_payment), this product is principal + total interest
+    # over the life of the loan — i.e. everything the borrower will ultimately pay.
     total_payable = (installment * periods).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     loan = Loan.objects.create(
         application=application,
@@ -200,6 +251,9 @@ def disburse_application(
         grace_period_days=grace_period_days,
         disbursed_date=disbursed_date or timezone.localdate(),
         total_payable=total_payable,
+        # Nothing has been paid yet, so what's owed (outstanding_balance) equals the
+        # full total_payable. From here, record_payment() below subtracts each
+        # payment from this field: outstanding_balance = total_payable - sum(payments).
         outstanding_balance=total_payable,
         disbursement_method=method,
         disbursement_reference=reference,
@@ -253,7 +307,14 @@ def record_payment(loan, amount, method, reference, user, installment=None):
     if late_payment_count:
         borrower = User.objects.select_for_update().get(pk=loan.application.borrower_id)
         _apply_credit_penalty(borrower, LATE_PAYMENT_CREDIT_PENALTY * late_payment_count)
+    # outstanding_balance is kept as total_payable minus every payment recorded so
+    # far, rather than recomputed from scratch each time — but it's the same number:
+    # outstanding_balance == total_payable - sum(loan.payments.values('amount')).
+    # clamped at 0 so a stray overpayment can't push the balance negative.
     loan.outstanding_balance = max(Decimal("0.00"), loan.outstanding_balance - amount)
+    # Balance hit zero -> the loan is fully repaid, so flip its status to PAID
+    # automatically. Any partial payment leaves it ACTIVE (installments still track
+    # per-period paid/pending/overdue individually).
     loan.status = Loan.Status.PAID if loan.outstanding_balance == 0 else Loan.Status.ACTIVE
     loan.save(update_fields=["outstanding_balance", "status"])
     loan.application.status = LoanApplication.Status.CLOSED if loan.status == Loan.Status.PAID else LoanApplication.Status.ACTIVE

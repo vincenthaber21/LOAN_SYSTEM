@@ -278,11 +278,57 @@ class LoanProductAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
 
 @admin.register(LoanApplication)
 class LoanApplicationAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
-    list_display = ("reference", "borrower", "loan_product", "amount_requested", "status", "created_at")
-    list_filter = ("status", "payment_frequency")
+    list_display = ("reference", "borrower", "loan_product", "amount_requested", "status", "applied_on", "created_at")
+    list_filter = ("status", "payment_frequency", "created_at", "decision_date")
     search_fields = ("borrower__email", "borrower__full_name", "borrower__username")
     actions = ("delete_selected",)
     readonly_fields = ("created_at",)
+    date_hierarchy = "created_at"
+
+
+class InstallmentInline(admin.TabularInline):
+    model = Installment
+    extra = 0
+    fields = ("installment_number", "due_date", "amount_due", "amount_paid", "status", "paid_date")
+    ordering = ("installment_number",)
+
+
+class PaymentInline(admin.TabularInline):
+    model = Payment
+    extra = 0
+    fields = ("amount", "payment_date", "method", "reference_number", "installment", "recorded_by")
+    ordering = ("-payment_date",)
+
+
+@admin.register(Loan)
+class LoanAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    list_display = ("reference", "borrower_name", "product_name", "principal", "status", "disbursed_date", "outstanding_balance")
+    list_filter = ("status", "disbursed_date")
+    search_fields = (
+        "application__borrower__full_name",
+        "application__borrower__email",
+        "application__borrower__username",
+        "disbursement_reference",
+    )
+    date_hierarchy = "disbursed_date"
+    inlines = (InstallmentInline, PaymentInline)
+    actions = ("delete_selected",)
+
+    @admin.display(description="Borrower", ordering="application__borrower__full_name")
+    def borrower_name(self, obj):
+        return obj.application.borrower_name
+
+    @admin.display(description="Product")
+    def product_name(self, obj):
+        return obj.product_name
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("application", "application__borrower", "application__loan_product")
+
+    def has_add_permission(self, request):
+        # Loans are created through the disbursement workflow (Disbursement admin),
+        # which generates the installment schedule — raw admin "add" would skip that.
+        return False
 
 
 @admin.register(Disbursement)
@@ -439,6 +485,28 @@ class FeaturesAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         )
 
 
-admin.site.register(Installment)
-admin.site.register(Payment)
+@admin.register(Installment)
+class InstallmentAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    list_display = ("loan", "installment_number", "due_date", "amount_due", "amount_paid", "status")
+    list_filter = ("status", "due_date")
+    search_fields = (
+        "loan__application__borrower__full_name",
+        "loan__application__borrower__email",
+        "loan__disbursement_reference",
+    )
+    date_hierarchy = "due_date"
+
+
+@admin.register(Payment)
+class PaymentAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    list_display = ("__str__", "loan", "amount", "method", "payment_date", "recorded_by")
+    list_filter = ("method", "payment_date")
+    search_fields = (
+        "loan__application__borrower__full_name",
+        "loan__application__borrower__email",
+        "reference_number",
+    )
+    date_hierarchy = "payment_date"
+
+
 admin.site.register(Document)

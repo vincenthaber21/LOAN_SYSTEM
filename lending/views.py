@@ -1488,9 +1488,8 @@ def export_disbursements_csv(request):
 
 @login_required
 def schedule_export(request, loan_id):
-    loan = get_object_or_404(Loan, pk=loan_id)
-    if not request.user.is_officer and loan.application.borrower_id != request.user.id:
-        return redirect("dashboard")
+    loan_qs = Loan.objects if request.user.is_officer else Loan.objects.filter(application__borrower=request.user)
+    loan = get_object_or_404(loan_qs, pk=loan_id)
     ensure_schedule_current(loan)
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{loan.reference}-schedule.csv"'
@@ -1503,15 +1502,13 @@ def schedule_export(request, loan_id):
 
 @login_required
 def payment_receipt(request, payment_id):
-    payment = get_object_or_404(
-        Payment.objects.select_related(
-            "loan", "loan__application", "loan__application__borrower", "loan__application__loan_product", "installment", "recorded_by"
-        ),
-        pk=payment_id,
+    payment_qs = Payment.objects.select_related(
+        "loan", "loan__application", "loan__application__borrower", "loan__application__loan_product", "installment", "recorded_by"
     )
+    if not request.user.is_officer:
+        payment_qs = payment_qs.filter(loan__application__borrower=request.user)
+    payment = get_object_or_404(payment_qs, pk=payment_id)
     loan = payment.loan
-    if not request.user.is_officer and loan.application.borrower_id != request.user.id:
-        return redirect("dashboard")
     paid_through = loan.payments.filter(pk__lte=payment.pk).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
     balance_after = max(Decimal("0.00"), loan.total_payable - paid_through)
     balance_before = balance_after + payment.amount
@@ -1525,16 +1522,14 @@ def payment_receipt(request, payment_id):
 
 @login_required
 def disbursement_receipt(request, disbursement_id):
-    application = get_object_or_404(
-        LoanApplication.objects.select_related("borrower", "loan_product", "reviewed_by"),
-        pk=disbursement_id,
-    )
+    application_qs = LoanApplication.objects.select_related("borrower", "loan_product", "reviewed_by")
+    if not request.user.is_officer:
+        application_qs = application_qs.filter(borrower=request.user)
+    application = get_object_or_404(application_qs, pk=disbursement_id)
     loan = get_object_or_404(
         Loan.objects.select_related("application", "application__borrower", "application__loan_product"),
         application=application,
     )
-    if not request.user.is_officer and application.borrower_id != request.user.id:
-        return redirect("dashboard")
     return render(request, "shared/disbursement_receipt.html", {
         "loan": loan,
         "application": application,
@@ -1597,6 +1592,7 @@ def simple_page(request, title, description):
     return render(request, "simple_page.html", {"title": title, "description": description})
 
 
+@login_required
 def estimate(request):
     try:
         product = get_object_or_404(LoanProduct, pk=request.GET.get("product"))

@@ -17,6 +17,7 @@ media/
 # Environment
 .env
 .env.*
+pythonanywhere_wsgi_snippet.py
 
 # Node
 node_modules/
