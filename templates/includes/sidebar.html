@@ -44,7 +44,7 @@
   <div class="sidebar-footer">
     <div class="person">
       <span class="avatar">{{ user_initials|default:"HL" }}</span>
-      <span class="min-w-0 flex-grow-1"><span class="d-block text-white text-truncate" style="max-width:145px;font-size:.8rem;">{{ user.get_full_name|default:user.email }}</span><span class="small">{{ user.get_role_display }}</span></span>
+      <span class="min-w-0 flex-grow-1"><span class="sidebar-footer-name">{{ user.get_full_name|default:user.email }}</span><span class="small">{{ user.get_role_display }}</span></span>
       <form method="post" action="{% url 'logout' %}" class="ms-auto mb-0">
         {% csrf_token %}
         <button type="submit" class="btn btn-link text-white-50 p-0 border-0" aria-label="Sign out"><i class="bi bi-box-arrow-right"></i></button>

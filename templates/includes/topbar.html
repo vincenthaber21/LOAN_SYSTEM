@@ -1,18 +1,18 @@
 <header class="topbar">
-  <div class="d-flex align-items-center gap-3">
-    <button class="btn btn-light d-lg-none px-2" data-sidebar-toggle aria-label="Open navigation" aria-expanded="false"><i class="bi bi-list fs-5"></i></button>
-    <div><div class="topbar-title">{% block topbar_title %}Good morning, {{ user.first_name|default:"there" }}{% endblock %}</div><div class="topbar-context">{% block topbar_context %}A clear view of what needs your attention.{% endblock %}</div></div>
+  <div class="d-flex align-items-center gap-2 gap-sm-3 min-w-0">
+    <button class="btn btn-light d-lg-none px-2 flex-shrink-0" type="button" data-sidebar-toggle aria-label="Open navigation" aria-expanded="false"><i class="bi bi-list fs-5"></i></button>
+    <div class="min-w-0"><div class="topbar-title">{% block topbar_title %}Good morning, {{ user.first_name|default:"there" }}{% endblock %}</div><div class="topbar-context">{% block topbar_context %}A clear view of what needs your attention.{% endblock %}</div></div>
   </div>
   <div class="topbar-actions">
-    <span class="d-none d-sm-inline text-muted small">{% now "l, j F Y" %}</span>
-    <a class="btn btn-light notification-bell{% if unread_notification_count %} has-unread{% endif %}" href="{% url 'notifications' %}" aria-label="Notifications{% if unread_notification_count %} ({{ unread_notification_count }} unread){% endif %}">
+    <span class="d-none d-md-inline text-muted small text-nowrap">{% now "l, j F Y" %}</span>
+    <a class="btn btn-light notification-bell flex-shrink-0{% if unread_notification_count %} has-unread{% endif %}" href="{% url 'notifications' %}" aria-label="Notifications{% if unread_notification_count %} ({{ unread_notification_count }} unread){% endif %}">
       <i class="bi bi-bell"></i>
       {% if unread_notification_count %}
       <span class="notification-bubble" aria-hidden="true">{% if unread_notification_count > 9 %}9+{% else %}{{ unread_notification_count }}{% endif %}</span>
       {% endif %}
     </a>
     <div class="dropdown">
-      <button class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><span class="avatar" style="width:25px;height:25px;font-size:.6rem;">{{ user_initials|default:"HL" }}</span><span class="d-none d-lg-inline ms-1">{{ user.first_name|default:"Account" }}</span></button>
+      <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><span class="avatar" style="width:25px;height:25px;font-size:.6rem;">{{ user_initials|default:"HL" }}</span><span class="d-none d-lg-inline ms-1 text-truncate" style="max-width:7rem;">{{ user.first_name|default:"Account" }}</span></button>
       <ul class="dropdown-menu dropdown-menu-end">
         <li><a class="dropdown-item" href="{% url 'profile' %}"><i class="bi bi-person me-2"></i>Profile & settings</a></li>
         <li><hr class="dropdown-divider"></li>
