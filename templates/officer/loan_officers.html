@@ -55,16 +55,16 @@
 
 <div class="card-soft fade-up-3">
   <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
+    <table class="table table-hover align-middle data-table mb-0">
       <thead>
         <tr>
           <th>Loan officer</th>
-          <th>Username</th>
-          <th>Phone</th>
-          <th>Applications reviewed</th>
-          <th>Joined</th>
-          <th>Account status</th>
-          <th></th>
+          <th class="d-none d-md-table-cell">Username</th>
+          <th class="d-none d-lg-table-cell">Phone</th>
+          <th class="d-none d-xl-table-cell num">Reviewed</th>
+          <th class="d-none d-xl-table-cell">Joined</th>
+          <th>Status</th>
+          <th class="table-actions"><span class="visually-hidden">Actions</span></th>
         </tr>
       </thead>
       <tbody>
@@ -74,19 +74,21 @@
               <span class="person">
                 <span class="avatar">{{ officer.initials }}</span>
                 <span>
-                  <span class="person-name d-block">{{ officer.display_name }}</span>
+                  <span class="person-name">{{ officer.display_name }}</span>
                   <span class="person-sub">{{ officer.email }}</span>
                 </span>
               </span>
             </td>
-            <td class="text-muted">{{ officer.username }}</td>
-            <td class="text-muted">{{ officer.phone|default:"—" }}</td>
-            <td><strong>{{ officer.applications_reviewed }}</strong> application{{ officer.applications_reviewed|pluralize }}</td>
-            <td class="text-muted">{{ officer.joined_at }}</td>
+            <td class="text-muted d-none d-md-table-cell text-nowrap">{{ officer.username }}</td>
+            <td class="text-muted d-none d-lg-table-cell text-nowrap">{{ officer.phone|default:"—" }}</td>
+            <td class="d-none d-xl-table-cell num"><strong>{{ officer.applications_reviewed }}</strong></td>
+            <td class="text-muted d-none d-xl-table-cell text-nowrap">{{ officer.joined_at }}</td>
             <td>{% include "includes/status_badge.html" with status=officer.status label=officer.status_label %}</td>
-            <td class="text-nowrap">
-              <a class="btn btn-sm btn-light" href="{% url 'officer_activity_log' officer_id=officer.id %}"><i class="bi bi-clock-history me-1"></i>Activity log</a>
-              <a class="btn btn-sm btn-outline-primary" href="{% url 'edit_officer' officer_id=officer.id %}"><i class="bi bi-pencil"></i></a>
+            <td class="table-actions">
+              <div class="table-row-actions">
+                <a class="btn btn-sm btn-light" href="{% url 'officer_activity_log' officer_id=officer.id %}"><i class="bi bi-clock-history me-1"></i><span class="d-none d-sm-inline">Activity</span></a>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'edit_officer' officer_id=officer.id %}" aria-label="Edit officer"><i class="bi bi-pencil"></i></a>
+              </div>
             </td>
           </tr>
         {% empty %}

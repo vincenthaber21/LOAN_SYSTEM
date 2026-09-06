@@ -4,7 +4,119 @@
 {% block topbar_title %}Applications queue{% endblock %}
 {% block topbar_context %}Review each request with context, not clutter.{% endblock %}
 {% block content %}
-<div class="page-heading"><div><div class="eyebrow">Officer workspace</div><h1>Applications.</h1><p>{{ result_count|default:"0" }} request{{ result_count|pluralize }} in view · sorted by {{ sort_label|default:"recent activity" }}.</p></div><div class="d-flex gap-2"><a class="btn btn-primary" href="{% url 'officer_apply_loan' %}"><i class="bi bi-plus-lg me-1"></i>New application</a><a class="btn btn-outline-primary csv-link" href="{% url 'export_applications_csv' %}?q={{ filters.q }}&status={{ filters.status }}&product={{ filters.product }}"><i class="bi bi-download"></i>Export CSV</a></div></div>
-<form class="filter-bar mb-4" method="get" action="{% url 'applications_queue' %}"><div class="row g-2 align-items-end"><div class="col-lg-5"><label class="form-label" for="q">Search applications</label><div class="input-group"><span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span><input class="form-control border-start-0" id="q" name="q" value="{{ filters.q|default:'' }}" placeholder="Name, email, or reference"></div></div><div class="col-sm-4 col-lg-2"><label class="form-label" for="status">Status</label><select class="form-select" id="status" name="status"><option value="">All statuses</option>{% for option in status_filters %}<option value="{{ option.value }}" {% if filters.status == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div><div class="col-sm-4 col-lg-2"><label class="form-label" for="product">Product</label><select class="form-select" id="product" name="product"><option value="">All products</option>{% for product in products %}<option value="{{ product.value }}">{{ product.label }}</option>{% endfor %}</select></div><div class="col-sm-4 col-lg-2"><label class="form-label" for="sort">Sort by</label><select class="form-select" id="sort" name="sort">{% for option in sort_options %}<option value="{{ option.value }}" {% if filters.sort == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div><div class="col-lg-1"><button class="btn btn-primary w-100" type="submit">Filter</button></div></div></form>
-<div class="card-soft"><div class="table-responsive"><table class="table table-hover"><thead><tr><th>Applicant</th><th>Loan request</th><th>Income</th><th>Applied</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>{% for application in applications %}<tr><td><a class="person" href="{% url 'application_review' application_id=application.id %}"><span class="avatar">{{ application.initials }}</span><span><span class="person-name d-block">{{ application.borrower_name }}</span><span class="person-sub">{{ application.email }}</span></span></a></td><td><strong>{{ application.amount|peso }}</strong><span class="person-sub d-block">{{ application.product_name }} · {{ application.term_months }} mo</span></td><td>{{ application.monthly_income|peso }}</td><td>{{ application.submitted_at }}</td><td><span class="person-sub">{{ application.assigned_officer|default:"Unassigned" }}</span></td><td>{% include "includes/status_badge.html" with status=application.status label=application.status_label %}</td><td class="text-nowrap"><a class="btn btn-sm btn-light" href="{% url 'application_review' application_id=application.id %}"><i class="bi bi-arrow-up-right"></i><span class="visually-hidden">Open {{ application.reference }}</span></a>{% if request.user.is_admin %}<form class="d-inline" method="post" action="{% url 'application_delete' application_id=application.id %}" onsubmit="return confirm('Delete application {{ application.reference }} for {{ application.borrower_name }}? This cannot be undone.');">{% csrf_token %}<button type="submit" class="btn btn-sm btn-outline-danger ms-1"><i class="bi bi-trash"></i><span class="visually-hidden">Delete {{ application.reference }}</span></button></form>{% endif %}</td></tr>{% empty %}<tr><td colspan="7">{% include "includes/empty_state.html" with icon="bi-inbox" title="No applications match those filters" description="Try widening your search or checking a different status." %}</td></tr>{% endfor %}</tbody></table></div>{% if is_paginated %}<div class="card-body border-top"><nav aria-label="Application pages"><ul class="pagination pagination-sm mb-0 justify-content-end">{% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{{ query_string }}">Previous</a></li>{% endif %}<li class="page-item active"><span class="page-link">{{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>{% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{{ query_string }}">Next</a></li>{% endif %}</ul></nav></div>{% endif %}</div>
+<div class="page-heading">
+  <div>
+    <div class="eyebrow">Officer workspace</div>
+    <h1>Applications.</h1>
+    <p>{{ result_count|default:"0" }} request{{ result_count|pluralize }} in view · sorted by {{ sort_label|default:"recent activity" }}.</p>
+  </div>
+  <div class="page-heading-actions">
+    <a class="btn btn-primary" href="{% url 'officer_apply_loan' %}"><i class="bi bi-plus-lg me-1"></i>New application</a>
+    <a class="btn btn-outline-primary csv-link" href="{% url 'export_applications_csv' %}?q={{ filters.q }}&status={{ filters.status }}&product={{ filters.product }}"><i class="bi bi-download"></i>Export CSV</a>
+  </div>
+</div>
+<form class="filter-bar mb-4" method="get" action="{% url 'applications_queue' %}">
+  <div class="row g-2 align-items-end">
+    <div class="col-lg-5">
+      <label class="form-label" for="q">Search applications</label>
+      <div class="input-group">
+        <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+        <input class="form-control border-start-0" id="q" name="q" value="{{ filters.q|default:'' }}" placeholder="Name, email, or reference">
+      </div>
+    </div>
+    <div class="col-sm-4 col-lg-2">
+      <label class="form-label" for="status">Status</label>
+      <select class="form-select" id="status" name="status">
+        <option value="">All statuses</option>
+        {% for option in status_filters %}
+        <option value="{{ option.value }}" {% if filters.status == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-4 col-lg-2">
+      <label class="form-label" for="product">Product</label>
+      <select class="form-select" id="product" name="product">
+        <option value="">All products</option>
+        {% for product in products %}
+        <option value="{{ product.value }}" {% if filters.product == product.value %}selected{% endif %}>{{ product.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-4 col-lg-2">
+      <label class="form-label" for="sort">Sort by</label>
+      <select class="form-select" id="sort" name="sort">
+        {% for option in sort_options %}
+        <option value="{{ option.value }}" {% if filters.sort == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-lg-1"><button class="btn btn-primary w-100" type="submit">Filter</button></div>
+  </div>
+</form>
+<div class="card-soft">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle data-table mb-0">
+      <thead>
+        <tr>
+          <th>Applicant</th>
+          <th>Loan request</th>
+          <th class="d-none d-xl-table-cell num">Income</th>
+          <th class="d-none d-lg-table-cell">Applied</th>
+          <th class="d-none d-md-table-cell">Owner</th>
+          <th>Status</th>
+          <th class="table-actions"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for application in applications %}
+        <tr>
+          <td>
+            <a class="person" href="{% url 'application_review' application_id=application.id %}">
+              <span class="avatar">{{ application.initials }}</span>
+              <span>
+                <span class="person-name">{{ application.borrower_name }}</span>
+                <span class="person-sub">{{ application.email }}</span>
+              </span>
+            </a>
+          </td>
+          <td>
+            <strong class="text-nowrap">{{ application.amount|peso }}</strong>
+            <span class="person-sub d-block text-truncate" style="max-width:160px;">{{ application.product_name }} · {{ application.term_months }} mo</span>
+          </td>
+          <td class="d-none d-xl-table-cell num text-nowrap">{{ application.monthly_income|peso }}</td>
+          <td class="d-none d-lg-table-cell text-nowrap">{{ application.submitted_at }}</td>
+          <td class="d-none d-md-table-cell"><span class="person-sub">{{ application.assigned_officer|default:"Unassigned" }}</span></td>
+          <td>{% include "includes/status_badge.html" with status=application.status label=application.status_label %}</td>
+          <td class="table-actions">
+            <div class="table-row-actions">
+              <a class="btn btn-sm btn-light" href="{% url 'application_review' application_id=application.id %}"><i class="bi bi-arrow-up-right"></i><span class="visually-hidden">Open {{ application.reference }}</span></a>
+              {% if request.user.is_admin %}
+              <form method="post" action="{% url 'application_delete' application_id=application.id %}" onsubmit="return confirm('Delete application {{ application.reference }} for {{ application.borrower_name }}? This cannot be undone.');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i><span class="visually-hidden">Delete {{ application.reference }}</span></button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7">{% include "includes/empty_state.html" with icon="bi-inbox" title="No applications match those filters" description="Try widening your search or checking a different status." %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if is_paginated %}
+  <div class="card-body border-top">
+    <nav aria-label="Application pages">
+      <ul class="pagination pagination-sm mb-0 justify-content-end">
+        {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{{ query_string }}">Previous</a></li>{% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{{ query_string }}">Next</a></li>{% endif %}
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+</div>
 {% endblock %}

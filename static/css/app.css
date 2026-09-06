@@ -350,13 +350,97 @@ body.auth-body .app-footer { background: var(--paper); }
 .status-draft, .status-upcoming, .status-closed, .status-inactive, .status-suspended, .status-terminated { background: #e7efe8; color: #527058; }
 .status-declined, .status-overdue, .status-error, .status-rejected, .status-defaulted { background: #f8e1df; color: #994a4c; }
 .status-neutral { background: #e9ece8; color: #62716a; }
-.table { --bs-table-bg: transparent; color: var(--ink); margin-bottom: 0; }
-.table thead th { color: var(--ink-soft); font-size: .68rem; font-weight: 700; letter-spacing: .09em; padding: 13px 15px; text-transform: uppercase; border-bottom-color: var(--line); white-space: nowrap; }
-.table tbody td { border-bottom-color: #e5eee6; padding: 16px 15px; vertical-align: middle; font-size: .84rem; }
+.table { --bs-table-bg: transparent; color: var(--ink); margin-bottom: 0; width: 100%; }
+.table thead th {
+  color: var(--ink-soft);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .09em;
+  padding: 13px 15px;
+  text-transform: uppercase;
+  border-bottom-color: var(--line);
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.table tbody td {
+  border-bottom-color: #e5eee6;
+  padding: 16px 15px;
+  vertical-align: middle;
+  font-size: .84rem;
+}
 .table tbody tr:last-child td { border-bottom: 0; }
 .table-hover tbody tr { transition: background .2s; }
 .table-hover tbody tr:hover { --bs-table-hover-bg: #f1f7f2; }
-.table-responsive { border-radius: 10px; }
+.table-responsive {
+  border-radius: 10px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+.card-soft > .table-responsive {
+  border-radius: calc(var(--radius) - 1px);
+}
+/* Dense directory / queue tables — stay usable on laptop-width hosts */
+.data-table {
+  --data-table-pad-x: 12px;
+  margin-bottom: 0;
+}
+.data-table thead th,
+.data-table tbody td {
+  padding-left: var(--data-table-pad-x);
+  padding-right: var(--data-table-pad-x);
+}
+.data-table thead th {
+  letter-spacing: .06em;
+  font-size: .64rem;
+}
+.data-table tbody td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-size: .82rem;
+}
+.data-table .person {
+  max-width: 220px;
+  min-width: 0;
+}
+.data-table .person > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+}
+.data-table .person-name,
+.data-table .person-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+  display: block;
+}
+.data-table .cell-note {
+  color: var(--ink-soft);
+  font-size: .7rem;
+  margin-top: 2px;
+  line-height: 1.3;
+  max-width: 140px;
+}
+.data-table .table-actions {
+  white-space: nowrap;
+  text-align: right;
+  width: 1%;
+}
+.data-table .table-actions .table-row-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+.data-table .badge {
+  white-space: nowrap;
+}
+.data-table td.num,
+.data-table th.num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .table-row-actions {
   display: inline-flex;
   flex-wrap: wrap;
@@ -702,10 +786,16 @@ body.auth-body .app-footer { background: var(--paper); }
   .nav-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .nav-tabs .nav-link { white-space: nowrap; }
   .table-responsive {
-    margin-left: -2px;
-    margin-right: -2px;
+    margin-left: 0;
+    margin-right: 0;
     -webkit-overflow-scrolling: touch;
   }
+  .data-table {
+    --data-table-pad-x: 10px;
+  }
+  .data-table .person { max-width: 180px; }
+  .data-table .person-name,
+  .data-table .person-sub { max-width: 140px; }
   .card-soft .card-header {
     display: flex;
     flex-wrap: wrap;

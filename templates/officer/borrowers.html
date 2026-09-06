@@ -11,7 +11,7 @@
     <h1>Members with loans.</h1>
     <p>{{ member_count }} member{{ member_count|pluralize }} with active loan{{ member_count|pluralize }} · {{ total_active_loans }} active loan{{ total_active_loans|pluralize }} · {{ total_outstanding|peso }} outstanding.</p>
   </div>
-  <div class="d-flex gap-2">
+  <div class="page-heading-actions">
     <a class="btn btn-outline-secondary" href="{% url 'all_members' %}"><i class="bi bi-people me-1"></i>All members</a>
     <a class="btn btn-primary" href="{% url 'add_member' %}"><i class="bi bi-person-plus me-1"></i>Add member</a>
     <a class="btn btn-outline-primary csv-link" href="{% url 'export_borrowers_csv' %}?q={{ filters.q }}&status={{ filters.status }}"><i class="bi bi-download"></i>Export CSV</a>
@@ -66,18 +66,18 @@
 
 <div class="card-soft fade-up-3">
   <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
+    <table class="table table-hover align-middle data-table mb-0">
       <thead>
         <tr>
           <th>Member</th>
-          <th>Member ID</th>
-          <th>Loans</th>
-          <th>Credit score</th>
-          <th>Loan availability</th>
-          <th>Outstanding</th>
-          <th>Last activity</th>
-          <th>Account status</th>
-          <th></th>
+          <th class="d-none d-md-table-cell">Member ID</th>
+          <th class="d-none d-lg-table-cell num">Loans</th>
+          <th class="d-none d-xl-table-cell num">Credit score</th>
+          <th class="d-none d-lg-table-cell">Availability</th>
+          <th class="num">Outstanding</th>
+          <th class="d-none d-xl-table-cell">Last activity</th>
+          <th>Status</th>
+          <th class="table-actions"><span class="visually-hidden">Actions</span></th>
         </tr>
       </thead>
       <tbody>
@@ -87,25 +87,26 @@
               <a class="person" href="{% url 'borrower_detail' borrower_id=member.id %}">
                 <span class="avatar">{{ member.initials }}</span>
                 <span>
-                  <span class="person-name d-block">{{ member.full_name|default:member.email }}</span>
+                  <span class="person-name">{{ member.full_name|default:member.email }}</span>
                   <span class="person-sub">{{ member.email }}</span>
                 </span>
               </a>
             </td>
-            <td class="text-muted">{{ member.reference }}</td>
-            <td>
-              <strong>{{ member.active_loan_count }}</strong> loan{{ member.active_loan_count|pluralize }}
+            <td class="text-muted d-none d-md-table-cell text-nowrap">{{ member.reference }}</td>
+            <td class="d-none d-lg-table-cell num">
+              <strong>{{ member.active_loan_count }}</strong>
             </td>
-            <td>
+            <td class="d-none d-xl-table-cell num" title="Starts at 100 · −0.1 per late month">
               <strong>{{ member.credit_score|credit_score }}</strong>
-              <span class="text-muted small d-block">Starts at 100 · −0.1 per late month</span>
             </td>
-            <td>{% include "includes/status_badge.html" with status=member.loan_availability_status label=member.loan_availability_label %}</td>
-            <td>{{ member.total_balance|peso }}</td>
-            <td class="text-muted">{{ member.last_activity }}</td>
+            <td class="d-none d-lg-table-cell">{% include "includes/status_badge.html" with status=member.loan_availability_status label=member.loan_availability_label %}</td>
+            <td class="num text-nowrap">{{ member.total_balance|peso }}</td>
+            <td class="text-muted d-none d-xl-table-cell text-nowrap">{{ member.last_activity }}</td>
             <td>{% include "includes/status_badge.html" with status=member.account_status label=member.account_status|title %}</td>
-            <td>
-              <a class="btn btn-sm btn-light" href="{% url 'borrower_detail' borrower_id=member.id %}">{% if member.active_loan_count > 1 %}View loans{% else %}View loan{% endif %}</a>
+            <td class="table-actions">
+              <div class="table-row-actions">
+                <a class="btn btn-sm btn-light" href="{% url 'borrower_detail' borrower_id=member.id %}">{% if member.active_loan_count > 1 %}View loans{% else %}View loan{% endif %}</a>
+              </div>
             </td>
           </tr>
         {% empty %}

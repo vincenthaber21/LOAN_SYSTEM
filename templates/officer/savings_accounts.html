@@ -73,18 +73,38 @@
   <div class="card-body p-0">
     {% if accounts %}
     <div class="table-responsive">
-      <table class="table table-hover align-middle mb-0">
-        <thead><tr><th>Account</th><th>Member</th><th>Product</th><th>Status</th><th class="text-end">Balance</th><th class="text-end">Interest earned</th><th></th></tr></thead>
+      <table class="table table-hover align-middle data-table mb-0">
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Member</th>
+            <th class="d-none d-lg-table-cell">Product</th>
+            <th>Status</th>
+            <th class="text-end num">Balance</th>
+            <th class="text-end num d-none d-md-table-cell">Interest</th>
+            <th class="table-actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
         <tbody>
           {% for account in accounts %}
           <tr>
-            <td><strong>{{ account.reference }}</strong><div class="text-muted small">{{ account.opened_at|date:"M d, Y" }}</div></td>
-            <td>{{ account.member.display_name }}<div class="text-muted small">{{ account.member.email }}</div></td>
-            <td>{{ account.product_name }}</td>
+            <td>
+              <strong class="text-nowrap">{{ account.reference }}</strong>
+              <div class="text-muted small">{{ account.opened_at|date:"M d, Y" }}</div>
+            </td>
+            <td>
+              <span class="person-name d-block text-truncate" style="max-width:160px;">{{ account.member.display_name }}</span>
+              <div class="text-muted small text-truncate" style="max-width:160px;">{{ account.member.email }}</div>
+            </td>
+            <td class="d-none d-lg-table-cell">{{ account.product_name }}</td>
             <td><span class="badge status-{{ account.status }}">{{ account.status_label }}</span></td>
-            <td class="text-end fw-semibold">{{ account.balance|peso }}</td>
-            <td class="text-end fw-semibold text-success">{{ account.total_interest_earned|peso }}</td>
-            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{% url 'officer_savings_account_detail' account_id=account.id %}">Manage</a></td>
+            <td class="text-end fw-semibold num text-nowrap">{{ account.balance|peso }}</td>
+            <td class="text-end fw-semibold text-success num text-nowrap d-none d-md-table-cell">{{ account.total_interest_earned|peso }}</td>
+            <td class="table-actions">
+              <div class="table-row-actions">
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_savings_account_detail' account_id=account.id %}">Manage</a>
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
