@@ -140,9 +140,11 @@ class Command(BaseCommand):
             },
         )
 
+        from mutual_aid.services import resolve_kap_mutual_aid_plan
         from savings.services import resolve_membership_savings_product
 
         resolve_membership_savings_product()
+        resolve_kap_mutual_aid_plan()
         regular_savings, _ = SavingsProduct.objects.update_or_create(
             name="Regular Savings",
             defaults={

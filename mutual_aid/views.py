@@ -27,6 +27,7 @@ from .services import (
     enroll_member,
     reactivate_membership,
     record_contribution,
+    resolve_kap_mutual_aid_plan,
     review_claim,
     submit_claim,
     suspend_membership,
@@ -249,6 +250,8 @@ def officer_mutual_aid_membership_detail(request, membership_id):
 @login_required
 @role_required("admin")
 def officer_mutual_aid_plans(request):
+    # Ensure the compulsory KAPAMILYA MUTUAL AID PROGRAM plan always exists.
+    resolve_kap_mutual_aid_plan()
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
     qs = MutualAidPlan.objects.annotate(memberships_count=Count("memberships"))
