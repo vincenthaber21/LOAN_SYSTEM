@@ -77,6 +77,15 @@ class OfficerEnrollForm(forms.Form):
         self.fields["member"].queryset = User.member_accounts().filter(
             is_active=True
         ).order_by("full_name", "username")
+        if not self.is_bound and not self.initial.get("plan"):
+            from .services import KAP_MUTUAL_AID_PLAN_NAME
+
+            default = MutualAidPlan.objects.filter(
+                name__iexact=KAP_MUTUAL_AID_PLAN_NAME,
+                is_active=True,
+            ).first()
+            if default:
+                self.fields["plan"].initial = default.pk
 
     def clean(self):
         cleaned = super().clean()

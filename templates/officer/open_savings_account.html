@@ -157,19 +157,32 @@
   var depositMinError = document.getElementById('depositMinError');
   var openAccountBtn = document.getElementById('openAccountBtn');
   var availableProductsToken = 0;
+  var defaultProductId = '{{ form.product.value|default:"" }}';
 
   function renderProductOptions(products, selectedId, memberInactive, blockedProductCount) {
     var currentValue = selectedId != null ? String(selectedId) : productSelect.value;
+    if (!currentValue && defaultProductId) currentValue = String(defaultProductId);
     productSelect.innerHTML = '';
     productSelect.appendChild(new Option('Select product…', ''));
+    var matched = false;
     products.forEach(function (product) {
       var opt = new Option(product.label, product.id);
       opt.dataset.minDeposit = product.min_deposit;
       opt.dataset.minBalance = product.min_balance;
       opt.dataset.rate = product.rate;
-      if (String(product.id) === currentValue) opt.selected = true;
+      if (String(product.id) === currentValue) {
+        opt.selected = true;
+        matched = true;
+      }
       productSelect.appendChild(opt);
     });
+    if (!matched && defaultProductId) {
+      products.forEach(function (product) {
+        if (String(product.id) === String(defaultProductId)) {
+          productSelect.value = String(defaultProductId);
+        }
+      });
+    }
     updateProductHint();
     validateDeposit();
     if (memberInactive) {
@@ -303,14 +316,14 @@
       placeholder: 'Type a name or email to search…',
       sortField: { field: 'text', direction: 'asc' },
       onChange: function () {
-        refreshAvailableProducts(null);
+        refreshAvailableProducts(defaultProductId || null);
       },
     });
   } else if (memberSelect) {
-    memberSelect.addEventListener('change', function () { refreshAvailableProducts(null); });
+    memberSelect.addEventListener('change', function () { refreshAvailableProducts(defaultProductId || null); });
   }
 
-  refreshAvailableProducts(productSelect ? productSelect.value : null);
+  refreshAvailableProducts(productSelect && productSelect.value ? productSelect.value : (defaultProductId || null));
 })();
 </script>
 {% endblock %}

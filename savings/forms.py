@@ -63,6 +63,18 @@ class OpenAccountForm(forms.Form):
         label="Initial deposit (optional)",
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.is_bound and not self.initial.get("product"):
+            from .services import MEMBERSHIP_SAVINGS_PRODUCT_NAME
+
+            default = SavingsProduct.objects.filter(
+                name__iexact=MEMBERSHIP_SAVINGS_PRODUCT_NAME,
+                is_active=True,
+            ).first()
+            if default:
+                self.fields["product"].initial = default.pk
+
     def clean(self):
         cleaned = super().clean()
         product = cleaned.get("product")
@@ -211,6 +223,15 @@ class OfficerOpenAccountForm(forms.Form):
 
         super().__init__(*args, **kwargs)
         self.fields["member"].queryset = User.member_accounts().filter(is_active=True).order_by("full_name", "username")
+        if not self.is_bound and not self.initial.get("product"):
+            from .services import MEMBERSHIP_SAVINGS_PRODUCT_NAME
+
+            default = SavingsProduct.objects.filter(
+                name__iexact=MEMBERSHIP_SAVINGS_PRODUCT_NAME,
+                is_active=True,
+            ).first()
+            if default:
+                self.fields["product"].initial = default.pk
 
     def clean(self):
         cleaned = super().clean()

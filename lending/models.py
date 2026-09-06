@@ -1024,8 +1024,13 @@ class Document(models.Model):
 class Features(models.Model):
     """Singleton site branding — store name, tagline, and logo."""
 
-    store_name = models.CharField(max_length=120, default="Harborline")
-    tagline = models.CharField(max_length=120, default="Lending workspace", blank=True)
+    DEFAULT_STORE_NAME = "KAP"
+    DEFAULT_TAGLINE = "Kaakibat ang Pag-unlad Microfinancing Inc."
+    DEFAULT_LOGO_STATIC = "branding/kap_logo.png"
+    DEFAULT_LOGO_MEDIA = "branding/KAP_logo_transparent_1_csXgoGL.png"
+
+    store_name = models.CharField(max_length=120, default=DEFAULT_STORE_NAME)
+    tagline = models.CharField(max_length=120, default=DEFAULT_TAGLINE, blank=True)
     logo = models.ImageField(upload_to="branding/", blank=True, null=True)
 
     class Meta:
@@ -1047,6 +1052,57 @@ class Features(models.Model):
         pass
 
     @classmethod
-    def load(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+    def _ensure_default_logo(cls, obj):
+        """Copy the bundled KAP logo into media when Features has no logo file."""
+        from pathlib import Path
+        from shutil import copyfile
+
+        from django.conf import settings
+
+        if obj.logo and obj.logo.name:
+            media_path = Path(settings.MEDIA_ROOT) / obj.logo.name
+            if media_path.is_file():
+                return obj
+
+        media_root = Path(settings.MEDIA_ROOT)
+        target = media_root / cls.DEFAULT_LOGO_MEDIA
+        if not target.is_file():
+            source = None
+            for candidate in (
+                Path(settings.BASE_DIR) / "static" / cls.DEFAULT_LOGO_STATIC,
+                *(Path(root) / cls.DEFAULT_LOGO_STATIC for root in getattr(settings, "STATICFILES_DIRS", ())),
+            ):
+                if candidate.is_file():
+                    source = candidate
+                    break
+            if source is None:
+                return obj
+            target.parent.mkdir(parents=True, exist_ok=True)
+            copyfile(source, target)
+
+        if obj.logo.name != cls.DEFAULT_LOGO_MEDIA:
+            obj.logo.name = cls.DEFAULT_LOGO_MEDIA
+            obj.save(update_fields=["logo"])
         return obj
+
+    @classmethod
+    def load(cls):
+        obj, created = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                "store_name": cls.DEFAULT_STORE_NAME,
+                "tagline": cls.DEFAULT_TAGLINE,
+            },
+        )
+        update_fields = []
+        if created or obj.store_name in ("", "Harborline"):
+            if obj.store_name != cls.DEFAULT_STORE_NAME:
+                obj.store_name = cls.DEFAULT_STORE_NAME
+                update_fields.append("store_name")
+        if created or obj.tagline in ("", "Lending workspace"):
+            if obj.tagline != cls.DEFAULT_TAGLINE:
+                obj.tagline = cls.DEFAULT_TAGLINE
+                update_fields.append("tagline")
+        if update_fields:
+            obj.save(update_fields=update_fields)
+        return cls._ensure_default_logo(obj)

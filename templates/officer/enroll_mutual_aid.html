@@ -131,6 +131,7 @@
   var enrollMemberBtn = document.getElementById('enrollMemberBtn');
   var memberTomSelect = null;
   var availablePlansToken = 0;
+  var defaultPlanId = '{{ form.plan.value|default:"" }}';
 
   function getMemberId() {
     if (memberTomSelect) {
@@ -141,6 +142,7 @@
 
   function renderPlanOptions(plans, selectedId, memberInactive, blockedPlanCount, memberId) {
     var currentValue = selectedId != null ? String(selectedId) : planSelect.value;
+    if (!currentValue && defaultPlanId) currentValue = String(defaultPlanId);
     var availablePlans = plans.filter(function (plan) { return plan.available; });
     planSelect.innerHTML = '';
     planSelect.appendChild(new Option('Select plan…', ''));
@@ -152,7 +154,10 @@
       planSelect.appendChild(opt);
     });
     if (!availablePlans.some(function (plan) { return String(plan.id) === currentValue; })) {
-      planSelect.value = '';
+      var fallback = availablePlans.find(function (plan) {
+        return String(plan.id) === String(defaultPlanId);
+      });
+      planSelect.value = fallback ? String(fallback.id) : '';
     }
     if (memberInactive) {
       planAvailabilityHint.textContent = 'This member\'s account is inactive. Only active members can be enrolled.';
@@ -207,15 +212,20 @@
       placeholder: 'Type a name or email to search…',
       sortField: { field: 'text', direction: 'asc' },
       onChange: function (value) {
-        refreshAvailablePlans(null, value);
+        refreshAvailablePlans(defaultPlanId || null, value);
       },
     });
   } else if (memberSelect) {
-    memberSelect.addEventListener('change', function () { refreshAvailablePlans(null, memberSelect.value); });
+    memberSelect.addEventListener('change', function () {
+      refreshAvailablePlans(defaultPlanId || null, memberSelect.value);
+    });
   }
 
   if (planSelect) {
-    refreshAvailablePlans(planSelect.value, getMemberId());
+    refreshAvailablePlans(
+      planSelect.value || defaultPlanId || null,
+      getMemberId()
+    );
   }
 })();
 </script>

@@ -78,7 +78,7 @@ def product_context(request):
         "is_officer": is_officer,
         "is_admin": is_admin,
         "is_manager": is_manager,
-        "user_initials": user.initials if user.is_authenticated else "HL",
+        "user_initials": user.initials if user.is_authenticated else "KAP",
         "active_nav": active_nav,
         "unread_notification_count": unread_notification_count,
         "pending_application_count": (
