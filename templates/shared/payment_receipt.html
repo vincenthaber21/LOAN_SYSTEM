@@ -12,7 +12,14 @@
   }
   .receipt-card { max-width: 640px; margin: 0 auto; }
   .receipt-brand { display: flex; align-items: center; gap: .75rem; }
-  .receipt-mark { width: 44px; height: 44px; border-radius: 12px; background: var(--bs-primary, #0d6efd); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; }
+  .receipt-mark {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: var(--bs-primary, #0d6efd); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.25rem; overflow: hidden; flex-shrink: 0;
+  }
+  .receipt-mark-has-logo { background: transparent; }
+  .receipt-mark .receipt-logo { width: 100%; height: 100%; object-fit: contain; }
   .receipt-meta { text-align: right; }
   .receipt-amount { font-size: 2.25rem; font-weight: 700; }
   .receipt-row { display: flex; justify-content: space-between; padding: .5rem 0; border-bottom: 1px dashed var(--bs-border-color, #dee2e6); }
@@ -34,9 +41,15 @@
 <div class="receipt-card card-soft p-4 p-md-5">
   <div class="d-flex justify-content-between align-items-start mb-4">
     <div class="receipt-brand">
-      <span class="receipt-mark"><i class="bi bi-water"></i></span>
+      <span class="receipt-mark{% if site_logo %} receipt-mark-has-logo{% endif %}">
+        {% if site_logo %}
+          <img src="{{ site_logo.url }}" alt="{{ app_name }}" class="receipt-logo">
+        {% else %}
+          <i class="bi bi-water"></i>
+        {% endif %}
+      </span>
       <div>
-        <div class="fw-bold fs-5">{{ app_name }} Lending</div>
+        <div class="fw-bold fs-5">{{ app_name }}{% if "Lending" not in app_name %} Lending{% endif %}</div>
         <div class="text-muted small">Official payment receipt</div>
       </div>
     </div>

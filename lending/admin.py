@@ -17,6 +17,7 @@ from .forms import DisbursementAdminForm
 from .services import normalize_credit_score
 from .models import (
     Administrator,
+    CharacterReference,
     Disbursement,
     Document,
     Features,
@@ -25,7 +26,9 @@ from .models import (
     LoanApplication,
     LoanOfficer,
     LoanProduct,
+    Manager,
     Member,
+    Notification,
     Payment,
     User,
 )
@@ -33,11 +36,13 @@ from .models import (
 ROLE_CHANGELIST_URLNAME = {
     User.Role.MEMBER: "admin:lending_member_changelist",
     User.Role.OFFICER: "admin:lending_loanofficer_changelist",
+    User.Role.MANAGER: "admin:lending_manager_changelist",
     User.Role.ADMIN: "admin:lending_administrator_changelist",
 }
 ROLE_CHANGE_URLNAME = {
     User.Role.MEMBER: "admin:lending_member_change",
     User.Role.OFFICER: "admin:lending_loanofficer_change",
+    User.Role.MANAGER: "admin:lending_manager_change",
     User.Role.ADMIN: "admin:lending_administrator_change",
 }
 
@@ -126,7 +131,7 @@ class MemberAdmin(RoleScopedUserAdmin):
         (None, {"fields": ("username", "password")}),
         ("Profile", {"fields": PROFILE_FIELDS}),
         ("Credit standing", {
-            "description": "Starts at 100. Deducts 0.1 for each late payment.",
+            "description": "Starts at 100. Deducts 0.1 for each late loan month.",
             "fields": ("credit_score",),
         }),
         ("Contact", {"fields": ("email", "first_name", "last_name")}),
@@ -211,11 +216,16 @@ class AdministratorCreationForm(BaseUserCreationForm):
         role = self.cleaned_data["role"]
         user._role_explicit = True
         user.role = role
-        user.is_staff = role in (User.Role.OFFICER, User.Role.ADMIN)
+        user.is_staff = role in (User.Role.OFFICER, User.Role.MANAGER, User.Role.ADMIN)
         user.is_superuser = role == User.Role.ADMIN
         if commit:
             user.save()
         return user
+
+
+@admin.register(Manager)
+class ManagerAdmin(RoleScopedUserAdmin):
+    list_display = ("username", "full_name", "email", "phone", "is_staff", "is_active", "date_joined")
 
 
 @admin.register(Administrator)
@@ -276,14 +286,164 @@ class LoanProductAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         return obj.applications.count()
 
 
+class CharacterReferenceInline(admin.TabularInline):
+    model = CharacterReference
+    extra = 2
+    max_num = 2
+    fields = ("sort_order", "name", "address", "relationship", "contact_number")
+    ordering = ("sort_order", "id")
+
+
+class DocumentInline(admin.TabularInline):
+    model = Document
+    extra = 0
+    fields = ("doc_type", "file", "uploaded_at")
+    readonly_fields = ("uploaded_at",)
+
+
 @admin.register(LoanApplication)
 class LoanApplicationAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
-    list_display = ("reference", "borrower", "loan_product", "amount_requested", "status", "applied_on", "created_at")
-    list_filter = ("status", "payment_frequency", "created_at", "decision_date")
-    search_fields = ("borrower__email", "borrower__full_name", "borrower__username")
+    list_display = (
+        "reference",
+        "borrower_name",
+        "branch_name",
+        "application_type",
+        "amount_requested",
+        "loan_purpose",
+        "status",
+        "applied_on",
+    )
+    list_filter = (
+        "status",
+        "application_type",
+        "loan_purpose",
+        "payment_frequency",
+        "office_decision",
+        "created_at",
+    )
+    search_fields = (
+        "borrower__email",
+        "borrower__full_name",
+        "borrower__username",
+        "borrower_surname",
+        "borrower_first_name",
+        "form_ref_no",
+        "branch_name",
+        "business_name",
+    )
     actions = ("delete_selected",)
     readonly_fields = ("created_at",)
-    date_hierarchy = "created_at"
+    date_hierarchy = "applied_on"
+    inlines = (CharacterReferenceInline, DocumentInline)
+    autocomplete_fields = ("loan_product",)
+    raw_id_fields = ("borrower", "reviewed_by")
+    fieldsets = (
+        ("KAP Microfinance Loan Application", {
+            "fields": (
+                ("branch_name", "form_ref_no", "applied_on"),
+                ("application_type", "status"),
+                ("borrower_photo", "coborrower_photo"),
+            ),
+            "description": "Reminders: use capital letters where applicable. Put N/A in fields that do not apply.",
+        }),
+        ("Account link", {
+            "fields": ("borrower", "loan_product", "term_months", "reviewed_by", "created_at"),
+            "description": "System account and product used for disbursement and schedule generation.",
+        }),
+        ("Proposed plan payment", {
+            "fields": (
+                ("payment_frequency", "amount_requested"),
+                "loan_purpose",
+                "purpose",
+            ),
+            "description": "Pay daily / weekly / monthly. Amount requested and loan purpose from the KAP form.",
+        }),
+        ("Borrower information", {
+            "fields": (
+                ("borrower_surname", "borrower_first_name", "borrower_middle_name"),
+                "borrower_present_address",
+                ("borrower_municipality_city", "borrower_period_of_staying"),
+                "borrower_dwelling_ownership",
+                "borrower_permanent_address",
+                ("borrower_permanent_municipality_city", "borrower_tel_mobile"),
+                ("borrower_date_of_birth", "borrower_age"),
+                ("borrower_citizenship", "borrower_place_of_birth"),
+                ("borrower_gender", "borrower_civil_status"),
+                ("borrower_nationality", "borrower_occupation"),
+                "borrower_id_presented",
+                ("borrower_contact_network", "borrower_tin_sss"),
+                "borrower_email",
+                "borrower_spouse_name",
+            ),
+        }),
+        ("Co-borrower information", {
+            "fields": (
+                "coborrower_relationship",
+                ("coborrower_surname", "coborrower_first_name", "coborrower_middle_name"),
+                "coborrower_present_address",
+                ("coborrower_municipality_city", "coborrower_period_of_staying"),
+                "coborrower_dwelling_ownership",
+                "coborrower_permanent_address",
+                ("coborrower_permanent_municipality_city", "coborrower_tel_mobile"),
+                ("coborrower_date_of_birth", "coborrower_age"),
+                ("coborrower_citizenship", "coborrower_place_of_birth"),
+                ("coborrower_gender", "coborrower_civil_status"),
+                ("coborrower_nationality", "coborrower_occupation"),
+                "coborrower_id_presented",
+                ("coborrower_contact_network", "coborrower_tin_sss"),
+                "coborrower_email",
+                "coborrower_spouse_name",
+            ),
+            "classes": ("collapse",),
+        }),
+        ("Enterprise data (for new borrower)", {
+            "fields": (
+                ("primary_business", "business_name"),
+                "business_ownership",
+                "business_address",
+                ("reg_dti", "reg_barangay", "reg_mayor", "reg_bir", "reg_others"),
+                "reg_others_text",
+                ("years_in_operation", "persons_employed"),
+                ("additional_business_1_type", "additional_business_1_name"),
+                "additional_business_1_address",
+                ("additional_business_2_type", "additional_business_2_name"),
+                "additional_business_2_address",
+            ),
+            "classes": ("collapse",),
+        }),
+        ("Certification / signatures", {
+            "fields": (
+                ("borrower_signed_name", "borrower_signed_date", "borrower_signed_place"),
+                "borrower_signature",
+                ("coborrower_signed_name", "coborrower_signed_date", "coborrower_signed_place"),
+                "coborrower_signature",
+            ),
+            "classes": ("collapse",),
+        }),
+        ("Office use only — loan recommendation", {
+            "fields": (
+                ("recommended_loan_amount", "recommended_loan_period"),
+                ("recommended_by_name", "recommended_by_date"),
+                ("validated_by_name", "validated_by_date"),
+                ("hold_out_amount", "insurance_proposed"),
+            ),
+            "classes": ("collapse",),
+        }),
+        ("Office use only — loan approval", {
+            "fields": (
+                "office_decision",
+                ("branch_manager_name", "branch_manager_date"),
+                ("final_interest_rate", "final_term_months"),
+                "review_notes",
+                "decision_date",
+            ),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Borrower", ordering="borrower_surname")
+    def borrower_name(self, obj):
+        return obj.borrower_name
 
 
 class InstallmentInline(admin.TabularInline):
@@ -507,6 +667,14 @@ class PaymentAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         "reference_number",
     )
     date_hierarchy = "payment_date"
+
+
+@admin.register(Notification)
+class NotificationAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    list_display = ("title", "user", "kind", "is_read", "created_at")
+    list_filter = ("kind", "is_read", "created_at")
+    search_fields = ("title", "message", "user__username", "user__full_name", "user__email")
+    date_hierarchy = "created_at"
 
 
 admin.site.register(Document)

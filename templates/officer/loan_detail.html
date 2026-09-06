@@ -9,27 +9,55 @@
     <a class="small" href="{% url 'borrower_detail' borrower_id=loan.application.borrower_id %}"><i class="bi bi-arrow-left me-1"></i>Back to {{ loan.application.borrower_name }}</a>
     <div class="eyebrow mt-3">{{ loan.reference }}</div>
     <h1>{{ loan.product_name }}</h1>
-    <p>Opened {{ loan.start_date }} · {{ loan.term_months }} month term</p>
+    <p>
+      Opened {{ loan.start_date }} · {{ loan.term_months }} month term
+      {% if loan.is_rescheduled %}
+      · <span class="badge status-rescheduled">Rescheduled {{ loan.reschedule_date_display }}</span>
+      {% endif %}
+    </p>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-primary" href="{% url 'application_pdf' application_id=loan.application_id %}?download=1"><i class="bi bi-download me-1"></i>Download PDF form</a>
+    <a class="btn btn-outline-primary" href="{% url 'application_pdf' application_id=loan.application_id %}" target="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>View PDF</a>
     <a class="btn btn-outline-primary" href="{% url 'disbursement_receipt' disbursement_id=loan.application_id %}"><i class="bi bi-receipt me-1"></i>Disbursement receipt</a>
     <a class="btn btn-outline-primary" href="{% url 'officer_repayment_schedule' loan_id=loan.id %}"><i class="bi bi-calendar3 me-1"></i>Schedule</a>
-    {% if loan.outstanding_balance > 0 %}<a class="btn btn-primary" href="{% url 'officer_make_payment' loan_id=loan.id %}"><i class="bi bi-cash-coin me-1"></i>Record payment</a>{% endif %}
+    {% if loan.outstanding_balance > 0 %}<a class="btn btn-primary" href="{% url 'officer_make_payment' loan_id=loan.id %}{% if next_due %}?pay={{ next_due.frequency }}{% endif %}"><i class="bi bi-cash-coin me-1"></i>Record payment</a>{% endif %}
   </div>
 </div>
+{% if loan.is_rescheduled %}
+<div class="reschedule-banner" role="status">
+  <span class="reschedule-banner__icon" aria-hidden="true"><i class="bi bi-arrow-repeat"></i></span>
+  <div>
+    <p class="reschedule-banner__title">Rescheduled on {{ loan.reschedule_date_display }}</p>
+    <p class="reschedule-banner__meta">
+      Remaining balance rebuilt into a {{ loan.term_months }}-month term at {{ loan.interest_rate }}%.
+      New collections start {{ loan.reschedule_interest_start_display }}
+      · principal {{ loan.principal|peso }}
+      · original release {{ loan.original_amount|peso }}.
+      <a class="ms-1" href="{% url 'officer_repayment_schedule' loan_id=loan.id %}">View schedule</a>
+    </p>
+  </div>
+</div>
+{% endif %}
 <div class="row g-4">
   <div class="col-lg-8">
     <div class="loan-hero mb-4">
       <div class="row g-4 align-items-end position-relative" style="z-index:1;">
         <div class="col-sm-7">
           <div class="eyebrow">Remaining balance</div>
-          <div class="amount">{{ loan.remaining_balance|peso }}</div>
-          <p class="mt-2">Original amount {{ loan.original_amount|peso }} · {{ loan.status_label }}</p>
+          <div class="amount">{{ loan.adjusted_outstanding_balance|peso }}</div>
+          <p class="mt-2 mb-1 text-white-50">Exact {{ loan.remaining_balance|peso }}</p>
+          <p class="mt-0">Original amount {{ loan.original_amount|peso }} · {{ loan.status_label }}{% if loan.is_rescheduled %} · Rescheduled {{ loan.reschedule_date_display }}{% endif %}</p>
         </div>
         <div class="col-sm-5 text-sm-end">
-          <div class="amount-label">Next payment</div>
+          <div class="amount-label">Next payment{% if next_due %} · {{ next_due.label }}{% endif %}</div>
+          {% if next_due %}
+          <div class="text-white fw-semibold mt-1">{{ next_due.adjusted_amount|peso }}</div>
+          <div class="small text-white-50">Exact {{ next_due.amount|peso }} · {{ next_due.due_date }}</div>
+          {% else %}
           <div class="text-white fw-semibold mt-1">{{ loan.next_payment_amount|peso }}</div>
           <div class="small text-white-50">{{ loan.next_payment_date }}</div>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -44,9 +72,31 @@
           <div class="col-sm-4"><div class="detail-label">Payment frequency</div><div class="detail-value">{{ loan.payment_frequency }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Payments remaining</div><div class="detail-value">{{ loan.payments_remaining }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Origination date</div><div class="detail-value">{{ loan.start_date }}</div></div>
+          {% if loan.is_rescheduled %}
+          <div class="col-sm-4">
+            <div class="detail-label">Rescheduled on</div>
+            <div class="detail-value">{{ loan.reschedule_date_display }}</div>
+            <div class="text-muted small">Term starts {{ loan.reschedule_interest_start_display }}</div>
+          </div>
+          {% endif %}
           <div class="col-sm-4"><div class="detail-label">Maturity date</div><div class="detail-value">{{ loan.maturity_date }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Loan reference</div><div class="detail-value">{{ loan.reference }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Disbursement method</div><div class="detail-value">{{ loan.disbursement_method }}</div></div>
+          <div class="col-sm-4">
+            <div class="detail-label">Payment per day</div>
+            <div class="detail-value">{{ loan.adjusted_daily_payment|peso }}</div>
+            <div class="text-muted small">Exact {{ loan.daily_payment|peso }}</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Payment per month</div>
+            <div class="detail-value">{{ loan.adjusted_monthly_payment|peso }}</div>
+            <div class="text-muted small">Exact {{ loan.monthly_payment|peso }}</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Total payable</div>
+            <div class="detail-value">{{ loan.adjusted_total_payable|peso }}</div>
+            <div class="text-muted small">Exact {{ loan.total_payable|peso }}</div>
+          </div>
           {% if loan.total_deductions %}
           <div class="col-sm-4"><div class="detail-label">Total deductions</div><div class="detail-value">{{ loan.total_deductions|peso }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Net amount released</div><div class="detail-value">{{ loan.net_release_amount|peso }}</div></div>
@@ -54,6 +104,96 @@
         </div>
       </div>
     </div>
+    {% if can_extend_balance %}
+    <div class="card-soft mt-4" id="balanceExtensionCard">
+      <div class="card-header">
+        <h2 class="card-title">Pay remaining balance</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3">This loan’s term has ended with a balance still outstanding. Choose how many months (maximum 3) to repay the remaining amount. Flat interest applies at {{ extension_rate }}%.</p>
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% include "includes/form_errors.html" with form=extension_form %}
+          <div class="mb-3">
+            <label class="form-label d-block label-required">Months to pay <span class="text-danger">*</span></label>
+            <div class="d-flex flex-wrap gap-3" role="radiogroup" aria-label="Extension months">
+              {% for choice in extension_form.months %}
+              <div class="form-check form-check-inline m-0">
+                {{ choice.tag }}
+                <label class="form-check-label" for="{{ choice.id_for_label }}">{{ choice.choice_label }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="row g-3 mb-4" id="extensionPreview" hidden>
+            <div class="col-sm-4">
+              <div class="detail-label">Adjusted remaining (principal)</div>
+              <div class="detail-value" data-preview="principal">—</div>
+            </div>
+            <div class="col-sm-4">
+              <div class="detail-label">Interest ({{ extension_rate }}%)</div>
+              <div class="detail-value" data-preview="interest">—</div>
+            </div>
+            <div class="col-sm-4">
+              <div class="detail-label">New total payable</div>
+              <div class="detail-value" data-preview="total">—</div>
+            </div>
+            <div class="col-sm-4">
+              <div class="detail-label">Per month</div>
+              <div class="detail-value" data-preview="per-month">—</div>
+            </div>
+            <div class="col-sm-4">
+              <div class="detail-label">Per working day</div>
+              <div class="detail-value" data-preview="per-day">—</div>
+            </div>
+          </div>
+          <button class="btn btn-primary" type="submit" id="applyExtensionBtn" disabled>Apply new schedule</button>
+        </form>
+      </div>
+    </div>
+    {{ extension_previews|json_script:"extensionPreviewData" }}
+    <script>
+      (function () {
+        var dataEl = document.getElementById("extensionPreviewData");
+        var preview = document.getElementById("extensionPreview");
+        var applyBtn = document.getElementById("applyExtensionBtn");
+        if (!dataEl || !preview || !applyBtn) return;
+        var quotes = {};
+        try {
+          JSON.parse(dataEl.textContent).forEach(function (row) { quotes[String(row.months)] = row; });
+        } catch (e) { return; }
+        function peso(value) {
+          var n = Number(value);
+          if (isNaN(n)) return "—";
+          return "₱" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        function setText(key, value) {
+          var el = preview.querySelector('[data-preview="' + key + '"]');
+          if (el) el.textContent = value;
+        }
+        function update() {
+          var selected = document.querySelector('input[name="months"]:checked');
+          var quote = selected ? quotes[selected.value] : null;
+          if (!quote) {
+            preview.hidden = true;
+            applyBtn.disabled = true;
+            return;
+          }
+          setText("principal", peso(quote.principal));
+          setText("interest", peso(quote.total_interest));
+          setText("total", peso(quote.total_payable));
+          setText("per-month", peso(quote.per_month));
+          setText("per-day", peso(quote.per_day));
+          preview.hidden = false;
+          applyBtn.disabled = false;
+        }
+        document.querySelectorAll('input[name="months"]').forEach(function (input) {
+          input.addEventListener("change", update);
+        });
+        update();
+      })();
+    </script>
+    {% endif %}
     <div class="card-soft mt-4">
       <div class="card-header d-flex justify-content-between align-items-center">
         <h2 class="card-title">Payment history</h2>

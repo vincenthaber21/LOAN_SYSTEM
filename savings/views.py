@@ -294,6 +294,7 @@ def officer_savings_account_detail(request, account_id):
                             reference=data.get("reference_number", ""),
                             created_by=request.user,
                             notes=data.get("notes", ""),
+                            occurred_on=data.get("transaction_date"),
                         )
                         messages.success(request, "Deposit recorded.")
                     else:
@@ -304,6 +305,7 @@ def officer_savings_account_detail(request, account_id):
                             reference=data.get("reference_number", ""),
                             created_by=request.user,
                             notes=data.get("notes", ""),
+                            occurred_on=data.get("transaction_date"),
                         )
                         messages.success(request, "Withdrawal recorded.")
                     return redirect("officer_savings_account_detail", account_id=account.pk)
@@ -395,7 +397,7 @@ def officer_open_savings_account(request):
 
 
 @login_required
-@role_required("officer")
+@role_required("admin")
 def officer_savings_products(request):
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
@@ -416,7 +418,7 @@ def officer_savings_products(request):
 
 
 @login_required
-@role_required("officer")
+@role_required("admin")
 def officer_add_savings_product(request):
     form = SavingsProductForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -430,7 +432,7 @@ def officer_add_savings_product(request):
 
 
 @login_required
-@role_required("officer")
+@role_required("admin")
 def officer_edit_savings_product(request, product_id):
     product = get_object_or_404(SavingsProduct, pk=product_id)
     form = SavingsProductForm(request.POST or None, instance=product)

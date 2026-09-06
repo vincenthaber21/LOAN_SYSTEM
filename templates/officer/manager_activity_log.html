@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Activity log · {{ manager.display_name }}{% endblock %}
+{% block topbar_title %}Manager activity log{% endblock %}
+{% block topbar_context %}Monitor applications, payments, and disbursements handled by this manager.{% endblock %}
+{% block content %}
+
+<div class="page-heading fade-up">
+  <div>
+    <a class="small" href="{% url 'managers' %}"><i class="bi bi-arrow-left me-1"></i>Back to managers</a>
+    <div class="d-flex align-items-center gap-3 mt-3">
+      <span class="avatar avatar-lg">{{ manager.initials }}</span>
+      <div>
+        <h1 class="mb-1">{{ manager.display_name }}</h1>
+        <p class="mb-0">{{ manager.email }} · joined {{ manager.joined_at }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    {% if manager.is_online %}
+    {% include "includes/status_badge.html" with status="online" label="Online now" %}
+    {% else %}
+    {% include "includes/status_badge.html" with status="neutral" label=manager.presence_label %}
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="{% url 'edit_manager' manager_id=manager.id %}"><i class="bi bi-pencil me-1"></i>Edit profile</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4 fade-up-2">
+  {% for metric in activity_summary %}
+  <div class="col-md-4">
+    <div class="card-soft metric-card">
+      <div class="metric-label">{{ metric.label }}</div>
+      <div class="metric-value">{{ metric.value }}</div>
+      <div class="metric-note">{{ metric.note }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<form class="filter-bar mb-4 fade-up-2" method="get" action="{% url 'manager_activity_log' manager_id=manager.id %}">
+  <div class="row g-2 align-items-end">
+    <div class="col-sm-6 col-lg-4">
+      <label class="form-label" for="activity_type">Activity type</label>
+      <select class="form-select" id="activity_type" name="type">
+        {% for option in activity_type_filters %}
+        <option value="{{ option.value }}" {% if filters.type == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2"><button class="btn btn-primary w-100" type="submit">Filter</button></div>
+  </div>
+</form>
+
+<div class="card-soft fade-up-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div>
+      <h2 class="card-title">Activity history</h2>
+      <span class="text-muted small">Every application decision, payment, and disbursement linked to this manager.</span>
+    </div>
+    <span class="badge status-neutral">{{ page_obj.paginator.count }} event{{ page_obj.paginator.count|pluralize }}</span>
+  </div>
+  {% if activity %}
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Action</th>
+          <th>Member</th>
+          <th>Reference</th>
+          <th>Type</th>
+          <th>Amount</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in activity %}
+        <tr>
+          <td class="text-muted">{{ event.created_at_display }}</td>
+          <td>
+            <div class="fw-semibold">{{ event.title }}</div>
+            <div class="person-sub">{{ event.description }}</div>
+          </td>
+          <td>
+            {% if event.borrower_id %}
+            <a class="person" href="{% url 'borrower_detail' borrower_id=event.borrower_id %}">
+              <span class="person-name d-block">{{ event.member_name }}</span>
+            </a>
+            {% else %}
+            —
+            {% endif %}
+          </td>
+          <td class="fw-semibold">{{ event.reference }}</td>
+          <td>{% include "includes/status_badge.html" with status=event.status label=event.status_label %}</td>
+          <td><strong>{% if event.amount %}{{ event.amount|peso }}{% else %}—{% endif %}</strong></td>
+          <td class="text-nowrap">
+            {% if event.detail_url %}
+            <a class="btn btn-sm btn-light" href="{{ event.detail_url }}"><i class="bi bi-box-arrow-up-right me-1"></i>Open</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if is_paginated %}
+  <div class="card-body border-top">
+    <nav aria-label="Manager activity pages">
+      <ul class="pagination pagination-sm mb-0 justify-content-end">
+        {% if page_obj.has_previous %}
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{{ query_string }}">Previous</a></li>
+        {% endif %}
+        <li class="page-item active"><span class="page-link">{{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{{ query_string }}">Next</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card-body">
+    {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity recorded yet" description="Applications, payments, and disbursements handled by this manager will appear here." %}
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

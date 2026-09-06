@@ -1,3 +1,4 @@
+from datetime import datetime, time
 from decimal import Decimal
 
 from django.db import transaction
@@ -5,13 +6,132 @@ from django.utils import timezone
 
 from .models import MutualAidClaim, MutualAidContribution, MutualAidMembership, MutualAidPeriod, MutualAidPlan
 
+KAP_MUTUAL_AID_PLAN_NAME = "KAPAMILYA MUTUAL AID PROGRAM"
+# Matches the disbursement deduction label used as the plan name on some installs.
+_LEGACY_KAP_MUTUAL_AID_NAMES = (
+    "Initial contribution for KAPAMILYA MUTUAL AID PROGRAM",
+    "KAP Mutual Aid",
+    "KAPAMILYA MUTUAL AID",
+)
+
 
 class MutualAidError(Exception):
     pass
 
 
+def _datetime_on_date(value):
+    dt = datetime.combine(value, time.min)
+    if timezone.is_naive(dt):
+        return timezone.make_aware(dt, timezone.get_current_timezone())
+    return dt
+
+
+def resolve_kap_mutual_aid_plan():
+    """Return the KAP mutual aid plan used for compulsory disbursement contributions."""
+    plan = MutualAidPlan.objects.filter(
+        name__iexact=KAP_MUTUAL_AID_PLAN_NAME,
+        is_active=True,
+    ).first()
+    if plan:
+        return plan
+
+    for legacy_name in _LEGACY_KAP_MUTUAL_AID_NAMES:
+        plan = MutualAidPlan.objects.filter(name__iexact=legacy_name).first()
+        if plan:
+            if plan.name != KAP_MUTUAL_AID_PLAN_NAME:
+                plan.name = KAP_MUTUAL_AID_PLAN_NAME
+                plan.is_active = True
+                plan.save(update_fields=["name", "is_active"])
+            elif not plan.is_active:
+                plan.is_active = True
+                plan.save(update_fields=["is_active"])
+            return plan
+
+    plan = MutualAidPlan.objects.filter(name__icontains="KAPAMILYA").first()
+    if plan:
+        if not plan.is_active:
+            plan.is_active = True
+            plan.save(update_fields=["is_active"])
+        return plan
+
+    plan, _ = MutualAidPlan.objects.get_or_create(
+        name=KAP_MUTUAL_AID_PLAN_NAME,
+        defaults={
+            "description": "Compulsory initial contribution credited from loan disbursement.",
+            "contribution_amount": Decimal("200.00"),
+            "contribution_frequency": MutualAidPlan.ContributionFrequency.MONTHLY,
+            "max_benefit_amount": Decimal("10000.00"),
+            "waiting_period_days": 90,
+            "min_membership_months": 0,
+            "is_active": True,
+        },
+    )
+    if not plan.is_active:
+        plan.is_active = True
+        plan.save(update_fields=["is_active"])
+    return plan
+
+
+def get_or_enroll_member(member, plan, enrolled_by=None, notes="", enrolled_on=None):
+    """Return the member's active membership for the plan, enrolling if needed."""
+    membership = (
+        MutualAidMembership.objects.select_for_update()
+        .filter(
+            member=member,
+            plan=plan,
+            status=MutualAidMembership.Status.ACTIVE,
+        )
+        .first()
+    )
+    if membership:
+        return membership
+    return enroll_member(
+        member,
+        plan,
+        enrolled_by=enrolled_by,
+        notes=notes,
+        enrolled_on=enrolled_on,
+    )
+
+
 @transaction.atomic
-def enroll_member(member, plan, enrolled_by=None, notes=""):
+def credit_kap_mutual_aid_from_disbursement(
+    member,
+    amount,
+    *,
+    loan_reference="",
+    recorded_by=None,
+    disbursed_date=None,
+):
+    """Enroll (if needed) and record the KAP mutual aid contribution from a loan release."""
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        return None
+
+    credited_on = disbursed_date or timezone.localdate()
+    plan = resolve_kap_mutual_aid_plan()
+    membership = get_or_enroll_member(
+        member,
+        plan,
+        enrolled_by=recorded_by,
+        notes="Enrolled automatically from loan disbursement.",
+        enrolled_on=credited_on,
+    )
+    reference = f"DISB-{loan_reference}" if loan_reference else "DISB-KAP-MUTUAL-AID"
+    notes = "Initial contribution for KAPAMILYA MUTUAL AID PROGRAM deducted from loan disbursement."
+    return record_contribution(
+        membership,
+        amount,
+        MutualAidContribution.Method.ONLINE,
+        reference=reference[:60],
+        recorded_by=recorded_by,
+        notes=notes,
+        occurred_on=credited_on,
+    )
+
+
+@transaction.atomic
+def enroll_member(member, plan, enrolled_by=None, notes="", enrolled_on=None):
     if not plan.is_active:
         raise MutualAidError("This mutual aid plan is not available.")
 
@@ -28,6 +148,7 @@ def enroll_member(member, plan, enrolled_by=None, notes=""):
         plan=plan,
         enrolled_by=enrolled_by,
         notes=notes,
+        enrolled_at=_datetime_on_date(enrolled_on) if enrolled_on else timezone.now(),
     )
 
 
@@ -51,13 +172,24 @@ def create_period(plan, date_from, date_to, label=""):
 
 
 @transaction.atomic
-def record_contribution(membership, amount, method, reference="", period=None, recorded_by=None, notes=""):
+def record_contribution(
+    membership,
+    amount,
+    method,
+    reference="",
+    period=None,
+    recorded_by=None,
+    notes="",
+    occurred_on=None,
+):
     if not membership.is_operational:
         raise MutualAidError("This membership is not active.")
 
     amount = Decimal(str(amount))
     if amount <= 0:
         raise MutualAidError("Contribution amount must be greater than zero.")
+    if occurred_on and occurred_on > timezone.localdate():
+        raise MutualAidError("Contribution date cannot be in the future.")
 
     if period and period.plan_id != membership.plan_id:
         raise MutualAidError("Selected period does not belong to this membership's plan.")
@@ -74,6 +206,7 @@ def record_contribution(membership, amount, method, reference="", period=None, r
         reference_number=reference,
         period=period,
         notes=notes,
+        created_at=_datetime_on_date(occurred_on) if occurred_on else timezone.now(),
         recorded_by=recorded_by,
     )
 

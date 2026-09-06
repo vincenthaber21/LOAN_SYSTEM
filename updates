@@ -8,9 +8,17 @@ git push origin main
 GitHub
    ↓
 PythonAnywhere
+↓
+workon venv
    ↓
 git pull origin main
    ↓
 migrate / collectstatic if needed
    ↓
 Web → Reload
+
+
+
+use the update in the github
+git checkout loan_system/settings.py
+git pull origin main

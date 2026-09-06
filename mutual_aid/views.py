@@ -168,6 +168,7 @@ def officer_mutual_aid_membership_detail(request, membership_id):
                         period=data.get("period"),
                         recorded_by=request.user,
                         notes=data.get("notes", ""),
+                        occurred_on=data.get("contribution_date"),
                     )
                     messages.success(request, "Contribution recorded.")
                     return redirect("officer_mutual_aid_membership_detail", membership_id=membership.pk)
@@ -246,7 +247,7 @@ def officer_mutual_aid_membership_detail(request, membership_id):
 
 
 @login_required
-@role_required("officer")
+@role_required("admin")
 def officer_mutual_aid_plans(request):
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
@@ -267,7 +268,7 @@ def officer_mutual_aid_plans(request):
 
 
 @login_required
-@role_required("officer")
+@role_required("admin")
 def officer_add_mutual_aid_plan(request):
     form = MutualAidPlanForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -281,7 +282,7 @@ def officer_add_mutual_aid_plan(request):
 
 
 @login_required
-@role_required("officer")
+@role_required("admin")
 def officer_edit_mutual_aid_plan(request, plan_id):
     plan = get_object_or_404(MutualAidPlan, pk=plan_id)
     form = MutualAidPlanForm(request.POST or None, instance=plan)

@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Add a manager{% endblock %}
+{% block topbar_title %}Add a manager{% endblock %}
+{% block topbar_context %}Administrator access only.{% endblock %}
+
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Administration</div>
+    <h1>Add a manager.</h1>
+    <p>Create a staff account with manager access to the officer workspace — applications, borrowers, disbursements, and reports.</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="{% url 'managers' %}"><i class="bi bi-arrow-left me-1"></i>Back to managers</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="alert-box mb-4">{{ form.non_field_errors|join:", " }}</div>
+      {% endif %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="eyebrow">Step 1</div>
+          <h2 class="card-title mt-1"><i class="bi bi-person me-2 text-muted"></i>Personal information</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.first_name.id_for_label }}">First name<span class="req">*</span></label>
+              <input type="text" id="{{ form.first_name.id_for_label }}" name="{{ form.first_name.html_name }}" value="{{ form.first_name.value|default:'' }}" class="form-control {% if form.first_name.errors %}is-invalid{% endif %}" placeholder="Avery">
+              {% if form.first_name.errors %}<div class="invalid-feedback">{{ form.first_name.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.last_name.id_for_label }}">Last name<span class="req">*</span></label>
+              <input type="text" id="{{ form.last_name.id_for_label }}" name="{{ form.last_name.html_name }}" value="{{ form.last_name.value|default:'' }}" class="form-control {% if form.last_name.errors %}is-invalid{% endif %}" placeholder="Santos">
+              {% if form.last_name.errors %}<div class="invalid-feedback">{{ form.last_name.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.phone.id_for_label }}">Phone number</label>
+              <input type="text" id="{{ form.phone.id_for_label }}" name="{{ form.phone.html_name }}" value="{{ form.phone.value|default:'' }}" class="form-control {% if form.phone.errors %}is-invalid{% endif %}" placeholder="+63 917 555 0142">
+              {% if form.phone.errors %}<div class="invalid-feedback">{{ form.phone.errors|join:", " }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="eyebrow">Step 2</div>
+          <h2 class="card-title mt-1"><i class="bi bi-envelope me-2 text-muted"></i>Account</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.username.id_for_label }}">
+                Username<span class="req">*</span>
+                <button type="button" class="regen-link" id="regen-username" title="Regenerate from name"><i class="bi bi-arrow-repeat"></i> Regenerate</button>
+              </label>
+              <input type="text" id="{{ form.username.id_for_label }}" name="{{ form.username.html_name }}" value="{{ form.username.value|default:'' }}" class="form-control {% if form.username.errors %}is-invalid{% endif %}" placeholder="avery.santos" autocomplete="off">
+              {% if form.username.errors %}<div class="invalid-feedback">{{ form.username.errors|join:", " }}</div>{% else %}<span class="helptext">Auto-filled from the name above — edit if you'd like something different.</span>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.email.id_for_label }}">Email address<span class="req">*</span></label>
+              <input type="email" id="{{ form.email.id_for_label }}" name="{{ form.email.html_name }}" value="{{ form.email.value|default:'' }}" class="form-control {% if form.email.errors %}is-invalid{% endif %}" placeholder="avery@example.com">
+              {% if form.email.errors %}<div class="invalid-feedback">{{ form.email.errors|join:", " }}</div>{% else %}<span class="helptext">Used to sign in too — must be unique.</span>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.password1.id_for_label }}">Password<span class="req">*</span></label>
+              <input type="password" id="{{ form.password1.id_for_label }}" name="{{ form.password1.html_name }}" class="form-control {% if form.password1.errors %}is-invalid{% endif %}">
+              {% if form.password1.errors %}<div class="invalid-feedback">{{ form.password1.errors|join:", " }}</div>{% else %}<span class="helptext">At least 8 characters, not too common.</span>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.password2.id_for_label }}">Confirm password<span class="req">*</span></label>
+              <input type="password" id="{{ form.password2.id_for_label }}" name="{{ form.password2.html_name }}" class="form-control {% if form.password2.errors %}is-invalid{% endif %}">
+              {% if form.password2.errors %}<div class="invalid-feedback">{{ form.password2.errors|join:", " }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 align-items-center">
+        <button type="submit" class="btn btn-primary px-4"><i class="bi bi-person-plus me-1"></i>Add manager</button>
+        <a href="{% url 'managers' %}" class="btn btn-outline-secondary">Cancel</a>
+        <span class="text-muted ms-auto" style="font-size:.75rem;"><i class="bi bi-shield-lock me-1"></i>This account gets staff access as a manager.</span>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card-soft">
+      <div class="card-body">
+        <div class="eyebrow mb-2">Administrator only</div>
+        <div class="add-member-step"><span class="add-member-dot"><i class="bi bi-shield-check"></i></span><div><strong>Why this is restricted</strong><p>Manager accounts can oversee applications, disbursements, and the portfolio — only admins can create them.</p></div></div>
+        <div class="add-member-step"><span class="add-member-dot">1</span><div><strong>Account created</strong><p>Saved with the Manager role and staff access, ready to sign in immediately.</p></div></div>
+        <div class="add-member-step"><span class="add-member-dot">2</span><div><strong>Share their credentials</strong><p>Give them the email and password you set here, securely.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.form-label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; margin-bottom: .35rem; display: flex; align-items: center; gap: 8px; }
+.regen-link { margin-left: auto; background: none; border: 0; padding: 0; font-size: .72rem; font-weight: 600; color: var(--teal); cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
+.regen-link:hover { color: var(--teal-deep); text-decoration: underline; }
+.req { color: var(--danger); margin-left: 2px; }
+.form-control { border-color: var(--line); border-radius: 9px; font-size: .9rem; }
+.form-control:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(24, 96, 16, .12); }
+.helptext { display: block; font-size: .74rem; color: var(--ink-soft); margin-top: 4px; }
+.invalid-feedback { display: block; font-size: .76rem; }
+.btn-outline-secondary { border-color: var(--line); color: var(--ink-soft); }
+.btn-outline-secondary:hover { background: var(--canvas); border-color: var(--ink-soft); color: var(--ink); }
+.alert-box { background: var(--apricot-soft); border: 1px solid var(--apricot); color: var(--warning); border-radius: 9px; padding: 11px 14px; font-size: .84rem; }
+.add-member-step { display: flex; gap: 12px; margin-bottom: 18px; }
+.add-member-step:last-child { margin-bottom: 0; }
+.add-member-dot { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%; background: var(--mint); color: var(--teal-deep); font-size: .76rem; font-weight: 700; display: grid; place-items: center; }
+.add-member-step strong { display: block; font-size: .84rem; margin-bottom: 2px; }
+.add-member-step p { margin: 0; font-size: .77rem; color: var(--ink-soft); line-height: 1.45; }
+</style>
+
+<script>
+(function () {
+  var firstInput = document.getElementById("{{ form.first_name.id_for_label }}");
+  var lastInput = document.getElementById("{{ form.last_name.id_for_label }}");
+  var usernameInput = document.getElementById("{{ form.username.id_for_label }}");
+  var regenBtn = document.getElementById("regen-username");
+  if (!firstInput || !lastInput || !usernameInput) { return; }
+
+  var editedByUser = usernameInput.value.trim() !== "";
+
+  function slugifyPart(value) {
+    var normalized = (value || "").normalize("NFKD").replace(/[̀-ͯ]/g, "");
+    return normalized.toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+
+  function suggestion() {
+    var parts = [slugifyPart(firstInput.value), slugifyPart(lastInput.value)].filter(Boolean);
+    return parts.join(".") || "manager";
+  }
+
+  function applySuggestion() {
+    usernameInput.value = suggestion();
+  }
+
+  function handleNameInput() {
+    if (!editedByUser) { applySuggestion(); }
+  }
+
+  usernameInput.addEventListener("input", function () {
+    editedByUser = usernameInput.value.trim() !== "";
+  });
+
+  firstInput.addEventListener("input", handleNameInput);
+  lastInput.addEventListener("input", handleNameInput);
+
+  if (regenBtn) {
+    regenBtn.addEventListener("click", function () {
+      editedByUser = false;
+      applySuggestion();
+    });
+  }
+})();
+</script>
+{% endblock %}

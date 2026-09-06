@@ -98,7 +98,7 @@
             </td>
             <td>
               <strong>{{ member.credit_score|credit_score }}</strong>
-              <span class="text-muted small d-block">Starts at 100 · −0.1 per late payment</span>
+              <span class="text-muted small d-block">Starts at 100 · −0.1 per late month</span>
             </td>
             <td>{% include "includes/status_badge.html" with status=member.loan_availability_status label=member.loan_availability_label %}</td>
             <td>{{ member.total_balance|peso }}</td>

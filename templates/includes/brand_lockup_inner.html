@@ -1,6 +1,6 @@
 <span class="brand-mark{% if site_logo %} brand-mark-has-logo{% endif %}">
   {% if site_logo %}
-    <img src="{{ site_logo.url }}" alt="" class="brand-logo">
+    <img src="{% if site_logo_mark and not brand_full_logo %}{{ site_logo_mark }}{% else %}{{ site_logo.url }}{% endif %}" alt="{{ app_name }} logo" class="brand-logo">
   {% else %}
     <i class="bi bi-water"></i>
   {% endif %}

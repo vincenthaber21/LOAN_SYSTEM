@@ -21,6 +21,9 @@ def role_required(role):
             if role == "admin" and not request.user.is_admin:
                 messages.error(request, "That action is only available to administrators.")
                 return redirect("officer_dashboard" if request.user.is_officer else "dashboard")
+            if role == "manager" and not request.user.is_manager:
+                messages.error(request, "That action is only available to managers.")
+                return redirect("officer_dashboard" if request.user.is_officer else "dashboard")
             return view_func(request, *args, **kwargs)
 
         return wrapped

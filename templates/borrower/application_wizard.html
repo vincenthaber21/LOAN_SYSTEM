@@ -1,29 +1,121 @@
 {% extends "base.html" %}
 {% load lending_tags %}
-{% block title %}Loan application{% endblock %}
-{% block topbar_title %}New loan application{% endblock %}
-{% block topbar_context %}Save your progress and return when you are ready.{% endblock %}
+{% block title %}KAP loan application{% endblock %}
+{% block topbar_title %}New KAP application{% endblock %}
+{% block topbar_context %}Complete your microfinance loan application.{% endblock %}
+{% block head %}
+<style>
+  .kap-reminder {
+    background: #f7faf7;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    padding: .85rem 1rem;
+    font-size: .86rem;
+    color: var(--muted);
+  }
+  .kap-choice-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .55rem 1.1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .kap-choice-list label {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    font-size: .9rem;
+    margin: 0;
+    cursor: pointer;
+  }
+  .kap-section-title {
+    font-size: .72rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .kap-photo-box {
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    padding: 1rem;
+    background: #fafcfb;
+    height: 100%;
+  }
+  .kap-sig-pad {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    overflow: hidden;
+  }
+  .kap-sig-pad canvas {
+    display: block;
+    width: 100%;
+    height: 160px;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  .label-required {
+    font-weight: 700;
+  }
+  .label-required::after {
+    content: " *";
+    font-weight: 800;
+  }
+  .field-required:not(.is-filled) .label-required,
+  .field-required:not(.is-filled) .label-required::after {
+    color: #c62828 !important;
+  }
+  .field-required.is-filled .label-required,
+  .field-required.is-filled .label-required::after {
+    color: var(--ink) !important;
+  }
+  .field-required:not(.is-filled) .form-control,
+  .field-required:not(.is-filled) .form-select,
+  .field-required:not(.is-filled) .kap-sig-pad,
+  .field-required:not(.is-filled) .kap-choice-list {
+    border-color: #e57373 !important;
+  }
+  .field-required:not(.is-filled) .form-control:focus,
+  .field-required:not(.is-filled) .form-select:focus {
+    border-color: #c62828 !important;
+    box-shadow: 0 0 0 .2rem rgba(198, 40, 40, .15);
+  }
+  .field-required.is-filled .form-control,
+  .field-required.is-filled .form-select,
+  .field-required.is-filled .kap-sig-pad,
+  .field-required.is-filled .kap-choice-list {
+    border-color: var(--line);
+  }
+  .required-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    color: #c62828;
+    font-size: .86rem;
+    font-weight: 700;
+  }
+  .required-legend::before {
+    content: "";
+    width: .65rem;
+    height: .65rem;
+    border-radius: 2px;
+    background: #c62828;
+  }
+</style>
+{% endblock %}
 {% block content %}
-<div class="page-heading fade-up">
+<div class="page-heading">
   <div>
     <a class="small" href="{% url 'borrower_dashboard' %}"><i class="bi bi-arrow-left me-1"></i>Back to overview</a>
-    <div class="eyebrow mt-3">Application · Step 1 of 4</div>
-    <h1 class="mt-2">Tell us what you need.</h1>
-    <p>A few thoughtful details help us make a careful decision. Your answers are private.</p>
+    <h1 class="mt-3 mb-2">KAP microfinance loan application</h1>
+    <p>Complete the form below to submit your loan application for review.</p>
   </div>
 </div>
 
-<div class="stepper mb-4 fade-up-2">
-  {% for step in application_steps %}
-  <div class="step {% if forloop.first %}active{% endif %}">
-    <span class="step-circle">{{ step.number }}</span>
-    <small>{{ step.label }}</small>
-  </div>
-  {% endfor %}
-</div>
-
-{% if not products %}
-<div class="card-soft fade-up-3">
+{% if credit_score_blocked or not products %}
+<div class="card-soft">
   <div class="card-body">
     {% url 'support' as support_url %}
     {% if credit_score_blocked %}
@@ -34,358 +126,918 @@
   </div>
 </div>
 {% else %}
-<form method="post" action="{% url 'loan_application' %}" enctype="multipart/form-data" data-client-validation novalidate>
-  {% csrf_token %}
-  {% if form.errors or profile_form.errors %}
-  <div class="alert alert-danger fade-up-3">
-    <i class="bi bi-exclamation-circle me-2"></i>Please review the highlighted fields below and try again.
-  </div>
-  {% endif %}
-  {% include "includes/form_errors.html" %}
+<div class="row g-4">
+  <div class="col-xl-9">
+    <form method="post" action="{% url 'loan_application' %}" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {{ reference_formset.management_form }}
 
-  <div class="row g-4 fade-up-3">
-    <div class="col-lg-8">
+      <div class="kap-reminder mb-4">
+        Reminder: use capital letters where applicable. Tick the appropriate boxes. Put <strong>N/A</strong> in fields that do not apply.
+        <div class="required-legend mt-2">Red labels with * are still empty required fields — they turn normal once filled</div>
+        {% if profile_source == "previous_application" %}
+        <div class="text-muted small mt-2">Personal details were filled from your previous application. Please review and update anything that changed.</div>
+        {% else %}
+        <div class="text-muted small mt-2">Personal details were filled from your account profile where available.</div>
+        {% endif %}
+      </div>
+
+      {% include "includes/form_errors.html" %}
+      {% if reference_formset.non_form_errors %}
+      <div class="alert alert-danger">{{ reference_formset.non_form_errors }}</div>
+      {% endif %}
+
       <div class="card-soft mb-4">
         <div class="card-header">
-          <div class="eyebrow">Step 1</div>
-          <h2 class="card-title mt-1">About your loan</h2>
-          <p class="text-muted small mb-0 mt-1">Choose a product and tell us how it will help.</p>
+          <div class="kap-section-title">Account &amp; product</div>
+          <h2 class="card-title mt-1">Your loan product</h2>
         </div>
         <div class="card-body">
-          <div class="mb-3">
-            <label class="form-label" for="{{ form.loan_product.id_for_label }}">Loan product</label>
-            <select class="form-select {% if form.loan_product.errors %}is-invalid{% endif %}" id="{{ form.loan_product.id_for_label }}" name="{{ form.loan_product.html_name }}" required>
-              <option value="">Select a loan product…</option>
-              {% for product in products %}
-              <option value="{{ product.pk }}" data-min="{{ product.min_amount }}" data-max="{{ product.max_amount }}" data-min-term="{{ product.min_term_months }}" data-max-term="{{ product.max_term_months }}" data-rate="{{ product.interest_rate }}" {% if form.loan_product.value|stringformat:"s" == product.pk|stringformat:"s" %}selected{% endif %}>
-                {{ product.name }} — {{ product.get_loan_type_display }} ({{ product.interest_rate }}% p.a.)
-              </option>
-              {% endfor %}
-            </select>
-            {% for error in form.loan_product.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-          </div>
-
           <div class="row g-3">
-            <div class="col-sm-6">
-              <label class="form-label" for="{{ form.amount_requested.id_for_label }}">Amount requested</label>
+            <div class="col-md-8 field-required">
+              <label class="form-label label-required" for="{{ form.loan_product.id_for_label }}">Loan product</label>
+              <select class="form-select {% if form.loan_product.errors %}is-invalid{% endif %}" id="{{ form.loan_product.id_for_label }}" name="{{ form.loan_product.html_name }}" required>
+                <option value="">Select product…</option>
+                {% for product in products %}
+                <option value="{{ product.pk }}" data-min="{{ product.min_amount }}" data-max="{{ product.max_amount }}" data-min-term="{{ product.min_term_months }}" data-max-term="{{ product.max_term_months }}" {% if form.loan_product.value|stringformat:"s" == product.pk|stringformat:"s" %}selected{% endif %}>
+                  {{ product.name }} — {{ product.get_loan_type_display }} ({{ product.interest_rate }}% / mo)
+                </option>
+                {% endfor %}
+              </select>
+              {% for error in form.loan_product.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4 field-required">
+              <label class="form-label label-required" for="{{ form.term_months.id_for_label }}">Loan term (months)</label>
+              <input class="form-control {% if form.term_months.errors %}is-invalid{% endif %}" type="number" min="1" max="60" id="{{ form.term_months.id_for_label }}" name="{{ form.term_months.html_name }}" value="{{ form.term_months.value|default:'' }}" required>
+              {% for error in form.term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="kap-section-title">Header</div>
+          <h2 class="card-title mt-1">Application details</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.branch_name.id_for_label }}">Branch name</label>
+              <input class="form-control {% if form.branch_name.errors %}is-invalid{% endif %}" type="text" id="{{ form.branch_name.id_for_label }}" name="{{ form.branch_name.html_name }}" value="{{ form.branch_name.value|default:'' }}">
+              {% for error in form.branch_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.form_ref_no.id_for_label }}">Ref No.</label>
+              <input class="form-control {% if form.form_ref_no.errors %}is-invalid{% endif %}" type="text" id="{{ form.form_ref_no.id_for_label }}" name="{{ form.form_ref_no.html_name }}" value="{{ form.form_ref_no.value|default:'' }}">
+              {% for error in form.form_ref_no.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4 field-required is-filled">
+              <label class="form-label label-required" for="{{ form.applied_on.id_for_label }}">Date of application</label>
+              <input class="form-control" type="date" id="{{ form.applied_on.id_for_label }}" value="{{ form.today_iso }}" disabled tabindex="-1" aria-readonly="true">
+              <input type="hidden" name="{{ form.applied_on.html_name }}" value="{{ form.today_iso }}">
+              <div class="form-text">Automatically set to today.</div>
+              {% for error in form.applied_on.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-12 field-required is-filled" id="applicationTypeField">
+              <label class="form-label d-block label-required">Application type</label>
+              <div class="kap-choice-list" id="applicationTypeGroup">
+                {% for value, label in form.fields.application_type.choices %}
+                <label>
+                  <input type="radio" name="_application_type_display" value="{{ value }}" disabled {% if form.application_type.value|default:'new' == value %}checked{% endif %}>
+                  {{ label }}
+                </label>
+                {% endfor %}
+              </div>
+              <input type="hidden" name="{{ form.application_type.html_name }}" id="applicationTypeValue" value="{{ form.application_type.value|default:'new' }}">
+              <div class="form-text" id="applicationTypeHint">
+                {% if has_loan_history %}
+                Set to {{ application_type_label }} because you already have loan history. Not editable.
+                {% else %}
+                Set to {{ application_type_label }} — first application. Not editable.
+                {% endif %}
+              </div>
+              {% for error in form.application_type.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <div class="kap-photo-box">
+                <label class="form-label" for="{{ form.borrower_photo.id_for_label }}">Borrower 2×2 photo</label>
+                <input class="form-control {% if form.borrower_photo.errors %}is-invalid{% endif %}" type="file" accept="image/*" id="{{ form.borrower_photo.id_for_label }}" name="{{ form.borrower_photo.html_name }}">
+                {% for error in form.borrower_photo.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="kap-photo-box">
+                <label class="form-label" for="{{ form.coborrower_photo.id_for_label }}">Co-borrower 2×2 photo</label>
+                <input class="form-control {% if form.coborrower_photo.errors %}is-invalid{% endif %}" type="file" accept="image/*" id="{{ form.coborrower_photo.id_for_label }}" name="{{ form.coborrower_photo.html_name }}">
+                {% for error in form.coborrower_photo.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="kap-section-title">Proposed plan payment</div>
+          <h2 class="card-title mt-1">Loan request</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12 field-required">
+              <label class="form-label d-block label-required">Pay</label>
+              <div class="kap-choice-list">
+                {% for radio in form.payment_frequency %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+              {% for error in form.payment_frequency.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6 field-required">
+              <label class="form-label label-required" for="{{ form.amount_requested.id_for_label }}">Amount</label>
               <div class="input-group">
                 <span class="input-group-text">₱</span>
                 <input class="form-control amount-input {% if form.amount_requested.errors %}is-invalid{% endif %}" type="text" inputmode="decimal" autocomplete="off" id="{{ form.amount_requested.id_for_label }}" name="{{ form.amount_requested.html_name }}" value="{{ form.amount_requested.value|default:'' }}" placeholder="0.00" required>
               </div>
-              <div class="form-text" id="amount-range-hint">
-                {% if selected_product %}Between {{ selected_product.min_amount|peso }} and {{ selected_product.max_amount|peso }}{% else %}Choose a product to see the allowed range{% endif %}
-              </div>
-              <div class="text-danger small mt-1 d-none" id="amount-range-error"></div>
               {% for error in form.amount_requested.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <div class="text-danger small mt-1 d-none" id="amountRangeError"></div>
             </div>
-            <div class="col-sm-6">
-              <label class="form-label" for="id_term_months">Repayment term</label>
-              <select class="form-select {% if form.term_months.errors %}is-invalid{% endif %}" id="id_term_months" name="{{ form.term_months.html_name }}" required>
-                <option value="">Select term…</option>
-                {% for term in loan_terms %}
-                <option value="{{ term.months }}" {% if form.term_months.value|stringformat:"s" == term.months|stringformat:"s" %}selected{% endif %}>{{ term.label }}</option>
+            <div class="col-12 field-required">
+              <label class="form-label d-block label-required">Loan purpose</label>
+              <div class="kap-choice-list">
+                {% for radio in form.loan_purpose %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
                 {% endfor %}
-              </select>
-              {% for error in form.term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-          </div>
-
-          <div class="row g-3 mt-1">
-            <div class="col-sm-6">
-              <label class="form-label" for="{{ form.payment_frequency.id_for_label }}">Payment frequency</label>
-              <select class="form-select {% if form.payment_frequency.errors %}is-invalid{% endif %}" id="{{ form.payment_frequency.id_for_label }}" name="{{ form.payment_frequency.html_name }}" required>
-                {% for value, label in form.payment_frequency.field.choices %}
-                <option value="{{ value }}" {% if form.payment_frequency.value == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              {% for error in form.payment_frequency.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-sm-6">
-              <label class="form-label">Estimated monthly payment</label>
-              <div class="estimate-box">
-                <strong id="estimate-payment">₱—</strong>
-                <span id="estimate-meta">Choose details to calculate</span>
               </div>
+              {% for error in form.loan_purpose.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-          </div>
-
-          <div class="mt-3">
-            <label class="form-label" for="{{ form.purpose.id_for_label }}">What will the loan help you do?</label>
-            <textarea class="form-control {% if form.purpose.errors %}is-invalid{% endif %}" id="{{ form.purpose.id_for_label }}" name="{{ form.purpose.html_name }}" rows="3" placeholder="Briefly describe how you plan to use the funds." required>{{ form.purpose.value|default:'' }}</textarea>
-            {% for error in form.purpose.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="col-md-8">
+              <label class="form-label" for="{{ form.purpose.id_for_label }}">Others / details</label>
+              <input class="form-control {% if form.purpose.errors %}is-invalid{% endif %}" type="text" id="{{ form.purpose.id_for_label }}" name="{{ form.purpose.html_name }}" value="{{ form.purpose.value|default:'' }}" placeholder="Required when purpose is Others">
+              {% for error in form.purpose.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
           </div>
         </div>
       </div>
 
       <div class="card-soft mb-4">
         <div class="card-header">
-          <div class="eyebrow">Step 2</div>
-          <h2 class="card-title mt-1">Your profile</h2>
-          <p class="text-muted small mb-0 mt-1">We've filled in what we already know from your account. Update anything that has changed.</p>
+          <div class="kap-section-title">Borrower information</div>
+          <h2 class="card-title mt-1">Personal data</h2>
         </div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-sm-6">
-              <label class="form-label" for="{{ profile_form.full_name.id_for_label }}">{{ profile_form.full_name.label }}</label>
-              <input type="text" class="form-control {% if profile_form.full_name.errors %}is-invalid{% endif %}" id="{{ profile_form.full_name.id_for_label }}" name="{{ profile_form.full_name.html_name }}" value="{{ profile_form.full_name.value|default_if_none:'' }}" placeholder="Your legal full name">
-              {% for error in profile_form.full_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="col-md-4 field-required">
+              <label class="form-label label-required" for="{{ form.borrower_surname.id_for_label }}">Surname</label>
+              <input class="form-control text-uppercase {% if form.borrower_surname.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_surname.id_for_label }}" name="{{ form.borrower_surname.html_name }}" value="{{ form.borrower_surname.value|default:'' }}" required>
+              {% for error in form.borrower_surname.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-sm-6">
-              <label class="form-label" for="{{ profile_form.phone.id_for_label }}">{{ profile_form.phone.label }}</label>
-              <input type="text" class="form-control {% if profile_form.phone.errors %}is-invalid{% endif %}" id="{{ profile_form.phone.id_for_label }}" name="{{ profile_form.phone.html_name }}" value="{{ profile_form.phone.value|default_if_none:'' }}" placeholder="+63 9XX XXX XXXX">
-              {% for error in profile_form.phone.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="col-md-4 field-required">
+              <label class="form-label label-required" for="{{ form.borrower_first_name.id_for_label }}">First name</label>
+              <input class="form-control text-uppercase {% if form.borrower_first_name.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_first_name.id_for_label }}" name="{{ form.borrower_first_name.html_name }}" value="{{ form.borrower_first_name.value|default:'' }}" required>
+              {% for error in form.borrower_first_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-sm-6">
-              <label class="form-label" for="{{ profile_form.date_of_birth.id_for_label }}">{{ profile_form.date_of_birth.label }}</label>
-              <input type="date" class="form-control {% if profile_form.date_of_birth.errors %}is-invalid{% endif %}" id="{{ profile_form.date_of_birth.id_for_label }}" name="{{ profile_form.date_of_birth.html_name }}" value="{% if profile_form.date_of_birth.value %}{{ profile_form.date_of_birth.value|date:'Y-m-d' }}{% endif %}">
-              {% for error in profile_form.date_of_birth.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_middle_name.id_for_label }}">Middle name</label>
+              <input class="form-control text-uppercase {% if form.borrower_middle_name.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_middle_name.id_for_label }}" name="{{ form.borrower_middle_name.html_name }}" value="{{ form.borrower_middle_name.value|default:'' }}">
+              {% for error in form.borrower_middle_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-sm-6">
-              <label class="form-label" for="{{ profile_form.employment_status.id_for_label }}">{{ profile_form.employment_status.label }}</label>
-              <input type="text" class="form-control {% if profile_form.employment_status.errors %}is-invalid{% endif %}" id="{{ profile_form.employment_status.id_for_label }}" name="{{ profile_form.employment_status.html_name }}" value="{{ profile_form.employment_status.value|default_if_none:'' }}" placeholder="e.g. Employed, Self-employed">
-              {% for error in profile_form.employment_status.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="col-12 field-required">
+              <label class="form-label label-required" for="{{ form.borrower_present_address.id_for_label }}">Present address (House #, Street, Subd., Brgy.)</label>
+              <input class="form-control {% if form.borrower_present_address.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_present_address.id_for_label }}" name="{{ form.borrower_present_address.html_name }}" value="{{ form.borrower_present_address.value|default:'' }}" required>
+              {% for error in form.borrower_present_address.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-sm-6">
-              <label class="form-label" for="{{ profile_form.monthly_income.id_for_label }}">{{ profile_form.monthly_income.label }}</label>
-              <div class="input-group">
-                <span class="input-group-text">₱</span>
-                <input type="number" step="0.01" class="form-control {% if profile_form.monthly_income.errors %}is-invalid{% endif %}" id="{{ profile_form.monthly_income.id_for_label }}" name="{{ profile_form.monthly_income.html_name }}" value="{{ profile_form.monthly_income.value|default_if_none:'' }}" placeholder="0.00">
-              </div>
-              {% for error in profile_form.monthly_income.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="col-md-8">
+              <label class="form-label" for="{{ form.borrower_municipality_city.id_for_label }}">Municipality, Province / City</label>
+              <input class="form-control {% if form.borrower_municipality_city.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_municipality_city.id_for_label }}" name="{{ form.borrower_municipality_city.html_name }}" value="{{ form.borrower_municipality_city.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_period_of_staying.id_for_label }}">Period of staying</label>
+              <input class="form-control {% if form.borrower_period_of_staying.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_period_of_staying.id_for_label }}" name="{{ form.borrower_period_of_staying.html_name }}" value="{{ form.borrower_period_of_staying.value|default:'' }}">
             </div>
             <div class="col-12">
-              <label class="form-label" for="{{ profile_form.address.id_for_label }}">{{ profile_form.address.label }}</label>
-              <textarea class="form-control {% if profile_form.address.errors %}is-invalid{% endif %}" id="{{ profile_form.address.id_for_label }}" name="{{ profile_form.address.html_name }}" rows="3" placeholder="Street, Barangay, City, Province">{{ profile_form.address.value|default_if_none:'' }}</textarea>
-              {% for error in profile_form.address.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <label class="form-label d-block">Ownership of dwelling</label>
+              <div class="kap-choice-list">
+                {% for radio in form.borrower_dwelling_ownership %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.borrower_permanent_address.id_for_label }}">Permanent address</label>
+              <input class="form-control {% if form.borrower_permanent_address.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_permanent_address.id_for_label }}" name="{{ form.borrower_permanent_address.html_name }}" value="{{ form.borrower_permanent_address.value|default:'' }}">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="{{ form.borrower_permanent_municipality_city.id_for_label }}">Permanent Municipality, Province / City</label>
+              <input class="form-control" type="text" id="{{ form.borrower_permanent_municipality_city.id_for_label }}" name="{{ form.borrower_permanent_municipality_city.html_name }}" value="{{ form.borrower_permanent_municipality_city.value|default:'' }}">
+            </div>
+            <div class="col-md-4 field-required">
+              <label class="form-label label-required" for="{{ form.borrower_tel_mobile.id_for_label }}">Tel or Mobile</label>
+              <input class="form-control {% if form.borrower_tel_mobile.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_tel_mobile.id_for_label }}" name="{{ form.borrower_tel_mobile.html_name }}" value="{{ form.borrower_tel_mobile.value|default:'' }}" required>
+              {% for error in form.borrower_tel_mobile.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.borrower_date_of_birth.id_for_label }}">Date of birth</label>
+              {{ form.borrower_date_of_birth }}
+              {% for error in form.borrower_date_of_birth.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-2">
+              <label class="form-label" for="{{ form.borrower_age.id_for_label }}">Age</label>
+              <input class="form-control" type="number" min="0" max="120" id="{{ form.borrower_age.id_for_label }}" name="{{ form.borrower_age.html_name }}" value="{{ form.borrower_age.value|default:'' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.borrower_place_of_birth.id_for_label }}">Place of birth</label>
+              <input class="form-control" type="text" id="{{ form.borrower_place_of_birth.id_for_label }}" name="{{ form.borrower_place_of_birth.html_name }}" value="{{ form.borrower_place_of_birth.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label d-block">Citizenship</label>
+              <div class="kap-choice-list">
+                {% for radio in form.borrower_citizenship %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label d-block">Gender</label>
+              <div class="kap-choice-list">
+                {% for radio in form.borrower_gender %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label d-block">Civil status</label>
+              <div class="kap-choice-list">
+                {% for radio in form.borrower_civil_status %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_nationality.id_for_label }}">Nationality</label>
+              <input class="form-control" type="text" id="{{ form.borrower_nationality.id_for_label }}" name="{{ form.borrower_nationality.html_name }}" value="{{ form.borrower_nationality.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_occupation.id_for_label }}">Occupation</label>
+              <input class="form-control" type="text" id="{{ form.borrower_occupation.id_for_label }}" name="{{ form.borrower_occupation.html_name }}" value="{{ form.borrower_occupation.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_id_presented.id_for_label }}">I.D. Presented</label>
+              <input class="form-control" type="text" id="{{ form.borrower_id_presented.id_for_label }}" name="{{ form.borrower_id_presented.html_name }}" value="{{ form.borrower_id_presented.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_contact_network.id_for_label }}">Contact # / Network</label>
+              <input class="form-control" type="text" id="{{ form.borrower_contact_network.id_for_label }}" name="{{ form.borrower_contact_network.html_name }}" value="{{ form.borrower_contact_network.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_tin_sss.id_for_label }}">TIN or SSS #</label>
+              <input class="form-control" type="text" id="{{ form.borrower_tin_sss.id_for_label }}" name="{{ form.borrower_tin_sss.html_name }}" value="{{ form.borrower_tin_sss.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_email.id_for_label }}">E-mail address</label>
+              <input class="form-control" type="email" id="{{ form.borrower_email.id_for_label }}" name="{{ form.borrower_email.html_name }}" value="{{ form.borrower_email.value|default:'' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.borrower_spouse_name.id_for_label }}">Name of spouse (if married)</label>
+              <input class="form-control" type="text" id="{{ form.borrower_spouse_name.id_for_label }}" name="{{ form.borrower_spouse_name.html_name }}" value="{{ form.borrower_spouse_name.value|default:'' }}">
             </div>
           </div>
         </div>
       </div>
 
-      <div class="card-soft">
+      <div class="card-soft mb-4">
         <div class="card-header">
-          <div class="eyebrow">Step 3</div>
-          <h2 class="card-title mt-1">Supporting documents</h2>
-          <p class="text-muted small mb-0 mt-1">Upload a valid ID and proof of income when ready. You can also add these later.</p>
+          <div class="kap-section-title">Co-borrower information</div>
+          <h2 class="card-title mt-1">Co-borrower</h2>
         </div>
         <div class="card-body">
           <div class="row g-3">
-            {% for spec, document_form in document_fields %}
-            <div class="col-md-6">
-              <label class="form-label" for="{{ document_form.file.id_for_label }}">
-                <i class="bi {{ spec.3 }} me-1"></i>{{ spec.2 }}
-              </label>
-              <input type="hidden" name="{{ document_form.prefix }}-doc_type" value="{{ spec.1 }}">
-              <div class="file-upload-card">
-                <input class="form-control {% if document_form.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_form.file.id_for_label }}" name="{{ document_form.file.html_name }}">
-                <div class="file-upload-hint text-muted">JPG, PNG, PDF, or Word · optional</div>
+            <div class="col-12">
+              <label class="form-label d-block">Relationship with borrower</label>
+              <div class="kap-choice-list">
+                {% for radio in form.coborrower_relationship %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
               </div>
-              {% for error in document_form.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            {% endfor %}
-          </div>
-        </div>
-        <div class="card-footer bg-transparent border-top p-3 d-flex flex-wrap justify-content-between gap-2">
-          <a class="btn btn-outline-secondary" href="{% url 'borrower_dashboard' %}">Save &amp; exit</a>
-          <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-light" name="save_draft" value="1" type="submit">Save draft</button>
-            <button class="btn btn-primary" name="continue" value="1" type="submit">Submit application <i class="bi bi-arrow-right ms-1"></i></button>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_surname.id_for_label }}">Surname</label>
+              <input class="form-control text-uppercase" type="text" id="{{ form.coborrower_surname.id_for_label }}" name="{{ form.coborrower_surname.html_name }}" value="{{ form.coborrower_surname.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_first_name.id_for_label }}">First name</label>
+              <input class="form-control text-uppercase" type="text" id="{{ form.coborrower_first_name.id_for_label }}" name="{{ form.coborrower_first_name.html_name }}" value="{{ form.coborrower_first_name.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_middle_name.id_for_label }}">Middle name</label>
+              <input class="form-control text-uppercase" type="text" id="{{ form.coborrower_middle_name.id_for_label }}" name="{{ form.coborrower_middle_name.html_name }}" value="{{ form.coborrower_middle_name.value|default:'' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.coborrower_present_address.id_for_label }}">Present address</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_present_address.id_for_label }}" name="{{ form.coborrower_present_address.html_name }}" value="{{ form.coborrower_present_address.value|default:'' }}">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="{{ form.coborrower_municipality_city.id_for_label }}">Municipality, Province / City</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_municipality_city.id_for_label }}" name="{{ form.coborrower_municipality_city.html_name }}" value="{{ form.coborrower_municipality_city.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_period_of_staying.id_for_label }}">Period of staying</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_period_of_staying.id_for_label }}" name="{{ form.coborrower_period_of_staying.html_name }}" value="{{ form.coborrower_period_of_staying.value|default:'' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label d-block">Ownership of dwelling</label>
+              <div class="kap-choice-list">
+                {% for radio in form.coborrower_dwelling_ownership %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.coborrower_permanent_address.id_for_label }}">Permanent address</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_permanent_address.id_for_label }}" name="{{ form.coborrower_permanent_address.html_name }}" value="{{ form.coborrower_permanent_address.value|default:'' }}">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="{{ form.coborrower_permanent_municipality_city.id_for_label }}">Permanent Municipality, Province / City</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_permanent_municipality_city.id_for_label }}" name="{{ form.coborrower_permanent_municipality_city.html_name }}" value="{{ form.coborrower_permanent_municipality_city.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_tel_mobile.id_for_label }}">Tel or Mobile</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_tel_mobile.id_for_label }}" name="{{ form.coborrower_tel_mobile.html_name }}" value="{{ form.coborrower_tel_mobile.value|default:'' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.coborrower_date_of_birth.id_for_label }}">Date of birth</label>
+              {{ form.coborrower_date_of_birth }}
+              {% for error in form.coborrower_date_of_birth.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-2">
+              <label class="form-label" for="{{ form.coborrower_age.id_for_label }}">Age</label>
+              <input class="form-control" type="number" min="0" max="120" id="{{ form.coborrower_age.id_for_label }}" name="{{ form.coborrower_age.html_name }}" value="{{ form.coborrower_age.value|default:'' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.coborrower_place_of_birth.id_for_label }}">Place of birth</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_place_of_birth.id_for_label }}" name="{{ form.coborrower_place_of_birth.html_name }}" value="{{ form.coborrower_place_of_birth.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label d-block">Citizenship</label>
+              <div class="kap-choice-list">
+                {% for radio in form.coborrower_citizenship %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label d-block">Gender</label>
+              <div class="kap-choice-list">
+                {% for radio in form.coborrower_gender %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label d-block">Civil status</label>
+              <div class="kap-choice-list">
+                {% for radio in form.coborrower_civil_status %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_nationality.id_for_label }}">Nationality</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_nationality.id_for_label }}" name="{{ form.coborrower_nationality.html_name }}" value="{{ form.coborrower_nationality.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_occupation.id_for_label }}">Occupation</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_occupation.id_for_label }}" name="{{ form.coborrower_occupation.html_name }}" value="{{ form.coborrower_occupation.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_id_presented.id_for_label }}">I.D. Presented</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_id_presented.id_for_label }}" name="{{ form.coborrower_id_presented.html_name }}" value="{{ form.coborrower_id_presented.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_contact_network.id_for_label }}">Contact # / Network</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_contact_network.id_for_label }}" name="{{ form.coborrower_contact_network.html_name }}" value="{{ form.coborrower_contact_network.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_tin_sss.id_for_label }}">TIN or SSS #</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_tin_sss.id_for_label }}" name="{{ form.coborrower_tin_sss.html_name }}" value="{{ form.coborrower_tin_sss.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_email.id_for_label }}">E-mail address</label>
+              <input class="form-control" type="email" id="{{ form.coborrower_email.id_for_label }}" name="{{ form.coborrower_email.html_name }}" value="{{ form.coborrower_email.value|default:'' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.coborrower_spouse_name.id_for_label }}">Name of spouse (if married)</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_spouse_name.id_for_label }}" name="{{ form.coborrower_spouse_name.html_name }}" value="{{ form.coborrower_spouse_name.value|default:'' }}">
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="col-lg-4">
-      <div class="card-soft mb-4 application-summary">
+      <div class="card-soft mb-4">
         <div class="card-header">
-          <div class="eyebrow">Summary</div>
-          <h2 class="card-title mt-1">Your request</h2>
+          <div class="kap-section-title">Enterprise data</div>
+          <h2 class="card-title mt-1">For new borrower</h2>
         </div>
         <div class="card-body">
-          <div class="summary-row">
-            <span class="summary-label">Product</span>
-            <span class="summary-value" id="summary-product">{% if selected_product %}{{ selected_product.name }}{% else %}—{% endif %}</span>
-          </div>
-          <div class="summary-row">
-            <span class="summary-label">Amount</span>
-            <span class="summary-value" id="summary-amount">—</span>
-          </div>
-          <div class="summary-row">
-            <span class="summary-label">Term</span>
-            <span class="summary-value" id="summary-term">—</span>
-          </div>
-          <div class="summary-row">
-            <span class="summary-label">Est. payment</span>
-            <span class="summary-value text-teal" id="summary-payment">₱—</span>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.primary_business.id_for_label }}">Primary business</label>
+              <input class="form-control" type="text" id="{{ form.primary_business.id_for_label }}" name="{{ form.primary_business.html_name }}" value="{{ form.primary_business.value|default:'' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.business_name.id_for_label }}">Business name</label>
+              <input class="form-control" type="text" id="{{ form.business_name.id_for_label }}" name="{{ form.business_name.html_name }}" value="{{ form.business_name.value|default:'' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label d-block">Ownership of business</label>
+              <div class="kap-choice-list">
+                {% for radio in form.business_ownership %}
+                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.business_address.id_for_label }}">Business address</label>
+              <input class="form-control" type="text" id="{{ form.business_address.id_for_label }}" name="{{ form.business_address.html_name }}" value="{{ form.business_address.value|default:'' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label d-block">Type of registration</label>
+              <div class="kap-choice-list">
+                <label>{{ form.reg_dti }} DTI</label>
+                <label>{{ form.reg_barangay }} Barangay Clearance / Permit</label>
+                <label>{{ form.reg_mayor }} Mayor's Permit</label>
+                <label>{{ form.reg_bir }} BIR</label>
+                <label>{{ form.reg_others }} Others</label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.reg_others_text.id_for_label }}">Other registration details</label>
+              <input class="form-control {% if form.reg_others_text.errors %}is-invalid{% endif %}" type="text" id="{{ form.reg_others_text.id_for_label }}" name="{{ form.reg_others_text.html_name }}" value="{{ form.reg_others_text.value|default:'' }}">
+              {% for error in form.reg_others_text.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.years_in_operation.id_for_label }}">Years in operation</label>
+              <input class="form-control" type="text" id="{{ form.years_in_operation.id_for_label }}" name="{{ form.years_in_operation.html_name }}" value="{{ form.years_in_operation.value|default:'' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="{{ form.persons_employed.id_for_label }}">No. of persons employed</label>
+              <input class="form-control" type="text" id="{{ form.persons_employed.id_for_label }}" name="{{ form.persons_employed.html_name }}" value="{{ form.persons_employed.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.additional_business_1_type.id_for_label }}">Type of business 1</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_1_type.id_for_label }}" name="{{ form.additional_business_1_type.html_name }}" value="{{ form.additional_business_1_type.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.additional_business_1_name.id_for_label }}">Business 1 name</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_1_name.id_for_label }}" name="{{ form.additional_business_1_name.html_name }}" value="{{ form.additional_business_1_name.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.additional_business_1_address.id_for_label }}">Business 1 address</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_1_address.id_for_label }}" name="{{ form.additional_business_1_address.html_name }}" value="{{ form.additional_business_1_address.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.additional_business_2_type.id_for_label }}">Type of business 2</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_2_type.id_for_label }}" name="{{ form.additional_business_2_type.html_name }}" value="{{ form.additional_business_2_type.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.additional_business_2_name.id_for_label }}">Business 2 name</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_2_name.id_for_label }}" name="{{ form.additional_business_2_name.html_name }}" value="{{ form.additional_business_2_name.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.additional_business_2_address.id_for_label }}">Business 2 address</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_2_address.id_for_label }}" name="{{ form.additional_business_2_address.html_name }}" value="{{ form.additional_business_2_address.value|default:'' }}">
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="callout mb-3">
-        <div class="eyebrow">Good to know</div>
-        <h3 class="h5 mt-2">Clarity is part of the process.</h3>
-        <p>There is no penalty for taking your time. We will show you what you need and why.</p>
-        <a href="{% url 'support' %}" class="btn btn-outline-light btn-sm">Ask a question</a>
-      </div>
-
-      <div class="card-soft p-3">
-        <div class="d-flex gap-2">
-          <i class="bi bi-shield-check text-teal"></i>
-          <div>
-            <strong class="d-block" style="font-size:.8rem;">Private by design</strong>
-            <span class="text-muted" style="font-size:.73rem;">Your information is used only to review and service your account.</span>
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="kap-section-title">Character reference</div>
+          <h2 class="card-title mt-1">References</h2>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table align-middle mb-0">
+              <thead>
+                <tr>
+                  <th style="width:4%">#</th>
+                  <th>Name</th>
+                  <th>Address</th>
+                  <th>Relationship</th>
+                  <th>Contact #</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for ref_form in reference_formset %}
+                <tr>
+                  <td>
+                    {{ ref_form.sort_order }}
+                    {% if ref_form.id %}{{ ref_form.id }}{% endif %}
+                    <span class="text-muted">{{ forloop.counter }}</span>
+                  </td>
+                  <td>{{ ref_form.name }}{% for error in ref_form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</td>
+                  <td>{{ ref_form.address }}</td>
+                  <td>{{ ref_form.relationship }}</td>
+                  <td>{{ ref_form.contact_number }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
         </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header">
+          <div class="kap-section-title">Certification</div>
+          <h2 class="card-title mt-1">Signatures</h2>
+        </div>
+        <div class="card-body">
+          <p class="small mb-4" style="text-align:justify; line-height:1.45;">
+            We hereby certify that all documents, data and statements on this application form are true, correct and complete that are made for the purpose of obtaining credit accommodation for <strong>KAP MICROFINANCING</strong> and that the signature appearing thereon are genuine. We authorize <strong>KAP MICROFINANCING, INC.</strong> to obtain such information as it is necessary relative to our credit application as well as waive the secrecy of deposit as provided under Republic Act No. 1405, as amended and understand that any misrepresentation or failure to disclose information on our part does not waive any of our rights under the Data Privacy Act of 2012 and other applicable law. We also understand this application may be retained by KAP Microfinancing Inc. whether or not our application for loan is granted or not.
+          </p>
+          {{ form.borrower_signature_data }}
+          {{ form.coborrower_signature_data }}
+          {% for error in form.borrower_signature_data.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
+          {% for error in form.coborrower_signature_data.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
+          <div class="row g-4">
+            <div class="col-md-6 field-required">
+              <div class="kap-sig-pad">
+                <canvas id="borrowerSignaturePad" width="480" height="160"></canvas>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
+                <div class="fw-semibold small label-required">Signature over printed name of Borrower</div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-clear-sig="borrowerSignaturePad">Clear</button>
+              </div>
+              <div class="row g-2">
+                <div class="col-12">
+                  <label class="form-label" for="{{ form.borrower_signed_name.id_for_label }}">Borrower printed name</label>
+                  <input class="form-control" type="text" id="{{ form.borrower_signed_name.id_for_label }}" name="{{ form.borrower_signed_name.html_name }}" value="{{ form.borrower_signed_name.value|default:'' }}">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="{{ form.borrower_signed_date.id_for_label }}">Date</label>
+                  {{ form.borrower_signed_date }}
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="{{ form.borrower_signed_place.id_for_label }}">Place</label>
+                  <input class="form-control" type="text" id="{{ form.borrower_signed_place.id_for_label }}" name="{{ form.borrower_signed_place.html_name }}" value="{{ form.borrower_signed_place.value|default:'' }}">
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="kap-sig-pad">
+                <canvas id="coborrowerSignaturePad" width="480" height="160"></canvas>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-2 mb-3">
+                <div class="fw-semibold small">Signature over printed name of Co-Borrower</div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-clear-sig="coborrowerSignaturePad">Clear</button>
+              </div>
+              <div class="row g-2">
+                <div class="col-12">
+                  <label class="form-label" for="{{ form.coborrower_signed_name.id_for_label }}">Co-borrower printed name</label>
+                  <input class="form-control" type="text" id="{{ form.coborrower_signed_name.id_for_label }}" name="{{ form.coborrower_signed_name.html_name }}" value="{{ form.coborrower_signed_name.value|default:'' }}">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="{{ form.coborrower_signed_date.id_for_label }}">Date</label>
+                  {{ form.coborrower_signed_date }}
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="{{ form.coborrower_signed_place.id_for_label }}">Place</label>
+                  <input class="form-control" type="text" id="{{ form.coborrower_signed_place.id_for_label }}" name="{{ form.coborrower_signed_place.html_name }}" value="{{ form.coborrower_signed_place.value|default:'' }}">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Supporting documents</h2></div>
+        <div class="card-body">
+          <p class="text-muted small mb-3">Optional attachments (JPG, PNG, GIF, WEBP, PDF, DOC, DOCX). You can also add these later from the review page.</p>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="{{ document_forms.0.file.id_for_label }}"><i class="bi bi-card-image me-1"></i>Valid ID</label>
+              <input type="hidden" name="{{ document_forms.0.prefix }}-doc_type" value="valid_id">
+              <input class="form-control {% if document_forms.0.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.0.file.id_for_label }}" name="{{ document_forms.0.file.html_name }}">
+              {% for error in document_forms.0.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ document_forms.1.file.id_for_label }}"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Proof of income</label>
+              <input type="hidden" name="{{ document_forms.1.prefix }}-doc_type" value="proof_of_income">
+              <input class="form-control {% if document_forms.1.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.1.file.id_for_label }}" name="{{ document_forms.1.file.html_name }}">
+              {% for error in document_forms.1.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ document_forms.2.file.id_for_label }}"><i class="bi bi-file-earmark me-1"></i>Other document</label>
+              <input type="hidden" name="{{ document_forms.2.prefix }}-doc_type" value="other">
+              <input class="form-control {% if document_forms.2.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.2.file.id_for_label }}" name="{{ document_forms.2.file.html_name }}">
+              {% for error in document_forms.2.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 mb-5">
+        <button class="btn btn-primary px-4" type="submit" name="create_application" value="1" id="createApplicationBtn"><i class="bi bi-check2 me-1"></i>Submit application</button>
+        <a class="btn btn-outline-secondary" href="{% url 'borrower_dashboard' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-xl-3">
+    <div class="card-soft mb-4 sticky-below-topbar">
+      <div class="card-header">
+        <h2 class="card-title mb-0">Available products</h2>
+      </div>
+      <div class="card-body p-0" id="productList">
+        {% for product in products %}
+        <div class="px-4 py-3{% if not forloop.last %} border-bottom{% endif %}">
+          <div class="fw-semibold">{{ product.name }}</div>
+          <div class="text-muted small">{{ product.min_amount|peso_whole }} – {{ product.max_amount|peso_whole }} · {{ product.interest_rate }}% / mo · {{ product.min_term_months }}–{{ product.max_term_months }} mo</div>
+        </div>
+        {% empty %}
+        <div class="p-4 text-muted small" id="noProductsMsg">No available products.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="info-strip"><i class="bi bi-shield-check me-2"></i><span>Submitted applications go to the review queue. An officer will contact you if more information is needed.</span></div>
+  </div>
+</div>
+
+<!-- Confirm Application Modal -->
+<div class="modal fade" id="confirmApplicationModal" tabindex="-1" aria-labelledby="confirmApplicationModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmApplicationModalLabel"><i class="bi bi-shield-check me-2"></i>Confirm KAP application</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">Review these details before submitting your application.</p>
+        <dl class="row mb-0 confirm-summary">
+          <dt class="col-5">Loan product</dt><dd class="col-7" id="confirmProduct">—</dd>
+          <dt class="col-5">Amount requested</dt><dd class="col-7" id="confirmAmount">—</dd>
+          <dt class="col-5">Term</dt><dd class="col-7" id="confirmTerm">—</dd>
+          <dt class="col-5">Application date</dt><dd class="col-7" id="confirmAppliedOn">—</dd>
+          <dt class="col-5">Payment frequency</dt><dd class="col-7" id="confirmFrequency">—</dd>
+          <dt class="col-5">Loan purpose</dt><dd class="col-7" id="confirmPurpose">—</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
+        <button type="button" class="btn btn-primary" id="confirmApplicationBtn"><i class="bi bi-check2 me-1"></i>Confirm &amp; submit</button>
       </div>
     </div>
   </div>
-</form>
+</div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
-{% if products %}
+{% if products and not credit_score_blocked %}
+<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.2.0/dist/signature_pad.umd.min.js"></script>
 <script>
-(() => {
-  const product = document.getElementById('{{ form.loan_product.id_for_label }}');
-  const amount = document.getElementById('{{ form.amount_requested.id_for_label }}');
-  const amountForm = amount?.closest('form');
-  const term = document.getElementById('id_term_months');
-  const payment = document.getElementById('estimate-payment');
-  const meta = document.getElementById('estimate-meta');
-  const amountHint = document.getElementById('amount-range-hint');
-  const amountRangeError = document.getElementById('amount-range-error');
-  const summaryProduct = document.getElementById('summary-product');
-  const summaryAmount = document.getElementById('summary-amount');
-  const summaryTerm = document.getElementById('summary-term');
-  const summaryPayment = document.getElementById('summary-payment');
+(function () {
+  var amountInput = document.getElementById('{{ form.amount_requested.id_for_label }}');
+  var amountForm = amountInput.closest('form');
+  var productSelect = document.getElementById('{{ form.loan_product.id_for_label }}');
+  var signaturePads = {};
 
-  const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  function setupSignaturePad(canvasId, hiddenId) {
+    var canvas = document.getElementById(canvasId);
+    var hidden = document.getElementById(hiddenId);
+    if (!canvas || !hidden || !window.SignaturePad) return null;
+    function resizeCanvas() {
+      var ratio = Math.max(window.devicePixelRatio || 1, 1);
+      var data = null;
+      if (signaturePads[canvasId] && !signaturePads[canvasId].isEmpty()) {
+        data = signaturePads[canvasId].toData();
+      }
+      canvas.width = canvas.offsetWidth * ratio;
+      canvas.height = 160 * ratio;
+      canvas.getContext('2d').scale(ratio, ratio);
+      if (signaturePads[canvasId]) {
+        signaturePads[canvasId].clear();
+        if (data) signaturePads[canvasId].fromData(data);
+      }
+    }
+    resizeCanvas();
+    var pad = new SignaturePad(canvas, {
+      backgroundColor: 'rgb(255,255,255)',
+      penColor: 'rgb(20,40,30)',
+    });
+    signaturePads[canvasId] = pad;
+    window.addEventListener('resize', resizeCanvas);
+    return pad;
+  }
+
+  setupSignaturePad('borrowerSignaturePad', '{{ form.borrower_signature_data.id_for_label }}');
+  setupSignaturePad('coborrowerSignaturePad', '{{ form.coborrower_signature_data.id_for_label }}');
+
+  function fieldHasValue(container) {
+    if (container.querySelector('#borrowerSignaturePad')) {
+      var pad = signaturePads.borrowerSignaturePad;
+      return !!(pad && !pad.isEmpty());
+    }
+    var checkedRadio = container.querySelector('input[type="radio"]:checked');
+    if (container.querySelector('input[type="radio"]')) {
+      return !!checkedRadio && !!checkedRadio.value;
+    }
+    var input = container.querySelector('input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]), select, textarea');
+    if (!input) return false;
+    return String(input.value || '').trim() !== '';
+  }
+
+  function updateRequiredFieldState(container) {
+    if (!container) return;
+    container.classList.toggle('is-filled', fieldHasValue(container));
+  }
+
+  function updateAllRequiredFields() {
+    document.querySelectorAll('.field-required').forEach(updateRequiredFieldState);
+  }
+
+  document.querySelectorAll('.field-required').forEach(function (container) {
+    container.addEventListener('input', function () { updateRequiredFieldState(container); });
+    container.addEventListener('change', function () { updateRequiredFieldState(container); });
+  });
+
+  document.querySelectorAll('[data-clear-sig]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pad = signaturePads[btn.getAttribute('data-clear-sig')];
+      if (pad) pad.clear();
+      updateAllRequiredFields();
+    });
+  });
+
+  ['borrowerSignaturePad', 'coborrowerSignaturePad'].forEach(function (canvasId) {
+    var canvas = document.getElementById(canvasId);
+    var pad = signaturePads[canvasId];
+    if (!canvas || !pad) return;
+    canvas.addEventListener('pointerup', updateAllRequiredFields);
+    canvas.addEventListener('mouseup', updateAllRequiredFields);
+    canvas.addEventListener('touchend', updateAllRequiredFields);
+  });
+
+  updateAllRequiredFields();
+
+  function syncSignatures() {
+    var borrowerHidden = document.getElementById('{{ form.borrower_signature_data.id_for_label }}');
+    var coborrowerHidden = document.getElementById('{{ form.coborrower_signature_data.id_for_label }}');
+    var borrowerPad = signaturePads.borrowerSignaturePad;
+    var coborrowerPad = signaturePads.coborrowerSignaturePad;
+    if (borrowerHidden && borrowerPad && !borrowerPad.isEmpty()) {
+      borrowerHidden.value = borrowerPad.toDataURL('image/png');
+    } else if (borrowerHidden) {
+      borrowerHidden.value = '';
+    }
+    if (coborrowerHidden && coborrowerPad && !coborrowerPad.isEmpty()) {
+      coborrowerHidden.value = coborrowerPad.toDataURL('image/png');
+    } else if (coborrowerHidden) {
+      coborrowerHidden.value = '';
+    }
+  }
 
   function formatAmount(raw) {
-    const clean = String(raw).replace(/[^\d.]/g, '');
-    const firstDot = clean.indexOf('.');
-    const normalized = firstDot !== -1
-      ? clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '')
-      : clean;
-    const parts = normalized.split('.');
-    const intPart = parts[0].replace(/^0+(?=\d)/, '');
-    const decPart = parts.length > 1 ? `.${parts[1].slice(0, 2)}` : '';
-    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + decPart;
+    var clean = raw.replace(/[^\d.]/g, '');
+    var firstDot = clean.indexOf('.');
+    if (firstDot !== -1) {
+      clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
+    }
+    var parts = clean.split('.');
+    var intPart = parts[0].replace(/^0+(?=\d)/, '');
+    var decPart = parts.length > 1 ? '.' + parts[1].slice(0, 2) : '';
+    var formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return formattedInt + decPart;
   }
 
-  function rawAmount() {
-    return amount?.value.replace(/,/g, '') || '';
-  }
+  var rangeError = document.getElementById('amountRangeError');
 
-  function selectedOption() {
-    return product?.selectedOptions?.[0];
+  function moneyFmt(n) {
+    return '₱' + Math.round(n).toLocaleString('en-US');
   }
 
   function validateAmount() {
-    const option = selectedOption();
-    const raw = rawAmount();
-    const value = parseFloat(raw);
+    var product = productSelect.options[productSelect.selectedIndex];
+    var raw = amountInput.value.replace(/,/g, '');
+    var amount = parseFloat(raw);
 
-    amountRangeError?.classList.add('d-none');
-    if (amountRangeError) amountRangeError.textContent = '';
-    amount?.classList.remove('is-invalid');
-    amount?.setCustomValidity('');
+    rangeError.classList.add('d-none');
+    rangeError.textContent = '';
+    amountInput.classList.remove('is-invalid');
+    amountInput.setCustomValidity('');
 
-    if (!option?.value || !raw) return true;
-
-    const min = parseFloat(option.dataset.min);
-    const max = parseFloat(option.dataset.max);
-    if (Number.isNaN(min) || Number.isNaN(max)) return true;
-
-    if (Number.isNaN(value) || value < min || value > max) {
-      const message = `Enter an amount between ${peso(min)} and ${peso(max)}.`;
-      if (amountRangeError) {
-        amountRangeError.textContent = message;
-        amountRangeError.classList.remove('d-none');
-      }
-      amount?.classList.add('is-invalid');
-      amount?.setCustomValidity(message);
-      return false;
-    }
-    return true;
-  }
-
-  function updateTermOptions() {
-    const option = selectedOption();
-    if (!option || !term) return;
-    const minTerm = Number(option.dataset.minTerm || 3);
-    const maxTerm = Number(option.dataset.maxTerm || 24);
-    const current = term.value;
-    term.innerHTML = '<option value="">Select term…</option>';
-    for (let months = minTerm; months <= maxTerm; months += 3) {
-      const item = document.createElement('option');
-      item.value = String(months);
-      item.textContent = `${months} months`;
-      if (String(months) === String(current)) item.selected = true;
-      term.appendChild(item);
-    }
-    if (!term.value && term.options.length > 1) {
-      term.selectedIndex = 1;
-    }
-  }
-
-  function updateSummary() {
-    const option = selectedOption();
-    const raw = rawAmount();
-    if (summaryProduct) summaryProduct.textContent = option?.value ? option.textContent.split(' — ')[0] : '—';
-    if (summaryAmount) summaryAmount.textContent = raw ? peso(raw) : '—';
-    if (summaryTerm) summaryTerm.textContent = term?.value ? `${term.value} months` : '—';
-    if (summaryPayment && payment) summaryPayment.textContent = payment.textContent;
-  }
-
-  async function updateEstimate() {
-    const option = selectedOption();
-    if (option?.dataset.min && option?.dataset.max && amountHint) {
-      amountHint.textContent = `Between ${peso(option.dataset.min)} and ${peso(option.dataset.max)}`;
-    }
-    validateAmount();
-    const raw = rawAmount();
-    if (!product?.value || !raw || !term?.value || !validateAmount()) {
-      if (payment) payment.textContent = '₱—';
-      if (meta) meta.textContent = 'Choose details to calculate';
-      updateSummary();
+    if (!product || !product.value || !raw) {
       return;
     }
-    const response = await fetch(`{% url 'estimate' %}?product=${product.value}&amount=${raw}&term=${term.value}`);
-    if (!response.ok) return;
-    const data = await response.json();
-    if (payment) payment.textContent = peso(data.monthly_payment);
-    if (meta) meta.textContent = `${data.interest_rate}% annual interest · ${peso(data.processing_fee)} processing fee`;
-    updateSummary();
+    var min = parseFloat(product.dataset.min);
+    var max = parseFloat(product.dataset.max);
+    if (isNaN(min) || isNaN(max)) {
+      return;
+    }
+    if (isNaN(amount) || amount < min || amount > max) {
+      var msg = 'Enter an amount between ' + moneyFmt(min) + ' and ' + moneyFmt(max) + '.';
+      rangeError.textContent = msg;
+      rangeError.classList.remove('d-none');
+      amountInput.classList.add('is-invalid');
+      amountInput.setCustomValidity(msg);
+    }
   }
 
-  amount?.addEventListener('input', () => {
-    const oldLength = amount.value.length;
-    const oldPos = amount.selectionStart;
-    const formatted = formatAmount(amount.value);
-    amount.value = formatted;
-    const newPos = Math.max(0, oldPos + (formatted.length - oldLength));
-    amount.setSelectionRange(newPos, newPos);
-    updateEstimate();
+  amountInput.addEventListener('input', function () {
+    var oldLength = amountInput.value.length;
+    var oldPos = amountInput.selectionStart;
+    var formatted = formatAmount(amountInput.value);
+    amountInput.value = formatted;
+    var newPos = Math.max(0, oldPos + (formatted.length - oldLength));
+    amountInput.setSelectionRange(newPos, newPos);
+    validateAmount();
   });
 
-  if (amount?.value) {
-    amount.value = formatAmount(amount.value);
+  if (amountInput.value) {
+    amountInput.value = formatAmount(amountInput.value);
   }
 
-  amountForm?.addEventListener('submit', () => {
-    if (amount) amount.value = rawAmount();
+  if (amountForm) {
+    amountForm.addEventListener('submit', function () {
+      amountInput.value = amountInput.value.replace(/,/g, '');
+    });
+  }
+
+  productSelect.addEventListener('change', function () {
+    validateAmount();
+    updateAllRequiredFields();
+  });
+  updateAllRequiredFields();
+
+  function selectedRadioLabel(name) {
+    var checked = document.querySelector('input[name="' + name + '"]:checked');
+    if (!checked) return '';
+    var label = checked.closest('label');
+    return label ? label.textContent.trim() : checked.value;
+  }
+
+  var appForm = document.getElementById('createApplicationBtn').closest('form');
+  var confirmModalEl = document.getElementById('confirmApplicationModal');
+  var confirmBtn = document.getElementById('confirmApplicationBtn');
+
+  function selectedText(select) {
+    var opt = select.options[select.selectedIndex];
+    return opt ? opt.text.trim() : '';
+  }
+
+  appForm.addEventListener('submit', function (e) {
+    syncSignatures();
+    if (appForm.dataset.confirmed === 'true') {
+      return;
+    }
+    e.preventDefault();
+
+    if (!appForm.checkValidity()) {
+      appForm.reportValidity();
+      return;
+    }
+    var borrowerPad = signaturePads.borrowerSignaturePad;
+    if (borrowerPad && borrowerPad.isEmpty()) {
+      alert('Please capture your signature before submitting the application.');
+      return;
+    }
+
+    document.getElementById('confirmProduct').textContent = selectedText(productSelect) || '—';
+    document.getElementById('confirmAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
+    var termVal = document.getElementById('{{ form.term_months.id_for_label }}').value;
+    document.getElementById('confirmTerm').textContent = termVal ? termVal + ' month(s)' : '—';
+    var appliedOnVal = document.getElementById('{{ form.applied_on.id_for_label }}').value;
+    document.getElementById('confirmAppliedOn').textContent = appliedOnVal || '—';
+    document.getElementById('confirmFrequency').textContent = selectedRadioLabel('{{ form.payment_frequency.html_name }}') || '—';
+    document.getElementById('confirmPurpose').textContent = selectedRadioLabel('{{ form.loan_purpose.html_name }}') || '—';
+
+    bootstrap.Modal.getOrCreateInstance(confirmModalEl).show();
   });
 
-  product?.addEventListener('change', () => {
-    updateTermOptions();
-    updateEstimate();
-  });
-  term?.addEventListener('change', updateEstimate);
+  confirmBtn.addEventListener('click', function () {
+    if (confirmBtn.disabled || appForm.dataset.submitting === 'true') return;
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Submitting…';
 
-  updateTermOptions();
-  updateEstimate();
+    var flag = appForm.querySelector('input[name="create_application"][type="hidden"]');
+    if (!flag) {
+      flag = document.createElement('input');
+      flag.type = 'hidden';
+      flag.name = 'create_application';
+      flag.value = '1';
+      appForm.appendChild(flag);
+    }
+
+    amountInput.value = amountInput.value.replace(/,/g, '');
+    syncSignatures();
+    appForm.dataset.confirmed = 'true';
+    appForm.dataset.submitting = 'true';
+    bootstrap.Modal.getOrCreateInstance(confirmModalEl).hide();
+    appForm.submit();
+  });
 })();
 </script>
 {% endif %}

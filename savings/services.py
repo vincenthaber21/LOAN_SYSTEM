@@ -5,7 +5,11 @@ from dateutil.relativedelta import relativedelta
 from django.db import transaction
 from django.utils import timezone
 
-from .models import SavingsAccount, SavingsTransaction
+from .models import SavingsAccount, SavingsProduct, SavingsTransaction
+
+MEMBERSHIP_SAVINGS_PRODUCT_NAME = "Membership/Savings Deposit"
+# Older installs used this product name for the same compulsory deposit.
+_LEGACY_MEMBERSHIP_SAVINGS_NAMES = ("LOAN SAVINGS", "Loan Savings")
 
 
 class SavingsError(Exception):
@@ -25,6 +29,95 @@ def _opened_at_from_date(opened_on):
     if timezone.is_naive(dt):
         return timezone.make_aware(dt, timezone.get_current_timezone())
     return dt
+
+
+def resolve_membership_savings_product():
+    """Return the product used for compulsory Membership/Savings Deposit credits."""
+    product = SavingsProduct.objects.filter(
+        name__iexact=MEMBERSHIP_SAVINGS_PRODUCT_NAME,
+        is_active=True,
+    ).first()
+    if product:
+        return product
+
+    for legacy_name in _LEGACY_MEMBERSHIP_SAVINGS_NAMES:
+        product = SavingsProduct.objects.filter(name__iexact=legacy_name).first()
+        if product:
+            if product.name != MEMBERSHIP_SAVINGS_PRODUCT_NAME:
+                product.name = MEMBERSHIP_SAVINGS_PRODUCT_NAME
+                product.is_active = True
+                product.save(update_fields=["name", "is_active"])
+            elif not product.is_active:
+                product.is_active = True
+                product.save(update_fields=["is_active"])
+            return product
+
+    product, _ = SavingsProduct.objects.get_or_create(
+        name=MEMBERSHIP_SAVINGS_PRODUCT_NAME,
+        defaults={
+            "description": "Compulsory membership savings credited from loan disbursement.",
+            "interest_rate": Decimal("0.00"),
+            "interest_term_months": 1,
+            "min_balance": Decimal("0.00"),
+            "min_deposit": Decimal("500.00"),
+            "is_active": True,
+        },
+    )
+    if not product.is_active:
+        product.is_active = True
+        product.save(update_fields=["is_active"])
+    return product
+
+
+def get_or_open_account(member, product, opened_by=None, opened_on=None):
+    """Return the member's active account for the product, opening one if needed."""
+    account = (
+        SavingsAccount.objects.select_for_update()
+        .filter(
+            member=member,
+            product=product,
+            status=SavingsAccount.Status.ACTIVE,
+        )
+        .first()
+    )
+    if account:
+        return account
+    return open_account(member, product, opened_by=opened_by, opened_on=opened_on)
+
+
+@transaction.atomic
+def credit_membership_savings_from_disbursement(
+    member,
+    amount,
+    *,
+    loan_reference="",
+    created_by=None,
+    disbursed_date=None,
+):
+    """Open/credit Membership/Savings Deposit when a loan is disbursed."""
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        return None
+
+    credited_on = disbursed_date or timezone.localdate()
+    product = resolve_membership_savings_product()
+    account = get_or_open_account(
+        member,
+        product,
+        opened_by=created_by or member,
+        opened_on=credited_on,
+    )
+    reference = f"DISB-{loan_reference}" if loan_reference else "DISB-MEMBERSHIP"
+    notes = "Membership/Savings Deposit deducted from loan disbursement."
+    return record_deposit(
+        account,
+        amount,
+        SavingsTransaction.Method.ONLINE,
+        reference=reference[:60],
+        created_by=created_by,
+        notes=notes,
+        occurred_on=credited_on,
+    )
 
 
 @transaction.atomic
@@ -60,6 +153,7 @@ def open_account(member, product, opened_by=None, initial_deposit=None, opened_o
             reference="Initial deposit",
             created_by=opened_by or member,
             notes="Opening deposit",
+            occurred_on=opened_on,
         )
         account.refresh_from_db()
 
@@ -67,13 +161,15 @@ def open_account(member, product, opened_by=None, initial_deposit=None, opened_o
 
 
 @transaction.atomic
-def record_deposit(account, amount, method, reference="", created_by=None, notes=""):
+def record_deposit(account, amount, method, reference="", created_by=None, notes="", occurred_on=None):
     if not account.is_operational:
         raise SavingsError("This savings account is not active.")
 
     amount = Decimal(str(amount))
     if amount <= 0:
         raise SavingsError("Deposit amount must be greater than zero.")
+    if occurred_on and occurred_on > timezone.localdate():
+        raise SavingsError("Transaction date cannot be in the future.")
 
     account.balance += amount
     account.save(update_fields=["balance"])
@@ -86,12 +182,13 @@ def record_deposit(account, amount, method, reference="", created_by=None, notes
         reference_number=reference,
         balance_after=account.balance,
         notes=notes,
+        created_at=_datetime_on_date(occurred_on) if occurred_on else timezone.now(),
         created_by=created_by,
     )
 
 
 @transaction.atomic
-def record_withdrawal(account, amount, method, reference="", created_by=None, notes=""):
+def record_withdrawal(account, amount, method, reference="", created_by=None, notes="", occurred_on=None):
     if not account.is_operational:
         raise SavingsError("This savings account is not active.")
 
@@ -100,6 +197,8 @@ def record_withdrawal(account, amount, method, reference="", created_by=None, no
         raise SavingsError("Withdrawal amount must be greater than zero.")
     if amount > account.balance:
         raise SavingsError("Insufficient savings balance.")
+    if occurred_on and occurred_on > timezone.localdate():
+        raise SavingsError("Transaction date cannot be in the future.")
 
     remaining = account.balance - amount
     if remaining > 0 and remaining < account.product.min_balance:
@@ -119,6 +218,7 @@ def record_withdrawal(account, amount, method, reference="", created_by=None, no
         reference_number=reference,
         balance_after=account.balance,
         notes=notes,
+        created_at=_datetime_on_date(occurred_on) if occurred_on else timezone.now(),
         created_by=created_by,
     )
 

@@ -111,29 +111,36 @@ def get_secure_database_config(db_url):
     return {"default": config}
 
 
-_database_url = os.environ.get("DATABASE_URL")
-if _database_url:
-    DATABASES = get_secure_database_config(db_url=_database_url)
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.mysql",
-            "NAME": "loan_db",
-            "USER": "root",
-            "PASSWORD": "root",
-            "HOST": "127.0.0.1",
-            "PORT": "3307",
-            # Recycle before MySQL wait_timeout; health-check drops dead sockets
-            # (avoids "MySQL server has gone away" in long-lived scheduler threads).
-            "CONN_MAX_AGE": 300,
-            "CONN_HEALTH_CHECKS": True,
-            "OPTIONS": {
-                "connect_timeout": 20,
-                "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
-                "charset": "utf8mb4",
-            },
-        }
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "loan_system.sqlite3",
     }
+}
+
+# _database_url = os.environ.get("DATABASE_URL")
+# if _database_url:
+#     DATABASES = get_secure_database_config(db_url=_database_url)
+# else:
+#     DATABASES = {
+#         "default": {
+#             "ENGINE": "django.db.backends.mysql",
+#             "NAME": "loan_db",
+#             "USER": "root",
+#             "PASSWORD": "root",
+#             "HOST": "127.0.0.1",
+#             "PORT": "3307",
+#             # Recycle before MySQL wait_timeout; health-check drops dead sockets
+#             # (avoids "MySQL server has gone away" in long-lived scheduler threads).
+#             "CONN_MAX_AGE": 300,
+#             "CONN_HEALTH_CHECKS": True,
+#             "OPTIONS": {
+#                 "connect_timeout": 20,
+#                 "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
+#                 "charset": "utf8mb4",
+#             },
+#         }
+#     }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

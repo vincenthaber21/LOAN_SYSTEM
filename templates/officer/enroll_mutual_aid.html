@@ -16,7 +16,7 @@
   }
   .member-combobox .ts-wrapper.focus .ts-control {
     border-color: var(--teal);
-    box-shadow: 0 0 0 .2rem rgba(29, 124, 120, .15);
+    box-shadow: 0 0 0 .2rem rgba(24, 96, 16, .15);
   }
   .member-combobox .ts-dropdown {
     border-radius: 12px;
@@ -68,7 +68,9 @@
             <div class="col-md-6">
               <div class="d-flex justify-content-between align-items-center mb-1">
                 <label class="form-label mb-0" for="{{ form.plan.id_for_label }}">{{ form.plan.label }}</label>
+                {% if is_admin %}
                 <a class="btn btn-link btn-sm p-0 text-decoration-none" href="{% url 'officer_add_mutual_aid_plan' %}"><i class="bi bi-plus-circle me-1"></i>Add plan</a>
+                {% endif %}
               </div>
               <select class="form-select {% if form.plan.errors %}is-invalid{% endif %}" id="{{ form.plan.id_for_label }}" name="{{ form.plan.html_name }}" required>
                 <option value="">Select plan…</option>
@@ -100,7 +102,9 @@
     <div class="card-soft mb-4">
       <div class="card-header d-flex justify-content-between align-items-center">
         <h2 class="card-title mb-0">Active plans</h2>
+        {% if is_admin %}
         <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_add_mutual_aid_plan' %}"><i class="bi bi-plus-lg me-1"></i>Add</a>
+        {% endif %}
       </div>
       <div class="card-body p-0">
         {% for plan in plans %}

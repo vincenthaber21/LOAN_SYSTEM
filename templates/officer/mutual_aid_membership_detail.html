@@ -56,6 +56,12 @@
         <form method="post">{% csrf_token %}
           <input type="hidden" name="action" value="contribution">
           <div class="mb-3"><label class="form-label">Amount</label>{{ contribution_form.amount }}</div>
+          <div class="mb-3">
+            <label class="form-label" for="{{ contribution_form.contribution_date.id_for_label }}">{{ contribution_form.contribution_date.label }}</label>
+            {{ contribution_form.contribution_date }}
+            <div class="form-text">{{ contribution_form.contribution_date.help_text }}</div>
+            {% for error in contribution_form.contribution_date.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
           <div class="mb-3"><label class="form-label">Method</label>{{ contribution_form.method }}</div>
           <div class="mb-3"><label class="form-label">Period</label>{{ contribution_form.period }}<div class="form-text">Link this payment to a contribution period.</div></div>
           <div class="mb-3"><label class="form-label">Reference</label>{{ contribution_form.reference_number }}</div>

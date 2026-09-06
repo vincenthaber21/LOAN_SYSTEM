@@ -70,17 +70,12 @@
         <div class="card-body">
           <div class="row g-3">
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.interest_rate.id_for_label }}">Interest rate (% p.a.)</label>
+              <label class="form-label" for="{{ form.interest_rate.id_for_label }}">Interest rate (% flat / month)</label>
               <div class="input-group">
                 <input class="form-control {% if form.interest_rate.errors %}is-invalid{% endif %}" type="number" step="0.01" min="0" id="{{ form.interest_rate.id_for_label }}" name="{{ form.interest_rate.html_name }}" value="{{ form.interest_rate.value|default:'' }}" placeholder="12.00" required>
                 <span class="input-group-text">%</span>
               </div>
               {% for error in form.interest_rate.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.min_term_months.id_for_label }}">Min term (months)</label>
-              <input class="form-control {% if form.min_term_months.errors %}is-invalid{% endif %}" type="number" min="1" id="{{ form.min_term_months.id_for_label }}" name="{{ form.min_term_months.html_name }}" value="{{ form.min_term_months.value|default:'' }}" placeholder="3" required>
-              {% for error in form.min_term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
             <div class="col-md-4">
               <label class="form-label" for="{{ form.max_term_months.id_for_label }}">Max term (months)</label>
@@ -120,7 +115,7 @@
 <style>
 .form-label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; margin-bottom: .35rem; display: flex; align-items: center; gap: 8px; }
 .form-control, .input-group-text, .form-select { border-color: var(--line); border-radius: 9px; font-size: .9rem; }
-.form-control:focus, .form-select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(29, 124, 120, .12); }
+.form-control:focus, .form-select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(24, 96, 16, .12); }
 .helptext { font-size: .74rem; color: var(--ink-soft); margin-top: 4px; }
 .invalid-feedback { display: block; font-size: .76rem; }
 .btn-outline-secondary { border-color: var(--line); color: var(--ink-soft); }

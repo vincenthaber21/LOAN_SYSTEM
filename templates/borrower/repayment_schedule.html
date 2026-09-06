@@ -3,6 +3,224 @@
 {% block title %}Repayment schedule{% endblock %}
 {% block topbar_context %}Know what is due and when.{% endblock %}
 {% block content %}
-<div class="page-heading"><div><div class="eyebrow">Loan {{ loan.reference }}</div><h1>Repayment schedule</h1><p>Your full payment plan, with paid and upcoming installments clearly separated.</p></div><a class="btn btn-outline-primary csv-link" href="{% url 'export_schedule_csv' loan_id=loan.id %}"><i class="bi bi-download"></i>Download CSV</a></div>
-<div class="row g-4"><div class="col-lg-8"><div class="card-soft"><div class="card-header d-flex justify-content-between align-items-center"><h2 class="card-title">Payment plan</h2><span class="small text-muted">{{ paid_payment_count|default:"0" }} of {{ payment_count|default:"0" }} paid</span></div>{% if schedule %}<div class="table-responsive"><table class="table table-hover"><thead><tr><th>Due date</th><th>Payment</th><th>Principal</th><th>Interest</th><th>Status</th></tr></thead><tbody>{% for payment in schedule %}<tr><td><strong>{{ payment.due_date }}</strong>{% if payment.is_next %}<span class="badge status-pending ms-2">Next</span>{% endif %}</td><td>{{ payment.amount|peso }}</td><td>{{ payment.principal|peso }}</td><td>{{ payment.interest|peso }}</td><td>{% include "includes/status_badge.html" with status=payment.status label=payment.status_label %}</td></tr>{% endfor %}</tbody></table></div>{% else %}{% include "includes/empty_state.html" with icon="bi-calendar3" title="Schedule is not available yet" description="Your repayment schedule will appear once the loan is active." %}{% endif %}</div></div><div class="col-lg-4"><div class="card-soft mb-4"><div class="card-header"><h2 class="card-title">Next payment</h2></div><div class="card-body"><div class="eyebrow">Due {{ next_payment.due_date|default:"—" }}</div><div class="metric-value mb-2">₱{{ next_payment.amount|default:"0.00" }}</div><p class="text-muted small">{{ next_payment.description|default:"Your payment amount includes principal and interest." }}</p><p class="text-muted small mt-3 mb-0">Payments are recorded by your loan officer. <a href="{% url 'support' %}">Contact support</a> if you need help.</p></div></div><div class="info-strip"><i class="bi bi-lightbulb me-2"></i><span>Paying a little extra may reduce your total interest. <a href="{% url 'support' %}">Learn more</a></span></div></div></div>
+<div class="page-heading">
+  <div>
+    <div class="eyebrow">Loan {{ loan.reference }}</div>
+    <h1>{% if showing_original %}Original repayment schedule{% else %}Repayment schedule{% endif %}</h1>
+    <p>
+      {% if showing_original and original_terms %}
+      Your original plan from disbursement on {{ loan.start_date }}
+      · {{ original_terms.term_months }}-month term at {{ original_terms.interest_rate }}%
+      · {% if view_mode == "month" %}{{ original_terms.term_months }} monthly payments of {{ original_terms.per_month|peso }}{% elif view_mode == "biweek" %}biweekly working-day payments{% elif view_mode == "week" %}weekly working-day payments{% else %}{{ original_terms.periods }} working-day payments of {{ original_terms.per_day|peso }}{% endif %}
+      · interest started the Monday on or after disbursement.
+      {% elif loan.is_rescheduled %}
+      Your rescheduled plan from {{ loan.reschedule_date_display }}
+      · {{ loan.term_months }}-month term at {{ loan.interest_rate }}%
+      · {% if view_mode == "month" %}{{ loan.term_months }} monthly payments of {{ loan.adjusted_monthly_payment|peso }} <span class="text-muted">(exact {{ loan.monthly_payment|peso }})</span>{% elif view_mode == "biweek" %}biweekly payments of {{ loan.adjusted_biweekly_payment|peso }} <span class="text-muted">(exact {{ loan.biweekly_payment|peso }})</span>{% elif view_mode == "week" %}weekly payments of {{ loan.adjusted_weekly_payment|peso }} <span class="text-muted">(exact {{ loan.weekly_payment|peso }})</span>{% else %}{{ loan.working_days }} working-day payments of {{ loan.adjusted_daily_payment|peso }} <span class="text-muted">(exact {{ loan.daily_payment|peso }})</span>{% endif %}
+      · interest starts {{ loan.reschedule_interest_start_display }}.
+      {% else %}
+      Your full payment plan from disbursement on {{ loan.start_date }}
+      · {{ loan.term_months }}-month term
+      · {% if view_mode == "month" %}{{ loan.term_months }} monthly payments of {{ loan.adjusted_monthly_payment|peso }} <span class="text-muted">(exact {{ loan.monthly_payment|peso }})</span>{% elif view_mode == "biweek" %}biweekly payments of {{ loan.adjusted_biweekly_payment|peso }} <span class="text-muted">(exact {{ loan.biweekly_payment|peso }})</span>{% elif view_mode == "week" %}weekly payments of {{ loan.adjusted_weekly_payment|peso }} <span class="text-muted">(exact {{ loan.weekly_payment|peso }})</span>{% else %}{{ loan.working_days }} working-day payments of {{ loan.adjusted_daily_payment|peso }} <span class="text-muted">(exact {{ loan.daily_payment|peso }})</span>{% endif %}
+      · interest starts the Monday on or after disbursement.
+      {% endif %}
+    </p>
+  </div>
+  <a class="btn btn-outline-primary csv-link" href="{% url 'export_schedule_csv' loan_id=loan.id %}"><i class="bi bi-download"></i>Download CSV</a>
+</div>
+
+{% if loan.is_rescheduled %}
+<div class="reschedule-banner" role="status">
+  <span class="reschedule-banner__icon" aria-hidden="true"><i class="bi bi-arrow-repeat"></i></span>
+  <div>
+    <p class="reschedule-banner__title">Rescheduled on {{ loan.reschedule_date_display }}</p>
+    <p class="reschedule-banner__meta">
+      Your remaining balance was rebuilt into a {{ loan.term_months }}-month term at {{ loan.interest_rate }}%.
+      New payments start {{ loan.reschedule_interest_start_display }}
+      · principal {{ loan.principal|peso }}
+      · original release {{ loan.original_amount|peso }}.
+      {% if showing_original %}
+      You are viewing the original disbursement dates (read-only).
+      {% else %}
+      Switch to Original dates to review the first schedule.
+      {% endif %}
+    </p>
+  </div>
+</div>
+{% endif %}
+
+<form class="filter-bar schedule-filters mb-4" method="get" action="{% url 'repayment_schedule' loan_id=loan.id %}">
+  <div class="schedule-filters-row">
+    {% if loan.is_rescheduled %}
+    <div class="schedule-filter-field">
+      <label class="form-label" for="schedule_plan">Plan</label>
+      <select class="form-select" id="schedule_plan" name="plan" onchange="this.form.submit()">
+        <option value="current" {% if schedule_plan == "current" %}selected{% endif %}>Current (rescheduled)</option>
+        <option value="original" {% if schedule_plan == "original" %}selected{% endif %}>Original dates</option>
+      </select>
+    </div>
+    {% endif %}
+    <div class="schedule-filter-field">
+      <label class="form-label" for="schedule_view">Display</label>
+      <select class="form-select" id="schedule_view" name="view" onchange="this.form.submit()">
+        <option value="day" {% if view_mode == "day" %}selected{% endif %}>Daily</option>
+        <option value="week" {% if view_mode == "week" %}selected{% endif %}>Weekly</option>
+        <option value="biweek" {% if view_mode == "biweek" %}selected{% endif %}>Biweekly</option>
+        <option value="month" {% if view_mode == "month" %}selected{% endif %}>Monthly</option>
+      </select>
+    </div>
+    <div class="schedule-filter-field">
+      <label class="form-label" for="schedule_month">Month</label>
+      <select class="form-select" id="schedule_month" name="month" onchange="this.form.submit()">
+        <option value="">All months</option>
+        {% for option in month_options %}
+        <option value="{{ option.value }}" {% if selected_month == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="schedule-filter-actions">
+      <label class="form-label schedule-filter-spacer" aria-hidden="true">&nbsp;</label>
+      <button class="btn btn-outline-primary" type="submit">Apply</button>
+    </div>
+    {% if application_pay_frequency %}
+    <div class="schedule-filter-meta">
+      <span class="schedule-filter-meta-label">Application pay</span>
+      <strong>{{ loan.application.get_payment_frequency_display }}</strong>
+    </div>
+    {% endif %}
+  </div>
+</form>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card-soft">
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="card-title">
+          {% if showing_original %}Original {% endif %}{% if view_mode == "month" %}monthly plan{% elif view_mode == "biweek" %}biweekly plan{% elif view_mode == "week" %}weekly plan{% else %}daily plan{% endif %}
+        </h2>
+        <span class="small text-muted">
+          {% if showing_original %}
+          {{ payment_count|default:"0" }} original payment{{ payment_count|pluralize }}
+          {% else %}
+          {{ paid_payment_count|default:"0" }} of {{ payment_count|default:"0" }} paid
+          {% endif %}
+        </span>
+      </div>
+      {% if schedule %}
+      <div class="table-responsive">
+        <table class="table table-hover">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>{% if view_mode == "day" %}Due date{% else %}Period{% endif %}</th>
+              <th>Payment</th>
+              <th>Exact</th>
+              <th>Principal</th>
+              <th>Interest</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for payment in schedule %}
+            <tr{% if not showing_original and loan.is_rescheduled and payment.installment_number == 1 %} class="schedule-reschedule-start"{% elif showing_original and payment.installment_number == 1 %} class="schedule-original-start"{% endif %}>
+              <td class="text-muted">{{ payment.installment_number }}</td>
+              <td>
+                {% if view_mode == "day" %}
+                <strong>{{ payment.due_date }}</strong>
+                {% if showing_original and payment.installment_number == 1 %}<span class="badge status-neutral ms-2">Original start</span>{% endif %}
+                {% if not showing_original and loan.is_rescheduled and payment.installment_number == 1 %}<span class="badge status-rescheduled ms-2">Rescheduled start</span>{% endif %}
+                {% if not showing_original and payment.is_next %}<span class="badge status-pending ms-2">Next</span>{% endif %}
+                {% else %}
+                <strong>{{ payment.label }}</strong>
+                {% if showing_original and payment.installment_number == 1 %}<span class="badge status-neutral ms-2">Original start</span>{% endif %}
+                {% if not showing_original and loan.is_rescheduled and payment.installment_number == 1 %}<span class="badge status-rescheduled ms-2">Rescheduled start</span>{% endif %}
+                <span class="person-sub d-block">{{ payment.start_date }} – {{ payment.end_date }} · {{ payment.day_count }} working day{{ payment.day_count|pluralize }}</span>
+                {% endif %}
+              </td>
+              <td class="fw-semibold">{{ payment.adjusted_amount|peso }}</td>
+              <td class="text-muted">{{ payment.amount|peso }}</td>
+              <td>{{ payment.principal|peso }}</td>
+              <td>{{ payment.interest|peso }}</td>
+              <td>
+                {% if showing_original %}
+                <span class="badge status-neutral">Original</span>
+                {% else %}
+                {% include "includes/status_badge.html" with status=payment.status label=payment.status_label %}
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      {% include "includes/empty_state.html" with icon="bi-calendar3" title="Schedule is not available yet" description="Your repayment schedule will appear once the loan is active." %}
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">{% if showing_original %}Original summary{% else %}Payment summary{% endif %}</h2></div>
+      <div class="card-body">
+        {% if showing_original and original_terms %}
+        <div class="detail-label">Original principal</div><div class="detail-value mb-3">{{ original_terms.principal|peso }}</div>
+        <div class="detail-label">Origination date</div><div class="detail-value mb-3">{{ loan.start_date }}</div>
+        <div class="detail-label">Flat interest ({{ original_terms.interest_rate }}% × {{ original_terms.term_months }} mo)</div><div class="detail-value mb-3">{{ original_terms.total_interest|peso }}</div>
+        <div class="detail-label">Term</div><div class="detail-value mb-3">{{ original_terms.term_months }} months · {{ original_terms.periods }} working days</div>
+        <div class="detail-label">Payment per day</div>
+        <div class="detail-value mb-1">{{ original_terms.per_day|peso }}</div>
+        <div class="text-muted small mb-3">Exact schedule amounts</div>
+        <div class="detail-label">Payment per month</div>
+        <div class="detail-value mb-1">{{ original_terms.per_month|peso }}</div>
+        <div class="text-muted small mb-3">Exact schedule amounts</div>
+        <div class="detail-label">Original total payable</div>
+        <div class="detail-value mb-0">{{ original_terms.total_payable|peso }}</div>
+        {% else %}
+        <div class="detail-label">Principal</div><div class="detail-value mb-3">{{ loan.principal|peso }}</div>
+        {% if loan.is_rescheduled %}
+        <div class="detail-label">Rescheduled on</div>
+        <div class="detail-value mb-1">{{ loan.reschedule_date_display }}</div>
+        <div class="text-muted small mb-3">Term starts {{ loan.reschedule_interest_start_display }}</div>
+        <div class="detail-label">Original release</div><div class="detail-value mb-3">{{ loan.original_amount|peso }}</div>
+        {% endif %}
+        <div class="detail-label">Flat interest ({{ loan.interest_rate }}% × {{ loan.term_months }} mo)</div><div class="detail-value mb-3">{{ loan.total_interest|peso }}</div>
+        <div class="detail-label">Term</div><div class="detail-value mb-3">{{ loan.term_months }} months · {{ loan.working_days }} working days</div>
+        <div class="detail-label">Payment per day</div>
+        <div class="detail-value mb-1">{{ loan.adjusted_daily_payment|peso }}</div>
+        <div class="text-muted small mb-3">Exact {{ loan.daily_payment|peso }}</div>
+        <div class="detail-label">Payment per month</div>
+        <div class="detail-value mb-1">{{ loan.adjusted_monthly_payment|peso }}</div>
+        <div class="text-muted small mb-3">Exact {{ loan.monthly_payment|peso }}</div>
+        <div class="detail-label">Total payable</div>
+        <div class="detail-value mb-1">{{ loan.adjusted_total_payable|peso }}</div>
+        <div class="text-muted small mb-0">Exact {{ loan.total_payable|peso }}</div>
+        {% endif %}
+      </div>
+    </div>
+    {% if showing_original %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Original plan</h2></div>
+      <div class="card-body">
+        <p class="text-muted mb-3">This is your schedule from disbursement, before the remaining balance was rescheduled. Payments follow the current plan only.</p>
+        <a class="btn btn-outline-primary w-100" href="?plan=current&view={{ view_mode }}{% if selected_month %}&month={{ selected_month }}{% endif %}"><i class="bi bi-arrow-repeat me-1"></i>Back to current schedule</a>
+      </div>
+    </div>
+    {% else %}
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Next payment</h2></div>
+      <div class="card-body">
+        <div class="eyebrow">Due {{ next_payment.due_date|default:"—" }}</div>
+        {% if next_payment %}
+        <div class="metric-value mb-1">{{ next_payment.adjusted_remaining|peso }}</div>
+        <div class="text-muted small mb-2">Exact {{ next_payment.remaining|peso }}</div>
+        {% else %}
+        <div class="metric-value mb-2">₱0.00</div>
+        {% endif %}
+        <p class="text-muted small">{{ next_payment.description|default:"Your payment amount includes principal and interest." }}</p>
+        <p class="text-muted small mt-3 mb-0">Payments are recorded by your loan officer. <a href="{% url 'support' %}">Contact support</a> if you need help.</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

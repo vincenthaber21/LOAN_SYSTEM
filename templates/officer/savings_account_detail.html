@@ -56,6 +56,12 @@
             {{ transaction_form.action }}
           </div>
           <div class="mb-3"><label class="form-label">Amount</label>{{ transaction_form.amount }}{% for error in transaction_form.amount.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+          <div class="mb-3">
+            <label class="form-label" for="{{ transaction_form.transaction_date.id_for_label }}">{{ transaction_form.transaction_date.label }}</label>
+            {{ transaction_form.transaction_date }}
+            <div class="form-text">{{ transaction_form.transaction_date.help_text }}</div>
+            {% for error in transaction_form.transaction_date.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
           <div class="mb-3"><label class="form-label">Method</label>{{ transaction_form.method }}</div>
           <div class="mb-3"><label class="form-label">Reference</label>{{ transaction_form.reference_number }}</div>
           <div class="mb-4"><label class="form-label">Notes</label>{{ transaction_form.notes }}</div>

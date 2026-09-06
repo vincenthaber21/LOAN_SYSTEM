@@ -25,9 +25,11 @@
           {% include "includes/messages.html" %}
           {% block content %}{% endblock %}
         </main>
+        {% include "includes/footer.html" %}
       </div>
     {% else %}
       {% block auth_content %}{% endblock %}
+      {% include "includes/footer.html" %}
     {% endif %}
   </div>
   {% endblock %}

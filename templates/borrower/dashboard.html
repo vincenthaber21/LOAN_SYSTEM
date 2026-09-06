@@ -32,21 +32,34 @@
 </div>
 {% endif %}
 <div class="row g-3 mb-4 fade-up-3">
-  <div class="col-md-4">
+  <div class="col-sm-6 col-xl-3">
+    <div class="card-soft metric-card">
+      <div class="metric-label">Credit score</div>
+      <div class="metric-value">{{ credit_score }}</div>
+      <div class="metric-note {% if credit_score_blocked %}text-danger{% else %}positive{% endif %}">
+        {% if credit_score_blocked %}
+        Below the minimum for new loans
+        {% else %}
+        Starts at 100 · −0.1 per late month
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
     <div class="card-soft metric-card">
       <div class="metric-label">Application status</div>
       <div class="metric-value" style="font-size:1.55rem;">{{ application_status_label }}</div>
       <div class="metric-note">{{ application_status_note }}</div>
     </div>
   </div>
-  <div class="col-md-4">
+  <div class="col-sm-6 col-xl-3">
     <div class="card-soft metric-card">
       <div class="metric-label">Paid toward balance</div>
       <div class="metric-value">{{ total_paid|peso }}</div>
       <div class="metric-note positive">{% if payment_progress %}{{ payment_progress }}% of total payable{% else %}No payments recorded yet{% endif %}</div>
     </div>
   </div>
-  <div class="col-md-4">
+  <div class="col-sm-6 col-xl-3">
     <div class="card-soft metric-card">
       <div class="metric-label">Documents on file</div>
       <div class="metric-value">{{ verified_document_count }} <span class="text-muted" style="font-size:1rem;">/ {{ required_document_count }}</span></div>

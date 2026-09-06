@@ -126,6 +126,12 @@ class OfficerSavingsTransactionForm(forms.Form):
         min_value=Decimal("0.01"),
         widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0.01"}),
     )
+    transaction_date = forms.DateField(
+        label="Transaction date",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+        initial=timezone.localdate,
+        help_text="Use the same date as the related cash movement or loan disbursement.",
+    )
     method = forms.ChoiceField(
         choices=SavingsTransaction.Method.choices,
         widget=forms.Select(attrs={"class": "form-select"}),
@@ -142,6 +148,13 @@ class OfficerSavingsTransactionForm(forms.Form):
     def __init__(self, *args, account=None, **kwargs):
         self.account = account
         super().__init__(*args, **kwargs)
+        self.fields["transaction_date"].widget.attrs["max"] = timezone.localdate().isoformat()
+
+    def clean_transaction_date(self):
+        transaction_date = self.cleaned_data.get("transaction_date")
+        if transaction_date and transaction_date > timezone.localdate():
+            raise forms.ValidationError("Transaction date cannot be in the future.")
+        return transaction_date
 
     def clean(self):
         cleaned = super().clean()

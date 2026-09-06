@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django import forms
+from django.utils import timezone
 
 from lending.models import User
 
@@ -127,6 +128,12 @@ class OfficerContributionForm(forms.Form):
         min_value=Decimal("0.01"),
         widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0.01"}),
     )
+    contribution_date = forms.DateField(
+        label="Contribution date",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+        initial=timezone.localdate,
+        help_text="Use the same date as the related cash movement or loan disbursement.",
+    )
     method = forms.ChoiceField(
         choices=MutualAidContribution.Method.choices,
         widget=forms.Select(attrs={"class": "form-select"}),
@@ -149,12 +156,19 @@ class OfficerContributionForm(forms.Form):
     def __init__(self, *args, membership=None, **kwargs):
         self.membership = membership
         super().__init__(*args, **kwargs)
+        self.fields["contribution_date"].widget.attrs["max"] = timezone.localdate().isoformat()
         if membership:
             paid_period_ids = membership.contributions.filter(period__isnull=False).values_list("period_id", flat=True)
             self.fields["period"].queryset = (
                 membership.plan.periods.exclude(pk__in=paid_period_ids).order_by("-date_from")
             )
             self.fields["period"].label_from_instance = lambda obj: f"{obj.display_label} ({obj.date_from:%Y-%m-%d} to {obj.date_to:%Y-%m-%d})"
+
+    def clean_contribution_date(self):
+        contribution_date = self.cleaned_data.get("contribution_date")
+        if contribution_date and contribution_date > timezone.localdate():
+            raise forms.ValidationError("Contribution date cannot be in the future.")
+        return contribution_date
 
 
 class OfficerClaimForm(forms.Form):

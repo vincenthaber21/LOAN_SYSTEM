@@ -12,6 +12,7 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         MEMBER = "member", "Member"
         OFFICER = "officer", "Loan Officer"
+        MANAGER = "manager", "Manager"
         ADMIN = "admin", "Admin"
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
@@ -33,7 +34,7 @@ class User(AbstractUser):
 
     @property
     def is_officer(self):
-        return self.role in {self.Role.OFFICER, self.Role.ADMIN} or self.is_staff
+        return self.role in {self.Role.OFFICER, self.Role.MANAGER, self.Role.ADMIN} or self.is_staff
 
     @property
     def is_member(self):
@@ -43,6 +44,10 @@ class User(AbstractUser):
     def member_accounts(cls):
         """Borrower accounts visible to loan officers — role member only, no staff/admin."""
         return cls.objects.filter(role=cls.Role.MEMBER, is_staff=False, is_superuser=False)
+
+    @property
+    def is_manager(self):
+        return self.role in {self.Role.MANAGER, self.Role.ADMIN} or self.is_superuser
 
     @property
     def is_admin(self):
@@ -151,6 +156,16 @@ class LoanOfficer(RoleDefaultMixin, User):
         verbose_name_plural = "Loan Officers"
 
 
+class Manager(RoleDefaultMixin, User):
+    ROLE = User.Role.MANAGER
+    objects = RoleScopedManager(User.Role.MANAGER)
+
+    class Meta:
+        proxy = True
+        verbose_name = "Manager"
+        verbose_name_plural = "Managers"
+
+
 class Administrator(RoleDefaultMixin, User):
     ROLE = User.Role.ADMIN
     objects = RoleScopedManager(User.Role.ADMIN)
@@ -172,8 +187,12 @@ class LoanProduct(models.Model):
     loan_type = models.CharField(max_length=20, choices=LoanType.choices)
     min_amount = models.DecimalField(max_digits=12, decimal_places=2)
     max_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    interest_rate = models.DecimalField(max_digits=5, decimal_places=2, help_text="Annual percentage")
-    min_term_months = models.PositiveIntegerField(default=3)
+    interest_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        help_text="Flat monthly percentage charged on principal for each month of the term.",
+    )
+    min_term_months = models.PositiveIntegerField(default=1)
     max_term_months = models.PositiveIntegerField(default=24)
     processing_fee_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     grace_period_days = models.PositiveIntegerField(
@@ -186,14 +205,9 @@ class LoanProduct(models.Model):
         return self.name
 
     def estimate_payment(self, amount, term_months):
-        principal = Decimal(str(amount))
-        periods = int(term_months)
-        monthly_rate = (self.interest_rate / Decimal("100")) / Decimal("12")
-        if monthly_rate == 0:
-            return (principal / periods).quantize(Decimal("0.01"))
-        factor = (Decimal("1") + monthly_rate) ** periods
-        payment = principal * monthly_rate * factor / (factor - Decimal("1"))
-        return payment.quantize(Decimal("0.01"))
+        from .services import calculate_flat_loan_amounts
+
+        return calculate_flat_loan_amounts(amount, self.interest_rate, term_months)["per_month"]
 
     def fee_for(self, amount):
         return (Decimal(str(amount)) * self.processing_fee_percent / Decimal("100")).quantize(Decimal("0.01"))
@@ -212,9 +226,55 @@ class LoanApplication(models.Model):
         DEFAULTED = "defaulted", "Defaulted"
 
     class PaymentFrequency(models.TextChoices):
-        MONTHLY = "monthly", "Monthly"
+        DAILY = "daily", "Daily"
+        WEEKLY = "weekly", "Weekly"
         BIWEEKLY = "biweekly", "Biweekly"
+        MONTHLY = "monthly", "Monthly"
 
+    class ApplicationType(models.TextChoices):
+        NEW = "new", "New Application"
+        RENEW = "renew", "Renew Application"
+
+    class LoanPurpose(models.TextChoices):
+        ADDITIONAL_CAPITAL = "additional_capital", "Additional Capital / Business Expansion"
+        EXISTING_IMPROVEMENT = "existing_improvement", "Existing Improvement / Repair"
+        OTHERS = "others", "Others"
+
+    class DwellingOwnership(models.TextChoices):
+        OWNED = "owned", "Owned"
+        RENTED = "rented", "Rented"
+        MORTGAGED = "mortgaged", "Mortgaged"
+        USED_FREE = "used_free", "Used Free"
+
+    class Citizenship(models.TextChoices):
+        FILIPINO = "filipino", "Filipino"
+        OTHERS = "others", "Others"
+
+    class Gender(models.TextChoices):
+        MALE = "male", "Male"
+        FEMALE = "female", "Female"
+
+    class CivilStatus(models.TextChoices):
+        SINGLE = "single", "Single"
+        MARRIED = "married", "Married"
+        WIDOWED = "widowed", "Widowed"
+        SEPARATED = "separated", "Separated"
+
+    class CoborrowerRelationship(models.TextChoices):
+        SPOUSE = "spouse", "Spouse"
+        OTHERS = "others", "Others"
+
+    class InsuranceProposed(models.TextChoices):
+        LIFE_3YR = "life_3yr", "3 Years Life"
+        POG = "pog", "POG"
+        NONE = "none", "No Insurance"
+
+    class OfficeDecision(models.TextChoices):
+        APPROVED = "approved", "Approved"
+        DISAPPROVED = "disapproved", "Disapproved"
+        HOLD = "hold", "Hold"
+
+    # --- Core / system ---
     borrower = models.ForeignKey(User, on_delete=models.CASCADE, related_name="loan_applications")
     loan_product = models.ForeignKey(
         LoanProduct,
@@ -224,27 +284,176 @@ class LoanApplication(models.Model):
         related_name="applications",
     )
     amount_requested = models.DecimalField(max_digits=12, decimal_places=2)
-    purpose = models.TextField()
+    purpose = models.TextField(blank=True, help_text="Details when loan purpose is Others, or free-text notes.")
     term_months = models.PositiveIntegerField()
-    payment_frequency = models.CharField(max_length=20, choices=PaymentFrequency.choices, default=PaymentFrequency.MONTHLY)
+    payment_frequency = models.CharField(
+        max_length=20,
+        choices=PaymentFrequency.choices,
+        default=PaymentFrequency.WEEKLY,
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     applied_on = models.DateField(null=True, blank=True, help_text="Date the borrower applied for this loan.")
     created_at = models.DateTimeField(auto_now_add=True)
-    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_applications")
+    reviewed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_applications"
+    )
     review_notes = models.TextField(blank=True)
     decision_date = models.DateTimeField(null=True, blank=True)
     final_interest_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     final_term_months = models.PositiveIntegerField(null=True, blank=True)
 
+    # --- KAP header ---
+    branch_name = models.CharField(max_length=120, blank=True)
+    form_ref_no = models.CharField("Ref No.", max_length=60, blank=True)
+    application_type = models.CharField(
+        max_length=20,
+        choices=ApplicationType.choices,
+        default=ApplicationType.NEW,
+        blank=True,
+    )
+    loan_purpose = models.CharField(max_length=40, choices=LoanPurpose.choices, blank=True)
+    borrower_photo = models.ImageField(upload_to="loan-applications/photos/%Y/%m/", blank=True, null=True)
+    coborrower_photo = models.ImageField(upload_to="loan-applications/photos/%Y/%m/", blank=True, null=True)
+
+    # --- Borrower personal data ---
+    borrower_surname = models.CharField(max_length=80, blank=True)
+    borrower_first_name = models.CharField(max_length=80, blank=True)
+    borrower_middle_name = models.CharField(max_length=80, blank=True)
+    borrower_present_address = models.CharField(
+        max_length=255, blank=True, help_text="House #, Street, Subd., Brgy."
+    )
+    borrower_municipality_city = models.CharField("Municipality, Province / City", max_length=160, blank=True)
+    borrower_period_of_staying = models.CharField(max_length=80, blank=True)
+    borrower_dwelling_ownership = models.CharField(
+        max_length=20, choices=DwellingOwnership.choices, blank=True
+    )
+    borrower_permanent_address = models.CharField(max_length=255, blank=True)
+    borrower_permanent_municipality_city = models.CharField(
+        "Permanent Municipality, Province / City", max_length=160, blank=True
+    )
+    borrower_tel_mobile = models.CharField("Tel or Mobile", max_length=40, blank=True)
+    borrower_date_of_birth = models.DateField(null=True, blank=True)
+    borrower_age = models.PositiveSmallIntegerField(null=True, blank=True)
+    borrower_citizenship = models.CharField(max_length=20, choices=Citizenship.choices, blank=True)
+    borrower_place_of_birth = models.CharField(max_length=120, blank=True)
+    borrower_gender = models.CharField(max_length=10, choices=Gender.choices, blank=True)
+    borrower_civil_status = models.CharField(max_length=20, choices=CivilStatus.choices, blank=True)
+    borrower_nationality = models.CharField(max_length=80, blank=True)
+    borrower_occupation = models.CharField(max_length=120, blank=True)
+    borrower_id_presented = models.CharField("I.D. Presented", max_length=120, blank=True)
+    borrower_contact_network = models.CharField("Contact # / Network", max_length=80, blank=True)
+    borrower_tin_sss = models.CharField("TIN or SSS #", max_length=60, blank=True)
+    borrower_email = models.EmailField(blank=True)
+    borrower_spouse_name = models.CharField("Name of Spouse (if married)", max_length=160, blank=True)
+
+    # --- Co-borrower ---
+    coborrower_relationship = models.CharField(
+        max_length=20, choices=CoborrowerRelationship.choices, blank=True
+    )
+    coborrower_surname = models.CharField(max_length=80, blank=True)
+    coborrower_first_name = models.CharField(max_length=80, blank=True)
+    coborrower_middle_name = models.CharField(max_length=80, blank=True)
+    coborrower_present_address = models.CharField(
+        max_length=255, blank=True, help_text="House #, Street, Subd., Brgy."
+    )
+    coborrower_municipality_city = models.CharField("Municipality, Province / City", max_length=160, blank=True)
+    coborrower_period_of_staying = models.CharField(max_length=80, blank=True)
+    coborrower_dwelling_ownership = models.CharField(
+        max_length=20, choices=DwellingOwnership.choices, blank=True
+    )
+    coborrower_permanent_address = models.CharField(max_length=255, blank=True)
+    coborrower_permanent_municipality_city = models.CharField(
+        "Permanent Municipality, Province / City", max_length=160, blank=True
+    )
+    coborrower_tel_mobile = models.CharField("Tel or Mobile", max_length=40, blank=True)
+    coborrower_date_of_birth = models.DateField(null=True, blank=True)
+    coborrower_age = models.PositiveSmallIntegerField(null=True, blank=True)
+    coborrower_citizenship = models.CharField(max_length=20, choices=Citizenship.choices, blank=True)
+    coborrower_place_of_birth = models.CharField(max_length=120, blank=True)
+    coborrower_gender = models.CharField(max_length=10, choices=Gender.choices, blank=True)
+    coborrower_civil_status = models.CharField(max_length=20, choices=CivilStatus.choices, blank=True)
+    coborrower_nationality = models.CharField(max_length=80, blank=True)
+    coborrower_occupation = models.CharField(max_length=120, blank=True)
+    coborrower_id_presented = models.CharField("I.D. Presented", max_length=120, blank=True)
+    coborrower_contact_network = models.CharField("Contact # / Network", max_length=80, blank=True)
+    coborrower_tin_sss = models.CharField("TIN or SSS #", max_length=60, blank=True)
+    coborrower_email = models.EmailField(blank=True)
+    coborrower_spouse_name = models.CharField("Name of Spouse (if married)", max_length=160, blank=True)
+
+    # --- Enterprise data (new borrowers) ---
+    primary_business = models.CharField(max_length=160, blank=True)
+    business_name = models.CharField(max_length=160, blank=True)
+    business_ownership = models.CharField(max_length=20, choices=DwellingOwnership.choices, blank=True)
+    business_address = models.CharField(max_length=255, blank=True)
+    reg_dti = models.BooleanField("DTI", default=False)
+    reg_barangay = models.BooleanField("Barangay Clearance / Permit", default=False)
+    reg_mayor = models.BooleanField("Mayor's Permit", default=False)
+    reg_bir = models.BooleanField("BIR", default=False)
+    reg_others = models.BooleanField("Other registration", default=False)
+    reg_others_text = models.CharField("Other registration details", max_length=120, blank=True)
+    years_in_operation = models.CharField(max_length=40, blank=True)
+    persons_employed = models.CharField("No. of persons employed", max_length=40, blank=True)
+    additional_business_1_type = models.CharField("Type of Business 1", max_length=120, blank=True)
+    additional_business_1_name = models.CharField("Business 1 name", max_length=160, blank=True)
+    additional_business_1_address = models.CharField("Business 1 address", max_length=255, blank=True)
+    additional_business_2_type = models.CharField("Type of Business 2", max_length=120, blank=True)
+    additional_business_2_name = models.CharField("Business 2 name", max_length=160, blank=True)
+    additional_business_2_address = models.CharField("Business 2 address", max_length=255, blank=True)
+
+    # --- Certification ---
+    borrower_signed_name = models.CharField("Borrower printed name", max_length=160, blank=True)
+    borrower_signed_date = models.DateField(null=True, blank=True)
+    borrower_signed_place = models.CharField(max_length=120, blank=True)
+    borrower_signature = models.ImageField(
+        upload_to="loan-applications/signatures/%Y/%m/",
+        blank=True,
+        null=True,
+        help_text="Digital signature of the borrower.",
+    )
+    coborrower_signed_name = models.CharField("Co-borrower printed name", max_length=160, blank=True)
+    coborrower_signed_date = models.DateField(null=True, blank=True)
+    coborrower_signed_place = models.CharField(max_length=120, blank=True)
+    coborrower_signature = models.ImageField(
+        upload_to="loan-applications/signatures/%Y/%m/",
+        blank=True,
+        null=True,
+        help_text="Digital signature of the co-borrower.",
+    )
+
+    # --- Office use only ---
+    recommended_loan_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    recommended_loan_period = models.CharField(max_length=60, blank=True)
+    recommended_by_name = models.CharField(max_length=120, blank=True)
+    recommended_by_date = models.DateField(null=True, blank=True)
+    validated_by_name = models.CharField(max_length=120, blank=True)
+    validated_by_date = models.DateField(null=True, blank=True)
+    hold_out_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    insurance_proposed = models.CharField(max_length=20, choices=InsuranceProposed.choices, blank=True)
+    office_decision = models.CharField(max_length=20, choices=OfficeDecision.choices, blank=True)
+    branch_manager_name = models.CharField(max_length=120, blank=True)
+    branch_manager_date = models.DateField(null=True, blank=True)
+
     class Meta:
         ordering = ["-created_at"]
+        verbose_name = "Loan application"
+        verbose_name_plural = "Loan applications"
 
     def __str__(self):
         return f"APP-{self.pk:05d}"
 
+    def save(self, *args, **kwargs):
+        if not (self.purpose or "").strip() and self.loan_purpose:
+            if self.loan_purpose == self.LoanPurpose.OTHERS:
+                self.purpose = self.purpose or "Others"
+            else:
+                self.purpose = self.get_loan_purpose_display()
+        if not (self.purpose or "").strip():
+            self.purpose = "KAP loan application"
+        super().save(*args, **kwargs)
+
     @property
     def reference(self):
-        return f"APP-{self.pk:05d}"
+        return self.form_ref_no or f"APP-{self.pk:05d}"
 
     @property
     def monthly_estimate(self):
@@ -260,7 +469,9 @@ class LoanApplication(models.Model):
 
     @property
     def borrower_name(self):
-        return self.borrower.display_name()
+        parts = [self.borrower_surname, self.borrower_first_name, self.borrower_middle_name]
+        kap_name = " ".join(p for p in parts if p).strip()
+        return kap_name or self.borrower.display_name()
 
     @property
     def initials(self):
@@ -268,7 +479,7 @@ class LoanApplication(models.Model):
 
     @property
     def email(self):
-        return self.borrower.email
+        return self.borrower_email or self.borrower.email
 
     @property
     def monthly_income(self):
@@ -308,6 +519,25 @@ class LoanApplication(models.Model):
         return "Review the income profile and supporting documents before deciding."
 
 
+class CharacterReference(models.Model):
+    application = models.ForeignKey(
+        LoanApplication, on_delete=models.CASCADE, related_name="character_references"
+    )
+    name = models.CharField(max_length=160)
+    address = models.CharField(max_length=255, blank=True)
+    relationship = models.CharField(max_length=80, blank=True)
+    contact_number = models.CharField("Contact #", max_length=40, blank=True)
+    sort_order = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+        verbose_name = "Character reference"
+        verbose_name_plural = "Character references"
+
+    def __str__(self):
+        return self.name or f"Reference {self.pk}"
+
+
 class Loan(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -327,7 +557,7 @@ class Loan(models.Model):
     disbursement_reference = models.CharField(max_length=80, blank=True)
     processing_fee = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     other_fees = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-    other_fees_description = models.CharField(max_length=120, blank=True)
+    other_fees_description = models.CharField(max_length=255, blank=True)
     disbursed_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -338,6 +568,30 @@ class Loan(models.Model):
     grace_period_days = models.PositiveIntegerField(
         default=0,
         help_text="Days after disbursement before interest starts accruing.",
+    )
+    disbursed_principal = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Original principal released at disbursement (unchanged by balance extensions).",
+    )
+    schedule_start_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="When set, the repayment schedule starts from this date instead of disbursed_date.",
+    )
+    original_interest_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Interest rate before the first balance-extension reschedule.",
+    )
+    original_term_months = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Term months before the first balance-extension reschedule.",
     )
 
     class Meta:
@@ -367,15 +621,85 @@ class Loan(models.Model):
 
     @property
     def original_amount(self):
-        return self.principal
+        return self.disbursed_principal if self.disbursed_principal is not None else self.principal
+
+    @property
+    def is_rescheduled(self):
+        """True when remaining balance was restructured into a new term."""
+        return self.schedule_start_date is not None
+
+    @property
+    def reschedule_date_display(self):
+        if not self.schedule_start_date:
+            return None
+        return self.schedule_start_date.strftime("%b %d, %Y")
+
+    @property
+    def reschedule_interest_start_display(self):
+        """First Monday on/after the reschedule date — when the new term begins collecting."""
+        if not self.schedule_start_date:
+            return None
+        from .services import _interest_start_monday
+
+        return _interest_start_monday(self.schedule_start_date).strftime("%b %d, %Y")
+
+    def original_schedule_terms(self):
+        """Principal, rate, and term used for the pre-reschedule schedule."""
+        from .services import calculate_flat_loan_amounts
+
+        principal = self.disbursed_principal if self.disbursed_principal is not None else self.principal
+        rate = self.original_interest_rate
+        term = self.original_term_months
+        application = getattr(self, "application", None)
+        if rate is None and application is not None:
+            rate = application.final_interest_rate
+            if rate is None and application.loan_product_id:
+                rate = application.loan_product.interest_rate
+        if term is None and application is not None:
+            term = application.final_term_months or application.term_months
+        if rate is None:
+            rate = self.interest_rate
+        if term is None:
+            term = self.term_months
+        amounts = calculate_flat_loan_amounts(principal, rate, term)
+        return {
+            "principal": amounts["principal"],
+            "interest_rate": Decimal(str(rate)),
+            "term_months": int(term),
+            "total_interest": amounts["total_interest"],
+            "total_payable": amounts["total_payable"],
+            "per_day": amounts["per_day"],
+            "per_month": amounts["per_month"],
+            "periods": amounts["periods"],
+            "start_date": self.disbursed_date,
+        }
 
     @property
     def total_deductions(self):
         return self.processing_fee + self.other_fees
 
     @property
+    def deduction_line_items(self):
+        """Prefer the standard fee breakdown when amounts match; otherwise show stored fees."""
+        from .services import standard_disbursement_deductions
+
+        standard = standard_disbursement_deductions()
+        if (
+            self.processing_fee == standard["processing_fee"]
+            and self.other_fees == standard["other_fees"]
+        ):
+            return standard["line_items"]
+        items = []
+        if self.processing_fee:
+            items.append({"label": "Processing fee", "amount": self.processing_fee})
+        if self.other_fees:
+            label = self.other_fees_description or "Other fees"
+            items.append({"label": label, "amount": self.other_fees})
+        return items
+
+    @property
     def net_release_amount(self):
-        return self.principal - self.total_deductions
+        return self.original_amount - self.total_deductions
 
     @property
     def disbursement_receipt_number(self):
@@ -384,6 +708,19 @@ class Loan(models.Model):
     @property
     def remaining_balance(self):
         return self.outstanding_balance
+
+    @property
+    def adjusted_outstanding_balance(self):
+        from .services import adjust_payment
+
+        return adjust_payment(self.outstanding_balance)
+
+    @property
+    def adjusted_total_payable(self):
+        """Cash-adjusted total payable (single round of the loan total)."""
+        from .services import adjust_payment
+
+        return adjust_payment(self.total_payable)
 
     @property
     def status_label(self):
@@ -397,17 +734,93 @@ class Loan(models.Model):
     def payment_frequency(self):
         return self.application.get_payment_frequency_display()
 
-    @property
-    def periodic_payment(self):
-        from .services import calculate_periodic_payment, loan_term_months
+    def _flat_amounts(self):
+        from .services import calculate_flat_loan_amounts, loan_term_months
 
-        payment, _ = calculate_periodic_payment(
+        return calculate_flat_loan_amounts(
             self.principal,
             self.interest_rate,
             loan_term_months(self),
-            self.application.payment_frequency,
         )
-        return payment
+
+    @property
+    def periodic_payment(self):
+        """Daily working-day payment (Mon–Fri)."""
+        return self._flat_amounts()["per_day"]
+
+    @property
+    def daily_payment(self):
+        return self._flat_amounts()["per_day"]
+
+    @property
+    def adjusted_daily_payment(self):
+        from .services import adjust_payment
+
+        return adjust_payment(self.daily_payment)
+
+    @property
+    def weekly_payment(self):
+        """Five working days (Mon–Fri)."""
+        return (self.daily_payment * Decimal("5")).quantize(Decimal("0.01"))
+
+    @property
+    def adjusted_weekly_payment(self):
+        from .services import adjust_payment
+
+        return adjust_payment(self.weekly_payment)
+
+    @property
+    def biweekly_payment(self):
+        """Ten working days (two weeks)."""
+        return (self.daily_payment * Decimal("10")).quantize(Decimal("0.01"))
+
+    @property
+    def adjusted_biweekly_payment(self):
+        from .services import adjust_payment
+
+        return adjust_payment(self.biweekly_payment)
+
+    @property
+    def monthly_payment(self):
+        return self._flat_amounts()["per_month"]
+
+    @property
+    def adjusted_monthly_payment(self):
+        from .services import adjust_payment
+
+        return adjust_payment(self.monthly_payment)
+
+    def suggested_payment_for(self, frequency, adjust=True):
+        """Suggested remittance amount for a pay period, capped at outstanding balance.
+
+        When adjust=True (default), the amount is rounded to a cash-friendly
+        multiple of ₱10 via adjust_payment() before capping.
+        """
+        from .services import WORKING_DAYS_PER_MONTH, adjust_payment
+
+        mapping = {
+            "daily": self.daily_payment,
+            "weekly": self.weekly_payment,
+            "biweekly": self.biweekly_payment,
+            "monthly": self.monthly_payment,
+        }
+        amount = mapping.get(frequency, self.daily_payment)
+        if frequency == "monthly" and not amount:
+            amount = (self.daily_payment * Decimal(WORKING_DAYS_PER_MONTH)).quantize(Decimal("0.01"))
+        outstanding = self.outstanding_balance or Decimal("0.00")
+        if outstanding <= 0:
+            return Decimal("0.00")
+        if adjust:
+            amount = adjust_payment(amount)
+        return min(amount, outstanding)
+
+    @property
+    def total_interest(self):
+        return self._flat_amounts()["total_interest"]
+
+    @property
+    def working_days(self):
+        return self._flat_amounts()["periods"]
 
     @property
     def next_installment(self):
@@ -471,6 +884,10 @@ class Installment(models.Model):
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     paid_date = models.DateField(null=True, blank=True)
+    credit_penalty_applied = models.BooleanField(
+        default=False,
+        help_text="True when the −0.1 credit-score penalty for this loan month has already been applied.",
+    )
 
     class Meta:
         ordering = ["installment_number"]
@@ -482,6 +899,12 @@ class Installment(models.Model):
     def remaining(self):
         return max(Decimal("0.00"), self.amount_due - self.amount_paid)
 
+    @property
+    def adjusted_remaining(self):
+        from .services import adjust_payment
+
+        return adjust_payment(self.remaining)
+
     def mark_overdue_if_needed(self):
         if self.status == self.Status.PENDING and self.due_date < timezone.localdate():
             self.status = self.Status.OVERDUE
@@ -490,6 +913,12 @@ class Installment(models.Model):
     @property
     def amount(self):
         return self.amount_due
+
+    @property
+    def adjusted_amount(self):
+        from .services import adjust_payment
+
+        return adjust_payment(self.amount_due)
 
     @property
     def principal(self):
@@ -531,6 +960,26 @@ class Payment(models.Model):
 
     def __str__(self):
         return self.reference_number or f"PAY-{self.pk:05d}"
+
+
+class Notification(models.Model):
+    class Kind(models.TextChoices):
+        CREDIT_SCORE = "credit_score", "Credit score"
+        GENERAL = "general", "General"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    kind = models.CharField(max_length=30, choices=Kind.choices, default=Kind.GENERAL)
+    title = models.CharField(max_length=160)
+    message = models.TextField()
+    link_url = models.CharField(max_length=255, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.title} — {self.user}"
 
 
 class Document(models.Model):

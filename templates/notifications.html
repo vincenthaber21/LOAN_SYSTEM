@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Notifications{% endblock %}
+{% block topbar_title %}Notifications{% endblock %}
+{% block topbar_context %}Account alerts and credit updates.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <div class="eyebrow">Inbox</div>
+    <h1>Notifications</h1>
+    <p>{% if unread_count %}{{ unread_count }} unread update{{ unread_count|pluralize }}.{% else %}Alerts about your credit score and account activity.{% endif %}</p>
+  </div>
+  {% if unread_count %}
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="mark_all_read">
+    <button class="btn btn-outline-secondary" type="submit">Mark all as read</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card-soft col-lg-8 fade-up-2">
+  <div class="card-body">
+    {% if notifications %}
+    <form method="post" id="notificationsForm">
+      {% csrf_token %}
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4 pb-3 border-bottom">
+        <label class="form-check mb-0 d-flex align-items-center gap-2">
+          <input class="form-check-input" type="checkbox" id="selectAllNotifications">
+          <span class="small fw-semibold">Select all</span>
+        </label>
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-outline-secondary btn-sm" type="submit" name="action" value="delete_selected" id="deleteSelectedBtn" disabled>
+            <i class="bi bi-trash me-1"></i>Delete selected
+          </button>
+          <button class="btn btn-outline-danger btn-sm" type="submit" name="action" value="delete_all" onclick="return confirm('Delete all notifications?');">
+            <i class="bi bi-trash3 me-1"></i>Delete all
+          </button>
+        </div>
+      </div>
+
+      {% for item in notifications %}
+      <div class="d-flex gap-3 {% if not item.is_read %}notification-item-unread{% endif %} {% if not forloop.last %}mb-4 pb-4 border-bottom{% endif %}">
+        <label class="form-check mb-0 pt-1">
+          <input class="form-check-input notification-check" type="checkbox" name="notification_ids" value="{{ item.id }}">
+        </label>
+        <span class="avatar" style="width:36px;height:36px;flex-shrink:0;">
+          <i class="bi {% if item.kind == 'credit_score' %}bi-shield-exclamation{% else %}bi-bell{% endif %}"></i>
+        </span>
+        <div class="flex-grow-1">
+          <div class="d-flex justify-content-between gap-3 flex-wrap">
+            <div class="fw-semibold" style="font-size:.9rem;">
+              {{ item.title }}
+              {% if not item.is_read %}<span class="notification-dot-inline" aria-label="Unread"></span>{% endif %}
+            </div>
+            <div class="text-muted" style="font-size:.72rem;">{{ item.created_at|date:"M j, Y · g:i A" }}</div>
+          </div>
+          <div class="text-muted mt-1" style="font-size:.8rem;">{{ item.message }}</div>
+          {% if item.link_url %}
+          <a class="small d-inline-block mt-2" href="{{ item.link_url }}">View details <i class="bi bi-arrow-right"></i></a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </form>
+    {% else %}
+      {% include "includes/empty_state.html" with icon="bi-bell" title="You are all caught up" description="When your credit score changes or other account alerts arrive, they will show up here." %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById("notificationsForm");
+  if (!form) return;
+  const selectAll = document.getElementById("selectAllNotifications");
+  const checks = Array.from(form.querySelectorAll(".notification-check"));
+  const deleteSelectedBtn = document.getElementById("deleteSelectedBtn");
+
+  function syncDeleteButton() {
+    const selected = checks.some((box) => box.checked);
+    deleteSelectedBtn.disabled = !selected;
+  }
+
+  selectAll.addEventListener("change", function () {
+    checks.forEach((box) => {
+      box.checked = selectAll.checked;
+    });
+    syncDeleteButton();
+  });
+
+  checks.forEach((box) => {
+    box.addEventListener("change", function () {
+      selectAll.checked = checks.length > 0 && checks.every((item) => item.checked);
+      selectAll.indeterminate = checks.some((item) => item.checked) && !selectAll.checked;
+      syncDeleteButton();
+    });
+  });
+
+  form.addEventListener("submit", function (event) {
+    if (event.submitter && event.submitter.value === "delete_selected") {
+      const selected = checks.filter((box) => box.checked).length;
+      if (!selected) {
+        event.preventDefault();
+        return;
+      }
+      if (!confirm("Delete " + selected + " selected notification" + (selected === 1 ? "" : "s") + "?")) {
+        event.preventDefault();
+      }
+    }
+  });
+})();
+</script>
+{% endblock %}

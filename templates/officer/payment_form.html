@@ -21,9 +21,21 @@
           {% csrf_token %}
           {% include "includes/form_errors.html" %}
           <div class="mb-3">
-            <label class="form-label" for="id_amount">Amount</label>
-            <div class="input-group"><span class="input-group-text">₱</span><input class="form-control {% if form.amount.errors %}is-invalid{% endif %}" id="id_amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="{{ form.amount.value|default:'' }}" data-max-amount="{{ max_payment_amount }}" data-max-label="{{ max_payment_label }}" required></div>
+            <label class="form-label d-block label-required">Pay <span class="text-danger">*</span></label>
+            <div class="d-flex flex-wrap gap-3" id="payFrequencyGroup" role="radiogroup" aria-label="Pay period">
+              {% for value, label in pay_frequency_choices %}
+              <div class="form-check form-check-inline m-0">
+                <input class="form-check-input" type="radio" name="pay_frequency" id="pay_{{ value }}" value="{{ value }}" {% if pay_frequency == value %}checked{% endif %} required>
+                <label class="form-check-label" for="pay_{{ value }}">{{ label }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label label-required" for="id_amount">Amount <span class="text-danger">*</span></label>
+            <div class="input-group"><span class="input-group-text">₱</span><input class="form-control {% if form.amount.errors %}is-invalid{% endif %}" id="id_amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="{{ form.amount.value|default:pay_amounts.daily }}" data-max-amount="{{ max_payment_amount }}" data-max-label="{{ max_payment_label }}" required></div>
             <div class="invalid-feedback d-block{% if not form.amount.errors %} d-none{% endif %}" id="amountError">{% for error in form.amount.errors %}{{ error }}{% endfor %}</div>
+            <div class="form-text">Select Daily, Weekly, Biweekly, or Monthly to fill the adjusted remittance (cash-rounded).</div>
           </div>
           <div class="mb-3">
             <label class="form-label">{{ form.method.label }}</label>
@@ -46,17 +58,20 @@
       <div class="card-header"><h2 class="card-title">Loan summary</h2></div>
       <div class="card-body">
         <div class="detail-label">Outstanding balance</div>
-        <div class="detail-value" id="outstandingBalance" data-base="{{ loan.outstanding_balance }}">{{ loan.outstanding_balance|peso }}</div>
+        <div class="detail-value" id="outstandingBalance" data-base="{{ loan.outstanding_balance }}">{{ loan.adjusted_outstanding_balance|peso }}</div>
+        <div class="text-muted small mb-1">Exact {{ loan.outstanding_balance|peso }}</div>
         <div class="text-muted small mb-3" id="outstandingAfter"></div>
         {% if installment %}
         <div class="detail-label">Applying to</div><div class="detail-value mb-3">Installment #{{ installment.installment_number }} · due {{ installment.due_date }}</div>
         <div class="detail-label">Remaining on this installment</div>
-        <div class="detail-value" id="installmentRemaining" data-base="{{ installment.remaining }}">{{ installment.remaining|peso }}</div>
+        <div class="detail-value" id="installmentRemaining" data-base="{{ installment.remaining }}">{{ installment.adjusted_remaining|peso }}</div>
+        <div class="text-muted small mb-1">Exact {{ installment.remaining|peso }}</div>
         <div class="text-muted small" id="installmentAfter"></div>
         {% elif loan.next_installment %}
         <div class="detail-label">Next installment due</div><div class="detail-value mb-3">{{ loan.next_installment.due_date }}</div>
         <div class="detail-label">Remaining on this installment</div>
-        <div class="detail-value" id="installmentRemaining" data-base="{{ loan.next_installment.remaining }}">{{ loan.next_installment.remaining|peso }}</div>
+        <div class="detail-value" id="installmentRemaining" data-base="{{ loan.next_installment.remaining }}">{{ loan.next_installment.adjusted_remaining|peso }}</div>
+        <div class="text-muted small mb-1">Exact {{ loan.next_installment.remaining|peso }}</div>
         <div class="text-muted small" id="installmentAfter"></div>
         {% else %}
         <p class="text-muted mb-0">This loan has no unpaid installments left.</p>
@@ -98,11 +113,17 @@
   if (!amountInput) { return; }
   var amountForm = amountInput.closest('form');
   var amountError = document.getElementById('amountError');
+  var amounts = {
+    daily: {{ pay_amounts.daily|stringformat:".2f" }},
+    weekly: {{ pay_amounts.weekly|stringformat:".2f" }},
+    biweekly: {{ pay_amounts.biweekly|stringformat:".2f" }},
+    monthly: {{ pay_amounts.monthly|stringformat:".2f" }}
+  };
   var maxAmount = parseFloat(amountInput.dataset.maxAmount) || 0;
   var maxLabel = amountInput.dataset.maxLabel || 'outstanding balance';
 
   function formatAmount(raw) {
-    var clean = raw.replace(/[^\d.]/g, '');
+    var clean = String(raw).replace(/[^\d.]/g, '');
     var firstDot = clean.indexOf('.');
     if (firstDot !== -1) {
       clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
@@ -126,7 +147,7 @@
   }
 
   function validateAmount() {
-    var amount = parseFloat(amountInput.value.replace(/,/g, '')) || 0;
+    var amount = parseFloat(String(amountInput.value).replace(/,/g, '')) || 0;
     amountInput.classList.remove('is-invalid');
     amountInput.setCustomValidity('');
     if (amountError) {
@@ -147,7 +168,7 @@
   }
 
   function updateSummary() {
-    var amount = parseFloat(amountInput.value.replace(/,/g, '')) || 0;
+    var amount = parseFloat(String(amountInput.value).replace(/,/g, '')) || 0;
     if (outstandingAfterEl) {
       outstandingAfterEl.textContent = amount > 0 ? peso(Math.max(0, outstandingBase - amount)) + ' after this payment' : '';
     }
@@ -156,6 +177,19 @@
     }
     validateAmount();
   }
+
+  function setAmountFromFrequency(freq) {
+    var value = amounts[freq];
+    if (value == null) { return; }
+    amountInput.value = formatAmount(Number(value).toFixed(2));
+    updateSummary();
+  }
+
+  document.querySelectorAll('input[name="pay_frequency"]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      if (radio.checked) { setAmountFromFrequency(radio.value); }
+    });
+  });
 
   amountInput.addEventListener('input', function () {
     var oldLength = amountInput.value.length;
@@ -177,7 +211,7 @@
 
   if (amountForm) {
     amountForm.addEventListener('submit', function () {
-      amountInput.value = amountInput.value.replace(/,/g, '');
+      amountInput.value = String(amountInput.value).replace(/,/g, '');
     });
   }
 

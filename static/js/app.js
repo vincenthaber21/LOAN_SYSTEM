@@ -1,10 +1,19 @@
 (function () {
   'use strict';
 
+  var SIDEBAR_MQ = window.matchMedia('(max-width: 991.98px)');
+
   function setSidebar(open) {
     document.body.classList.toggle('sidebar-open', open);
     var toggle = document.querySelector('[data-sidebar-toggle]');
-    if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+    }
+  }
+
+  function closeSidebarIfOverlay() {
+    if (SIDEBAR_MQ.matches) setSidebar(false);
   }
 
   document.addEventListener('click', function (event) {
@@ -13,14 +22,37 @@
     if (toggle) {
       event.preventDefault();
       setSidebar(!document.body.classList.contains('sidebar-open'));
+      return;
     }
-    if (backdrop) setSidebar(false);
+    if (backdrop) {
+      setSidebar(false);
+      return;
+    }
+
+    var navLink = event.target.closest('.sidebar-nav a.nav-link:not(.nav-link-toggle)');
+    if (navLink) closeSidebarIfOverlay();
 
     var confirmButton = event.target.closest('[data-confirm]');
     if (confirmButton && !window.confirm(confirmButton.getAttribute('data-confirm'))) {
       event.preventDefault();
     }
   });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && document.body.classList.contains('sidebar-open')) {
+      setSidebar(false);
+    }
+  });
+
+  if (typeof SIDEBAR_MQ.addEventListener === 'function') {
+    SIDEBAR_MQ.addEventListener('change', function (event) {
+      if (!event.matches) setSidebar(false);
+    });
+  } else if (typeof SIDEBAR_MQ.addListener === 'function') {
+    SIDEBAR_MQ.addListener(function (event) {
+      if (!event.matches) setSidebar(false);
+    });
+  }
 
   document.addEventListener('submit', function (event) {
     var form = event.target;

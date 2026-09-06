@@ -1,13 +1,33 @@
+import base64
 import re
 import unicodedata
 from decimal import Decimal
+from uuid import uuid4
 
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
+from django.core.files.base import ContentFile
 from django.utils import timezone
 
-from .models import Disbursement, Document, Loan, LoanApplication, LoanProduct, Payment, User
-from .services import credit_score_blocks_loans, credit_score_loan_block_message
+from .models import CharacterReference, Disbursement, Document, Loan, LoanApplication, LoanProduct, Payment, User
+from .services import credit_score_blocks_loans, credit_score_loan_block_message, application_type_for_member
+
+def decode_signature_data_url(data_url, prefix="signature"):
+    """Convert a canvas data-URL into an uploadable PNG ContentFile."""
+    if not data_url:
+        return None
+    match = re.match(r"^data:image/(png|jpeg|jpg);base64,(.+)$", data_url.strip(), re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    try:
+        raw = base64.b64decode(match.group(2))
+    except Exception:
+        return None
+    if len(raw) < 64:
+        return None
+    ext = "jpg" if match.group(1).lower() in {"jpeg", "jpg"} else "png"
+    return ContentFile(raw, name=f"{prefix}-{uuid4().hex[:12]}.{ext}")
+
 
 PENDING_APPLICATION_STATUSES = [
     LoanApplication.Status.DRAFT,
@@ -104,19 +124,27 @@ class RegistrationForm(UserCreationForm):
     email = forms.EmailField()
     first_name = forms.CharField(max_length=80)
     last_name = forms.CharField(max_length=80)
-    phone = forms.CharField(max_length=30)
+    phone = forms.CharField(max_length=30, required=False)
 
     class Meta:
         model = User
         fields = ("first_name", "last_name", "email", "phone", "password1", "password2")
 
+    def clean_email(self):
+        email = self.cleaned_data["email"].strip().lower()
+        if User.objects.filter(email__iexact=email).exists() or User.objects.filter(username__iexact=email).exists():
+            raise forms.ValidationError("An account with this email already exists.")
+        return email
+
     def save(self, commit=True):
         user = super().save(commit=False)
-        user.username = self.cleaned_data["email"].lower()
-        user.email = self.cleaned_data["email"].lower()
+        user.username = self.cleaned_data["email"]
+        user.email = self.cleaned_data["email"]
         user.first_name = self.cleaned_data["first_name"]
         user.last_name = self.cleaned_data["last_name"]
         user.full_name = f"{user.first_name} {user.last_name}".strip()
+        user.phone = self.cleaned_data.get("phone", "")
+        user.role = User.Role.MEMBER
         if commit:
             user.save()
         return user
@@ -300,6 +328,58 @@ class OfficerAccountEditForm(forms.ModelForm):
         return user
 
 
+class ManagerAccountForm(BaseAccountCreationForm):
+    """Lets an admin create a Manager account from the officer workspace."""
+
+    ROLE = User.Role.MANAGER
+
+    class Meta:
+        model = User
+        fields = ("username", "first_name", "last_name", "email", "phone", "password1", "password2")
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.is_staff = True
+        if commit:
+            user.save()
+        return user
+
+
+class ManagerAccountEditForm(forms.ModelForm):
+    """Lets an admin update an existing manager's profile and account status."""
+
+    username = forms.CharField(max_length=150, help_text="Used to sign in — must stay unique.")
+    email = forms.EmailField()
+    full_name = forms.CharField(max_length=160, label="Full name")
+    phone = forms.CharField(max_length=30, required=False)
+    is_active = forms.BooleanField(required=False, label="Active account", help_text="Uncheck to suspend this manager's ability to sign in.")
+
+    class Meta:
+        model = User
+        fields = ("username", "full_name", "email", "phone", "is_active")
+
+    def clean_username(self):
+        username = self.cleaned_data["username"].strip().lower()
+        unchanged = self.instance.pk and username == self.instance.username.lower()
+        if not unchanged and not USERNAME_RE.match(username):
+            raise forms.ValidationError("Usernames may only contain lowercase letters, numbers, dots, hyphens, and underscores.")
+        if User.objects.filter(username__iexact=username).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError("This username is already taken — try adding a number or initial.")
+        return username
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].strip().lower()
+        if User.objects.filter(email__iexact=email).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError("An account with this email already exists.")
+        return email
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        if commit:
+            user.save()
+        return user
+
+
 class LoanApplicationForm(forms.ModelForm):
     class Meta:
         model = LoanApplication
@@ -386,13 +466,11 @@ class LoanProductForm(forms.ModelForm):
             "min_amount",
             "max_amount",
             "interest_rate",
-            "min_term_months",
             "max_term_months",
             "grace_period_days",
         )
         widgets = {
             "interest_rate": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
-            "min_term_months": forms.NumberInput(attrs={"min": "1"}),
             "max_term_months": forms.NumberInput(attrs={"min": "1"}),
             "grace_period_days": forms.NumberInput(attrs={"min": "0"}),
         }
@@ -410,13 +488,19 @@ class LoanProductForm(forms.ModelForm):
         cleaned = super().clean()
         min_a = cleaned.get("min_amount")
         max_a = cleaned.get("max_amount")
-        min_t = cleaned.get("min_term_months")
         max_t = cleaned.get("max_term_months")
         if min_a is not None and max_a is not None and min_a >= max_a:
             self.add_error("max_amount", "Max amount must be greater than min amount.")
-        if min_t is not None and max_t is not None and min_t >= max_t:
-            self.add_error("max_term_months", "Max term must be greater than min term.")
+        if max_t is not None and max_t <= 1:
+            self.add_error("max_term_months", "Max term must be greater than 1 month.")
         return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.min_term_months = 1
+        if commit:
+            instance.save()
+        return instance
 
 
 class LoanProductEditForm(LoanProductForm):
@@ -427,23 +511,131 @@ class LoanProductEditForm(LoanProductForm):
 class OfficerLoanApplicationForm(forms.ModelForm):
     borrower = forms.ModelChoiceField(
         queryset=User.objects.none(),
-        label="Borrower",
+        label="Member account",
         empty_label="Select a borrower…",
     )
     applied_on = forms.DateField(
-        label="Application date",
+        label="Date of application",
         widget=forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
         input_formats=["%Y-%m-%d"],
-        help_text="Year, month, and day the borrower applied for this loan.",
+        help_text="Date written on the KAP application form.",
     )
+    borrower_signature_data = forms.CharField(required=False, widget=forms.HiddenInput)
+    coborrower_signature_data = forms.CharField(required=False, widget=forms.HiddenInput)
 
     class Meta:
         model = LoanApplication
-        fields = ("borrower", "loan_product", "amount_requested", "purpose", "term_months", "payment_frequency", "applied_on")
+        fields = (
+            "borrower",
+            "loan_product",
+            "branch_name",
+            "form_ref_no",
+            "applied_on",
+            "application_type",
+            "borrower_photo",
+            "coborrower_photo",
+            "payment_frequency",
+            "amount_requested",
+            "loan_purpose",
+            "purpose",
+            "term_months",
+            "borrower_surname",
+            "borrower_first_name",
+            "borrower_middle_name",
+            "borrower_present_address",
+            "borrower_municipality_city",
+            "borrower_period_of_staying",
+            "borrower_dwelling_ownership",
+            "borrower_permanent_address",
+            "borrower_permanent_municipality_city",
+            "borrower_tel_mobile",
+            "borrower_date_of_birth",
+            "borrower_age",
+            "borrower_citizenship",
+            "borrower_place_of_birth",
+            "borrower_gender",
+            "borrower_civil_status",
+            "borrower_nationality",
+            "borrower_occupation",
+            "borrower_id_presented",
+            "borrower_contact_network",
+            "borrower_tin_sss",
+            "borrower_email",
+            "borrower_spouse_name",
+            "coborrower_relationship",
+            "coborrower_surname",
+            "coborrower_first_name",
+            "coborrower_middle_name",
+            "coborrower_present_address",
+            "coborrower_municipality_city",
+            "coborrower_period_of_staying",
+            "coborrower_dwelling_ownership",
+            "coborrower_permanent_address",
+            "coborrower_permanent_municipality_city",
+            "coborrower_tel_mobile",
+            "coborrower_date_of_birth",
+            "coborrower_age",
+            "coborrower_citizenship",
+            "coborrower_place_of_birth",
+            "coborrower_gender",
+            "coborrower_civil_status",
+            "coborrower_nationality",
+            "coborrower_occupation",
+            "coborrower_id_presented",
+            "coborrower_contact_network",
+            "coborrower_tin_sss",
+            "coborrower_email",
+            "coborrower_spouse_name",
+            "primary_business",
+            "business_name",
+            "business_ownership",
+            "business_address",
+            "reg_dti",
+            "reg_barangay",
+            "reg_mayor",
+            "reg_bir",
+            "reg_others",
+            "reg_others_text",
+            "years_in_operation",
+            "persons_employed",
+            "additional_business_1_type",
+            "additional_business_1_name",
+            "additional_business_1_address",
+            "additional_business_2_type",
+            "additional_business_2_name",
+            "additional_business_2_address",
+            "borrower_signed_name",
+            "borrower_signed_date",
+            "borrower_signed_place",
+            "coborrower_signed_name",
+            "coborrower_signed_date",
+            "coborrower_signed_place",
+        )
         widgets = {
-            "purpose": forms.Textarea(attrs={"rows": 3}),
+            "purpose": forms.TextInput(attrs={"placeholder": "Specify if Others"}),
             "amount_requested": forms.NumberInput(attrs={"step": "100", "min": "1000"}),
             "term_months": forms.NumberInput(attrs={"min": "1", "max": "60"}),
+            "application_type": forms.RadioSelect,
+            "loan_purpose": forms.RadioSelect,
+            "payment_frequency": forms.RadioSelect,
+            "borrower_dwelling_ownership": forms.RadioSelect,
+            "coborrower_dwelling_ownership": forms.RadioSelect,
+            "borrower_citizenship": forms.RadioSelect,
+            "coborrower_citizenship": forms.RadioSelect,
+            "borrower_gender": forms.RadioSelect,
+            "coborrower_gender": forms.RadioSelect,
+            "borrower_civil_status": forms.RadioSelect,
+            "coborrower_civil_status": forms.RadioSelect,
+            "coborrower_relationship": forms.RadioSelect,
+            "business_ownership": forms.RadioSelect,
+            "borrower_date_of_birth": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+            "coborrower_date_of_birth": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+            "borrower_signed_date": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+            "coborrower_signed_date": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+            "borrower_present_address": forms.TextInput(attrs={"placeholder": "House #, Street, Subd., Brgy."}),
+            "coborrower_present_address": forms.TextInput(attrs={"placeholder": "House #, Street, Subd., Brgy."}),
+            "borrower_photo": forms.ClearableFileInput(attrs={"accept": "image/*"}),
+            "coborrower_photo": forms.ClearableFileInput(attrs={"accept": "image/*"}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -454,17 +646,74 @@ class OfficerLoanApplicationForm(forms.ModelForm):
                 data["amount_requested"] = str(data["amount_requested"]).replace(",", "")
             self.data = data
         self.fields["borrower"].queryset = User.member_accounts().filter(is_active=True).order_by("full_name", "email")
+        self.fields["loan_product"].required = True
+        self.fields["loan_purpose"].required = True
+        self.fields["application_type"].required = True
+        self.fields["borrower_surname"].required = True
+        self.fields["borrower_first_name"].required = True
+        self.fields["borrower_present_address"].required = True
+        self.fields["borrower_tel_mobile"].required = True
         borrower = None
         if self.is_bound:
             borrower_id = self.data.get(self.add_prefix("borrower") if self.prefix else "borrower")
             if borrower_id:
                 borrower = User.objects.filter(pk=borrower_id).first()
         self.fields["loan_product"].queryset = available_loan_products_for_borrower(borrower)
+        if borrower:
+            computed_type = application_type_for_member(borrower)
+            self.fields["application_type"].initial = computed_type
+            if self.data is not None:
+                data = self.data.copy()
+                data["application_type"] = computed_type
+                self.data = data
         if not self.instance.pk and not self.is_bound:
             self.fields["applied_on"].initial = timezone.localdate()
+            self.fields["application_type"].initial = self.fields["application_type"].initial or LoanApplication.ApplicationType.NEW
+            self.fields["payment_frequency"].initial = LoanApplication.PaymentFrequency.WEEKLY
+        date_fields = (
+            "borrower_date_of_birth",
+            "coborrower_date_of_birth",
+            "borrower_signed_date",
+            "coborrower_signed_date",
+            "applied_on",
+        )
+        for name in date_fields:
+            self.fields[name].input_formats = ["%Y-%m-%d"]
+        _style_form_fields(self)
+        for name in (
+            "application_type",
+            "loan_purpose",
+            "payment_frequency",
+            "borrower_dwelling_ownership",
+            "coborrower_dwelling_ownership",
+            "borrower_citizenship",
+            "coborrower_citizenship",
+            "borrower_gender",
+            "coborrower_gender",
+            "borrower_civil_status",
+            "coborrower_civil_status",
+            "coborrower_relationship",
+            "business_ownership",
+            "reg_dti",
+            "reg_barangay",
+            "reg_mayor",
+            "reg_bir",
+            "reg_others",
+        ):
+            self.fields[name].widget.attrs.pop("class", None)
+            if name.startswith("reg_"):
+                continue
+            self.fields[name].choices = [c for c in self.fields[name].choices if c[0] != ""]
+            self.fields[name].empty_label = None
 
     def applied_on_input_value(self):
         value = self["applied_on"].value()
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d")
+        return value or ""
+
+    def date_input_value(self, field_name):
+        value = self[field_name].value()
         if hasattr(value, "strftime"):
             return value.strftime("%Y-%m-%d")
         return value or ""
@@ -487,27 +736,237 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         product = cleaned.get("loan_product")
         amount = cleaned.get("amount_requested")
         term = cleaned.get("term_months")
+        loan_purpose = cleaned.get("loan_purpose")
+        purpose = (cleaned.get("purpose") or "").strip()
         borrower_id = self.data.get("borrower")
         if borrower_id and not borrower:
             inactive_member = User.member_accounts().filter(pk=borrower_id, is_active=False).first()
             if inactive_member:
-                self.add_error("borrower", f"{inactive_member.display_name()}'s account is inactive and cannot receive a new loan application.")
+                self.add_error(
+                    "borrower",
+                    f"{inactive_member.display_name()}'s account is inactive and cannot receive a new loan application.",
+                )
         elif borrower and not borrower.is_active:
-            self.add_error("borrower", f"{borrower.display_name()}'s account is inactive and cannot receive a new loan application.")
+            self.add_error(
+                "borrower",
+                f"{borrower.display_name()}'s account is inactive and cannot receive a new loan application.",
+            )
         if product and amount is not None and not product.min_amount <= amount <= product.max_amount:
-            self.add_error("amount_requested", f"Enter an amount between ₱{product.min_amount:,.0f} and ₱{product.max_amount:,.0f}.")
+            self.add_error(
+                "amount_requested",
+                f"Enter an amount between ₱{product.min_amount:,.0f} and ₱{product.max_amount:,.0f}.",
+            )
         if product and term is not None and not product.min_term_months <= term <= product.max_term_months:
-            self.add_error("term_months", f"Choose a term between {product.min_term_months} and {product.max_term_months} months.")
+            self.add_error(
+                "term_months",
+                f"Choose a term between {product.min_term_months} and {product.max_term_months} months.",
+            )
+        if loan_purpose == LoanApplication.LoanPurpose.OTHERS and not purpose:
+            self.add_error("purpose", "Please specify the loan purpose.")
+        elif loan_purpose and not purpose:
+            cleaned["purpose"] = dict(LoanApplication.LoanPurpose.choices).get(loan_purpose, loan_purpose)
+        if cleaned.get("reg_others") and not (cleaned.get("reg_others_text") or "").strip():
+            self.add_error("reg_others_text", "Describe the other registration type.")
+        borrower_sig = decode_signature_data_url(cleaned.get("borrower_signature_data"), "borrower-sig")
+        coborrower_sig = decode_signature_data_url(cleaned.get("coborrower_signature_data"), "coborrower-sig")
+        cleaned["_borrower_signature_file"] = borrower_sig
+        cleaned["_coborrower_signature_file"] = coborrower_sig
+        if not borrower_sig:
+            self.add_error("borrower_signature_data", "Borrower signature is required.")
+        if cleaned.get("coborrower_surname") or cleaned.get("coborrower_first_name"):
+            if not coborrower_sig:
+                self.add_error("coborrower_signature_data", "Co-borrower signature is required when co-borrower details are provided.")
+        if not cleaned.get("borrower_signed_name"):
+            cleaned["borrower_signed_name"] = " ".join(
+                p for p in [cleaned.get("borrower_first_name"), cleaned.get("borrower_middle_name"), cleaned.get("borrower_surname")] if p
+            ).strip()
+        if not cleaned.get("borrower_signed_date"):
+            cleaned["borrower_signed_date"] = timezone.localdate()
+        if borrower:
+            cleaned["application_type"] = application_type_for_member(borrower)
         error = duplicate_application_error(borrower, product, exclude_pk=self.instance.pk)
         if error:
             self.add_error("loan_product", error)
         return cleaned
 
-    def clean_purpose(self):
-        purpose = (self.cleaned_data.get("purpose") or "").strip()
-        if not purpose:
-            raise forms.ValidationError("Please describe the purpose of the loan.")
-        return purpose
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        borrower_sig = self.cleaned_data.get("_borrower_signature_file")
+        coborrower_sig = self.cleaned_data.get("_coborrower_signature_file")
+        if borrower_sig:
+            instance.borrower_signature.save(borrower_sig.name, borrower_sig, save=False)
+        if coborrower_sig:
+            instance.coborrower_signature.save(coborrower_sig.name, coborrower_sig, save=False)
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
+class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
+    """KAP application form for members applying for themselves (no member picker)."""
+
+    class Meta(OfficerLoanApplicationForm.Meta):
+        fields = tuple(f for f in OfficerLoanApplicationForm.Meta.fields if f != "borrower")
+
+    def __init__(self, *args, borrower=None, **kwargs):
+        self.fixed_borrower = borrower
+        # Skip OfficerLoanApplicationForm.__init__ borrower-select logic; reimplement KAP setup.
+        forms.ModelForm.__init__(self, *args, **kwargs)
+        self.fields.pop("borrower", None)
+        if self.data:
+            data = self.data.copy()
+            if data.get("amount_requested"):
+                data["amount_requested"] = str(data["amount_requested"]).replace(",", "")
+            self.data = data
+        self.fields["loan_product"].required = True
+        self.fields["loan_purpose"].required = True
+        self.fields["application_type"].required = True
+        self.fields["borrower_surname"].required = True
+        self.fields["borrower_first_name"].required = True
+        self.fields["borrower_present_address"].required = True
+        self.fields["borrower_tel_mobile"].required = True
+        self.fields["loan_product"].queryset = available_loan_products_for_borrower(borrower)
+        self.fields["loan_product"].empty_label = "Select product…"
+        today = timezone.localdate()
+        self.fields["applied_on"].initial = today
+        if self.is_bound:
+            data = self.data.copy()
+            data["applied_on"] = today.isoformat()
+            self.data = data
+        if borrower:
+            computed_type = application_type_for_member(borrower)
+            self.fields["application_type"].initial = computed_type
+            if self.is_bound:
+                data = self.data.copy()
+                data["application_type"] = computed_type
+                self.data = data
+        if not self.instance.pk and not self.is_bound:
+            self.fields["application_type"].initial = (
+                self.fields["application_type"].initial or LoanApplication.ApplicationType.NEW
+            )
+            self.fields["payment_frequency"].initial = LoanApplication.PaymentFrequency.WEEKLY
+        date_fields = (
+            "borrower_date_of_birth",
+            "coborrower_date_of_birth",
+            "borrower_signed_date",
+            "coborrower_signed_date",
+            "applied_on",
+        )
+        for name in date_fields:
+            self.fields[name].input_formats = ["%Y-%m-%d"]
+        _style_form_fields(self)
+        for name in (
+            "application_type",
+            "loan_purpose",
+            "payment_frequency",
+            "borrower_dwelling_ownership",
+            "coborrower_dwelling_ownership",
+            "borrower_citizenship",
+            "coborrower_citizenship",
+            "borrower_gender",
+            "coborrower_gender",
+            "borrower_civil_status",
+            "coborrower_civil_status",
+            "coborrower_relationship",
+            "business_ownership",
+            "reg_dti",
+            "reg_barangay",
+            "reg_mayor",
+            "reg_bir",
+            "reg_others",
+        ):
+            self.fields[name].widget.attrs.pop("class", None)
+            if name.startswith("reg_"):
+                continue
+            self.fields[name].choices = [c for c in self.fields[name].choices if c[0] != ""]
+            self.fields[name].empty_label = None
+
+    def clean(self):
+        cleaned = super(OfficerLoanApplicationForm, self).clean()
+        borrower = self.fixed_borrower
+        cleaned["borrower"] = borrower
+        if borrower and credit_score_blocks_loans(borrower):
+            self.add_error(None, credit_score_loan_block_message(borrower))
+            return cleaned
+        product = cleaned.get("loan_product")
+        amount = cleaned.get("amount_requested")
+        term = cleaned.get("term_months")
+        loan_purpose = cleaned.get("loan_purpose")
+        purpose = (cleaned.get("purpose") or "").strip()
+        if product and amount is not None and not product.min_amount <= amount <= product.max_amount:
+            self.add_error(
+                "amount_requested",
+                f"Enter an amount between ₱{product.min_amount:,.0f} and ₱{product.max_amount:,.0f}.",
+            )
+        if product and term is not None and not product.min_term_months <= term <= product.max_term_months:
+            self.add_error(
+                "term_months",
+                f"Choose a term between {product.min_term_months} and {product.max_term_months} months.",
+            )
+        if loan_purpose == LoanApplication.LoanPurpose.OTHERS and not purpose:
+            self.add_error("purpose", "Please specify the loan purpose.")
+        elif loan_purpose and not purpose:
+            cleaned["purpose"] = dict(LoanApplication.LoanPurpose.choices).get(loan_purpose, loan_purpose)
+        if cleaned.get("reg_others") and not (cleaned.get("reg_others_text") or "").strip():
+            self.add_error("reg_others_text", "Describe the other registration type.")
+        borrower_sig = decode_signature_data_url(cleaned.get("borrower_signature_data"), "borrower-sig")
+        coborrower_sig = decode_signature_data_url(cleaned.get("coborrower_signature_data"), "coborrower-sig")
+        cleaned["_borrower_signature_file"] = borrower_sig
+        cleaned["_coborrower_signature_file"] = coborrower_sig
+        if not borrower_sig:
+            self.add_error("borrower_signature_data", "Borrower signature is required.")
+        if cleaned.get("coborrower_surname") or cleaned.get("coborrower_first_name"):
+            if not coborrower_sig:
+                self.add_error(
+                    "coborrower_signature_data",
+                    "Co-borrower signature is required when co-borrower details are provided.",
+                )
+        if not cleaned.get("borrower_signed_name"):
+            cleaned["borrower_signed_name"] = " ".join(
+                p
+                for p in [
+                    cleaned.get("borrower_first_name"),
+                    cleaned.get("borrower_middle_name"),
+                    cleaned.get("borrower_surname"),
+                ]
+                if p
+            ).strip()
+        if not cleaned.get("borrower_signed_date"):
+            cleaned["borrower_signed_date"] = timezone.localdate()
+        cleaned["applied_on"] = timezone.localdate()
+        if borrower:
+            cleaned["application_type"] = application_type_for_member(borrower)
+        error = duplicate_application_error(borrower, product, exclude_pk=self.instance.pk)
+        if error:
+            self.add_error("loan_product", error)
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        if self.fixed_borrower:
+            instance.borrower = self.fixed_borrower
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
+CharacterReferenceFormSet = forms.inlineformset_factory(
+    LoanApplication,
+    CharacterReference,
+    fields=("name", "address", "relationship", "contact_number", "sort_order"),
+    extra=2,
+    max_num=2,
+    can_delete=False,
+    widgets={
+        "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Full name"}),
+        "address": forms.TextInput(attrs={"class": "form-control"}),
+        "relationship": forms.TextInput(attrs={"class": "form-control"}),
+        "contact_number": forms.TextInput(attrs={"class": "form-control"}),
+        "sort_order": forms.HiddenInput(),
+    },
+)
 
 
 class ReviewForm(forms.ModelForm):
@@ -542,6 +1001,15 @@ class PaymentForm(forms.ModelForm):
         if amount is not None and self.max_amount is not None and amount > self.max_amount:
             raise forms.ValidationError(f"Amount cannot exceed the {self.max_amount_label} of ₱{self.max_amount:,.2f}.")
         return amount
+
+
+class BalanceExtensionForm(forms.Form):
+    months = forms.TypedChoiceField(
+        coerce=int,
+        choices=[(1, "1 month"), (2, "2 months"), (3, "3 months")],
+        widget=forms.RadioSelect(attrs={"class": "form-check-input"}),
+        label="Months to pay remaining balance",
+    )
 
 
 class DocumentForm(forms.ModelForm):
@@ -604,6 +1072,13 @@ class DisbursementAdminForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["disbursed_by"].queryset = User.objects.filter(is_staff=True).order_by("full_name", "email")
         self.fields["disbursed_by"].required = False
+        if not self.instance.pk:
+            from .services import standard_disbursement_deductions
+
+            deductions = standard_disbursement_deductions()
+            self.fields["processing_fee"].initial = deductions["processing_fee"]
+            self.fields["other_fees"].initial = deductions["other_fees"]
+            self.fields["other_fees_description"].initial = deductions["other_fees_description"]
 
     def clean(self):
         cleaned = super().clean()

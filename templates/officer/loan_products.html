@@ -83,7 +83,7 @@
             <td><span class="person-name d-block">{{ product.name }}</span></td>
             <td class="text-muted">{{ product.get_loan_type_display }}</td>
             <td class="text-muted">₱{{ product.min_amount|floatformat:0 }} – ₱{{ product.max_amount|floatformat:0 }}</td>
-            <td class="text-muted">{{ product.interest_rate }}% p.a.</td>
+            <td class="text-muted">{{ product.interest_rate }}% / mo</td>
             <td class="text-muted">{{ product.min_term_months }}–{{ product.max_term_months }} mo</td>
             <td><strong>{{ product.applications_count }}</strong> application{{ product.applications_count|pluralize }}</td>
             <td>{% include "includes/status_badge.html" with status=product.is_active|yesno:"active,inactive" label=product.is_active|yesno:"Active,Inactive" %}</td>

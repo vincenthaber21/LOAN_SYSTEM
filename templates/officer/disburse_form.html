@@ -38,8 +38,10 @@
         <div class="detail-label">Term</div><div class="detail-value mb-3">{{ existing_loan.term_months }} months</div>
         <div class="detail-label">Disbursement method</div><div class="detail-value mb-3">{{ existing_loan.disbursement_method }}</div>
         {% if existing_loan.total_deductions %}
-        <div class="detail-label">Processing fee</div><div class="detail-value mb-3">{{ existing_loan.processing_fee|peso }}</div>
-        <div class="detail-label">Other fees</div><div class="detail-value mb-3">{{ existing_loan.other_fees|peso }}{% if existing_loan.other_fees_description %} · {{ existing_loan.other_fees_description }}{% endif %}</div>
+        {% for item in existing_loan.deduction_line_items %}
+        <div class="detail-label">{{ item.label }}</div><div class="detail-value mb-3">{{ item.amount|peso }}</div>
+        {% endfor %}
+        <div class="detail-label">Total deductions</div><div class="detail-value mb-3">{{ existing_loan.total_deductions|peso }}</div>
         <div class="detail-label">Net amount released</div><div class="detail-value mb-3">{{ existing_loan.net_release_amount|peso }}</div>
         {% endif %}
         <div class="detail-label">Outstanding balance</div><div class="detail-value">{{ existing_loan.outstanding_balance|peso }}</div>
@@ -79,27 +81,32 @@
             <input class="form-control" id="reference" name="reference" placeholder="e.g. LUMEN-240617" value="{{ form_data.reference|default:'' }}">
           </div>
           <hr class="my-4">
-          <h3 class="h6 mb-1">Deductions</h3>
-          <p class="text-muted small mb-3">Fees deducted from the amount released. The loan principal and interest are still calculated on the full approved amount above.</p>
-          <div class="row g-3 mb-3">
-            <div class="col-sm-6">
-              <label class="form-label" for="processing_fee">Processing fee</label>
-              <div class="input-group"><span class="input-group-text">₱</span><input class="form-control{% if processing_fee_error %} is-invalid{% endif %}" id="processing_fee" name="processing_fee" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" value="{{ form_data.processing_fee|default:'' }}"></div>
-              <div class="invalid-feedback d-block{% if not processing_fee_error %} d-none{% endif %}" id="processingFeeError">{% if processing_fee_error %}{{ processing_fee_error }}{% endif %}</div>
-            </div>
-            <div class="col-sm-6">
-              <label class="form-label" for="other_fees">Other fees</label>
-              <div class="input-group"><span class="input-group-text">₱</span><input class="form-control" id="other_fees" name="other_fees" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" value="{{ form_data.other_fees|default:'' }}"></div>
-            </div>
-          </div>
-          <div class="mb-4">
-            <label class="form-label" for="other_fees_description">Other fees description</label>
-            <input class="form-control" id="other_fees_description" name="other_fees_description" placeholder="e.g. Notarial fee" value="{{ form_data.other_fees_description|default:'' }}">
+          <h3 class="h6 mb-1">Automatic deductions</h3>
+          <p class="text-muted small mb-3">These standard fees are deducted from the amount released for every application. Loan principal and interest are still based on the full approved amount above.</p>
+          {% if processing_fee_error %}<div class="alert alert-danger py-2">{{ processing_fee_error }}</div>{% endif %}
+          <div class="table-responsive mb-3">
+            <table class="table table-sm align-middle mb-0">
+              <tbody>
+                {% for item in standard_deductions.line_items %}
+                <tr>
+                  <td>{{ item.label }}</td>
+                  <td class="text-end fw-semibold">{{ item.amount|peso }}</td>
+                </tr>
+                {% endfor %}
+                <tr class="border-top">
+                  <td class="text-muted">Total deductions</td>
+                  <td class="text-end fw-semibold" id="totalDeductions">{{ standard_deductions.total|peso }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
           <div class="d-flex justify-content-between align-items-center mb-4">
             <span class="text-muted small">Net amount to release</span>
             <strong id="netAmount">₱0.00</strong>
           </div>
+          <input type="hidden" id="processing_fee" name="processing_fee" value="{{ standard_deductions.processing_fee }}">
+          <input type="hidden" id="other_fees" name="other_fees" value="{{ standard_deductions.other_fees }}">
+          <input type="hidden" id="other_fees_description" name="other_fees_description" value="{{ standard_deductions.other_fees_description }}">
           <div class="d-flex justify-content-between">
             <a class="btn btn-outline-secondary" href="{% url 'disbursements' %}">Cancel</a>
             <button class="btn btn-primary" type="submit" id="submitDisburseBtn">Confirm disbursement <i class="bi bi-arrow-right ms-1"></i></button>
@@ -113,8 +120,11 @@
       <div class="card-header"><h2 class="card-title">Approved terms</h2></div>
       <div class="card-body">
         <div class="detail-label">Borrower</div><div class="detail-value mb-3">{{ application.borrower_name }}</div>
-        <div class="detail-label">Rate</div><div class="detail-value mb-3">{{ application.final_interest_rate|default:application.loan_product.interest_rate }}% annual</div>
-        <div class="detail-label">Term</div><div class="detail-value">{{ application.final_term_months|default:application.term_months }} months</div>
+        <div class="detail-label">Rate</div><div class="detail-value mb-3">{{ application.final_interest_rate|default:application.loan_product.interest_rate }}% flat / month</div>
+        <div class="detail-label">Term</div><div class="detail-value mb-3">{{ application.final_term_months|default:application.term_months }} months</div>
+        <div class="detail-label">Approved amount</div><div class="detail-value mb-3">{{ application.amount|peso }}</div>
+        <div class="detail-label">Standard deductions</div><div class="detail-value mb-3">{{ standard_deductions.total|peso }}</div>
+        <div class="detail-label">Net to release</div><div class="detail-value">{{ net_release_preview|peso }}</div>
       </div>
     </div>
   </div>
@@ -135,6 +145,7 @@
           <dt class="col-5">Disbursement date</dt><dd class="col-7" id="confirmDisburseDate">—</dd>
           <dt class="col-5">Method</dt><dd class="col-7" id="confirmDisburseMethod">—</dd>
           <dt class="col-5">Reference</dt><dd class="col-7" id="confirmDisburseReference">—</dd>
+          <dt class="col-5">Total deductions</dt><dd class="col-7" id="confirmDisburseDeductions">{{ standard_deductions.total|peso }}</dd>
           <dt class="col-5">Net amount to release</dt><dd class="col-7" id="confirmDisburseNet">—</dd>
         </dl>
       </div>
@@ -153,11 +164,9 @@
   var processingFeeInput = document.getElementById('processing_fee');
   var otherFeesInput = document.getElementById('other_fees');
   var netAmountEl = document.getElementById('netAmount');
-  var amountForm = amountInput.closest('form');
-  var feeInputs = [processingFeeInput, otherFeesInput];
 
   function formatAmount(raw) {
-    var clean = raw.replace(/[^\d.]/g, '');
+    var clean = String(raw).replace(/[^\d.]/g, '');
     var firstDot = clean.indexOf('.');
     if (firstDot !== -1) {
       clean = clean.slice(0, firstDot + 1) + clean.slice(firstDot + 1).replace(/\./g, '');
@@ -171,69 +180,19 @@
 
   function toNumber(input) {
     if (!input) { return 0; }
-    return parseFloat(input.value.replace(/,/g, '')) || 0;
-  }
-
-  var processingFeeError = document.getElementById('processingFeeError');
-
-  function validateProcessingFee() {
-    if (!processingFeeInput) { return true; }
-    var amount = toNumber(amountInput);
-    var fee = toNumber(processingFeeInput);
-    processingFeeInput.classList.remove('is-invalid');
-    processingFeeInput.setCustomValidity('');
-    if (processingFeeError) {
-      processingFeeError.classList.add('d-none');
-      processingFeeError.textContent = '';
-    }
-    if (fee > amount) {
-      var msg = 'Processing fee cannot exceed the amount to release (₱' + formatAmount(amount.toFixed(2)) + ').';
-      if (processingFeeError) {
-        processingFeeError.textContent = msg;
-        processingFeeError.classList.remove('d-none');
-      }
-      processingFeeInput.classList.add('is-invalid');
-      processingFeeInput.setCustomValidity(msg);
-      return false;
-    }
-    return true;
+    return parseFloat(String(input.value).replace(/,/g, '')) || 0;
   }
 
   function updateNetAmount() {
     if (!netAmountEl) { return; }
     var net = toNumber(amountInput) - toNumber(processingFeeInput) - toNumber(otherFeesInput);
     netAmountEl.textContent = '₱' + formatAmount(net.toFixed(2));
-    validateProcessingFee();
   }
 
-  [amountInput, processingFeeInput, otherFeesInput].forEach(function (input) {
-    if (!input) { return; }
-    input.addEventListener('input', function () {
-      var oldLength = input.value.length;
-      var oldPos = input.selectionStart;
-      var formatted = formatAmount(input.value);
-      input.value = formatted;
-      var newPos = Math.max(0, oldPos + (formatted.length - oldLength));
-      input.setSelectionRange(newPos, newPos);
-      updateNetAmount();
-    });
-    if (input.value) {
-      input.value = formatAmount(input.value);
-    }
-  });
-
+  if (amountInput.value) {
+    amountInput.value = formatAmount(amountInput.value);
+  }
   updateNetAmount();
-  if (processingFeeInput && processingFeeInput.classList.contains('is-invalid')) {
-    validateProcessingFee();
-  }
-
-  if (amountForm) {
-    amountForm.addEventListener('submit', function () {
-      [amountInput].concat(feeInputs).forEach(function (input) {
-        if (input) { input.value = input.value.replace(/,/g, ''); }
-      });
-    });
-  }
 
   // Confirm-before-submit for the disbursement form.
   var disburseForm = document.getElementById('disburseForm');
