@@ -1027,6 +1027,7 @@ class Features(models.Model):
     DEFAULT_STORE_NAME = "KAP"
     DEFAULT_TAGLINE = "Kaakibat ang Pag-unlad Microfinancing Inc."
     DEFAULT_LOGO_STATIC = "branding/kap_logo.png"
+    DEFAULT_LOGO_MARK_STATIC = "branding/kap_logo_mark.png"
     DEFAULT_LOGO_MEDIA = "branding/KAP_logo_transparent_1_csXgoGL.png"
 
     store_name = models.CharField(max_length=120, default=DEFAULT_STORE_NAME)
@@ -1052,6 +1053,27 @@ class Features(models.Model):
         pass
 
     @classmethod
+    def default_logo_source_path(cls):
+        """Absolute path to the bundled KAP logo (works before/after collectstatic)."""
+        from pathlib import Path
+
+        from django.conf import settings
+        from django.contrib.staticfiles import finders
+
+        found = finders.find(cls.DEFAULT_LOGO_STATIC)
+        if found:
+            return Path(found if isinstance(found, str) else found[0])
+
+        for candidate in (
+            Path(settings.BASE_DIR) / "static" / cls.DEFAULT_LOGO_STATIC,
+            *(Path(root) / cls.DEFAULT_LOGO_STATIC for root in getattr(settings, "STATICFILES_DIRS", ())),
+            Path(settings.STATIC_ROOT) / cls.DEFAULT_LOGO_STATIC,
+        ):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @classmethod
     def _ensure_default_logo(cls, obj):
         """Copy the bundled KAP logo into media when Features has no logo file."""
         from pathlib import Path
@@ -1067,20 +1089,13 @@ class Features(models.Model):
         media_root = Path(settings.MEDIA_ROOT)
         target = media_root / cls.DEFAULT_LOGO_MEDIA
         if not target.is_file():
-            source = None
-            for candidate in (
-                Path(settings.BASE_DIR) / "static" / cls.DEFAULT_LOGO_STATIC,
-                *(Path(root) / cls.DEFAULT_LOGO_STATIC for root in getattr(settings, "STATICFILES_DIRS", ())),
-            ):
-                if candidate.is_file():
-                    source = candidate
-                    break
+            source = cls.default_logo_source_path()
             if source is None:
                 return obj
             target.parent.mkdir(parents=True, exist_ok=True)
             copyfile(source, target)
 
-        if obj.logo.name != cls.DEFAULT_LOGO_MEDIA:
+        if not obj.logo or obj.logo.name != cls.DEFAULT_LOGO_MEDIA:
             obj.logo.name = cls.DEFAULT_LOGO_MEDIA
             obj.save(update_fields=["logo"])
         return obj
@@ -1095,14 +1110,66 @@ class Features(models.Model):
             },
         )
         update_fields = []
-        if created or obj.store_name in ("", "Harborline"):
+        # Keep KAP branding as the system default on every host, including
+        # production DBs that still have the old Harborline placeholders.
+        legacy_names = {"", "Harborline"}
+        legacy_taglines = {"", "Lending workspace"}
+        if created or obj.store_name in legacy_names:
             if obj.store_name != cls.DEFAULT_STORE_NAME:
                 obj.store_name = cls.DEFAULT_STORE_NAME
                 update_fields.append("store_name")
-        if created or obj.tagline in ("", "Lending workspace"):
+        if created or obj.tagline in legacy_taglines:
             if obj.tagline != cls.DEFAULT_TAGLINE:
                 obj.tagline = cls.DEFAULT_TAGLINE
                 update_fields.append("tagline")
         if update_fields:
             obj.save(update_fields=update_fields)
         return cls._ensure_default_logo(obj)
+
+    def resolved_logo_url(self):
+        """Public logo URL; default KAP logo is served from static (WhiteNoise-safe)."""
+        from pathlib import Path
+
+        from django.conf import settings
+        from django.templatetags.static import static
+
+        # Bundled default must not depend on /media (often unmapped on PaaS hosts).
+        logo_name = (self.logo.name if self.logo else "") or ""
+        if (
+            not logo_name
+            or logo_name == self.DEFAULT_LOGO_MEDIA
+            or logo_name.startswith("branding/KAP_logo")
+        ):
+            return static(self.DEFAULT_LOGO_STATIC)
+
+        media_path = Path(settings.MEDIA_ROOT) / logo_name
+        if media_path.is_file():
+            try:
+                return self.logo.url
+            except ValueError:
+                pass
+        return static(self.DEFAULT_LOGO_STATIC)
+
+    def resolved_logo_mark_url(self):
+        """Square mark URL; bundled static mark is the production-safe default."""
+        from pathlib import Path
+
+        from django.conf import settings
+        from django.templatetags.static import static
+
+        from .logo_utils import logo_mark_url
+
+        logo_name = (self.logo.name if self.logo else "") or ""
+        if (
+            not logo_name
+            or logo_name == self.DEFAULT_LOGO_MEDIA
+            or logo_name.startswith("branding/KAP_logo")
+        ):
+            return static(self.DEFAULT_LOGO_MARK_STATIC)
+
+        mark = logo_mark_url(self.logo)
+        if mark and settings.DEBUG:
+            relative = mark[len(settings.MEDIA_URL) :] if mark.startswith(settings.MEDIA_URL) else None
+            if relative and (Path(settings.MEDIA_ROOT) / relative).is_file():
+                return mark
+        return static(self.DEFAULT_LOGO_MARK_STATIC)

@@ -1,6 +1,5 @@
 from django.conf import settings
 
-from .logo_utils import logo_mark_url
 from .models import Features, LoanApplication, Notification
 
 
@@ -68,12 +67,23 @@ def product_context(request):
     unread_notification_count = 0
     if user.is_authenticated:
         unread_notification_count = Notification.objects.filter(user=user, is_read=False).count()
+
+    # Prefer media upload when the file exists; otherwise use WhiteNoise-served
+    # static defaults so production hosts without a /media mapping still show KAP branding.
+    class _LogoRef:
+        def __init__(self, url, name=""):
+            self.url = url
+            self.name = name
+
+    logo_url = features.resolved_logo_url()
+    site_logo = _LogoRef(logo_url, getattr(features.logo, "name", "") or Features.DEFAULT_LOGO_STATIC)
+
     return {
         "currency_symbol": "₱",
-        "app_name": features.store_name,
-        "app_tagline": features.tagline,
-        "site_logo": features.logo,
-        "site_logo_mark": logo_mark_url(features.logo),
+        "app_name": features.store_name or Features.DEFAULT_STORE_NAME,
+        "app_tagline": features.tagline or Features.DEFAULT_TAGLINE,
+        "site_logo": site_logo,
+        "site_logo_mark": features.resolved_logo_mark_url(),
         "media_url": settings.MEDIA_URL,
         "is_officer": is_officer,
         "is_admin": is_admin,

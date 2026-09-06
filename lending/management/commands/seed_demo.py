@@ -140,6 +140,9 @@ class Command(BaseCommand):
             },
         )
 
+        from savings.services import resolve_membership_savings_product
+
+        resolve_membership_savings_product()
         regular_savings, _ = SavingsProduct.objects.update_or_create(
             name="Regular Savings",
             defaults={

@@ -32,6 +32,7 @@ from .services import (
     open_account,
     record_deposit,
     record_withdrawal,
+    resolve_membership_savings_product,
 )
 
 
@@ -399,6 +400,8 @@ def officer_open_savings_account(request):
 @login_required
 @role_required("admin")
 def officer_savings_products(request):
+    # Ensure the compulsory Membership/Savings Deposit product always exists.
+    resolve_membership_savings_product()
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
     qs = SavingsProduct.objects.annotate(accounts_count=Count("accounts"))

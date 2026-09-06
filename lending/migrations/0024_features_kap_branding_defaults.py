@@ -11,6 +11,26 @@ DEFAULT_LOGO_STATIC = "branding/kap_logo.png"
 DEFAULT_LOGO_MEDIA = "branding/KAP_logo_transparent_1_csXgoGL.png"
 
 
+def _find_bundled_logo():
+    try:
+        from django.contrib.staticfiles import finders
+
+        found = finders.find(DEFAULT_LOGO_STATIC)
+        if found:
+            return Path(found if isinstance(found, str) else found[0])
+    except Exception:
+        pass
+
+    for candidate in (
+        Path(settings.BASE_DIR) / "static" / DEFAULT_LOGO_STATIC,
+        *(Path(root) / DEFAULT_LOGO_STATIC for root in getattr(settings, "STATICFILES_DIRS", ())),
+        Path(getattr(settings, "STATIC_ROOT", "")) / DEFAULT_LOGO_STATIC,
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def apply_kap_branding(apps, schema_editor):
     Features = apps.get_model("lending", "Features")
     obj, _ = Features.objects.get_or_create(
@@ -33,14 +53,7 @@ def apply_kap_branding(apps, schema_editor):
     needs_logo = not obj.logo or not (media_root / str(obj.logo)).is_file()
     if needs_logo:
         if not target.is_file():
-            source = None
-            for candidate in (
-                Path(settings.BASE_DIR) / "static" / DEFAULT_LOGO_STATIC,
-                *(Path(root) / DEFAULT_LOGO_STATIC for root in getattr(settings, "STATICFILES_DIRS", ())),
-            ):
-                if candidate.is_file():
-                    source = candidate
-                    break
+            source = _find_bundled_logo()
             if source is not None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 copyfile(source, target)
