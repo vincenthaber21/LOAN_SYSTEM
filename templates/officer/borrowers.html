@@ -9,7 +9,7 @@
   <div>
     <div class="eyebrow">Officer workspace</div>
     <h1>Members with loans.</h1>
-    <p>{{ member_count }} member{{ member_count|pluralize }} with active loan{{ member_count|pluralize }} · {{ total_active_loans }} active loan{{ total_active_loans|pluralize }} · {{ total_outstanding|peso }} outstanding.</p>
+    <p>{{ member_count }} member{{ member_count|pluralize }} with active loan{{ member_count|pluralize }} · {{ total_active_loans }} active loan{{ total_active_loans|pluralize }} · {{ total_adjusted_outstanding|peso }} outstanding.</p>
   </div>
   <div class="page-heading-actions">
     <a class="btn btn-outline-secondary" href="{% url 'all_members' %}"><i class="bi bi-people me-1"></i>All members</a>
@@ -36,8 +36,8 @@
   <div class="col-md-4">
     <div class="card-soft metric-card">
       <div class="metric-label">Outstanding balance</div>
-      <div class="metric-value" style="font-size:1.55rem;">{{ total_outstanding|peso }}</div>
-      <div class="metric-note positive">Still owed on active loans</div>
+      <div class="metric-value" style="font-size:1.55rem;">{{ total_adjusted_outstanding|peso }}</div>
+      <div class="metric-note positive">Cash-adjusted · Exact {{ total_outstanding|peso }}</div>
     </div>
   </div>
 </div>
@@ -100,7 +100,12 @@
               <strong>{{ member.credit_score|credit_score }}</strong>
             </td>
             <td class="d-none d-lg-table-cell">{% include "includes/status_badge.html" with status=member.loan_availability_status label=member.loan_availability_label %}</td>
-            <td class="num text-nowrap">{{ member.total_balance|peso }}</td>
+            <td class="num">
+              <strong class="text-nowrap d-block">{{ member.total_adjusted_outstanding|peso }}</strong>
+              {% if member.total_outstanding != member.total_adjusted_outstanding %}
+              <span class="text-muted small d-block">Exact {{ member.total_outstanding|peso }}</span>
+              {% endif %}
+            </td>
             <td class="text-muted d-none d-xl-table-cell text-nowrap">{{ member.last_activity }}</td>
             <td>{% include "includes/status_badge.html" with status=member.account_status label=member.account_status|title %}</td>
             <td class="table-actions">

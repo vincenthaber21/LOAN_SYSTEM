@@ -1101,19 +1101,23 @@ def _members_queryset(query="", status="", active_loans_only=False):
 def _enrich_members(qs):
     total_active_loans = 0
     total_outstanding = Decimal("0.00")
+    total_adjusted_outstanding = Decimal("0.00")
     members = list(qs)
     for member in members:
         member.active_loan_count = member.active_loans
-        member.total_outstanding = sum(
-            (
-                loan.outstanding_balance
-                for application in member.loan_applications.all()
-                for loan in ([getattr(application, "loan", None)] if hasattr(application, "loan") else [])
-                if loan
-            ),
+        loan_balances = [
+            loan
+            for application in member.loan_applications.all()
+            for loan in ([getattr(application, "loan", None)] if hasattr(application, "loan") else [])
+            if loan
+        ]
+        member.total_outstanding = sum((loan.outstanding_balance for loan in loan_balances), Decimal("0.00"))
+        member.total_adjusted_outstanding = sum(
+            (loan.adjusted_outstanding_balance for loan in loan_balances),
             Decimal("0.00"),
         )
-        member.total_balance = member.total_outstanding
+        # Primary list display: cash-adjusted (₱5 remittance) outstanding
+        member.total_balance = member.total_adjusted_outstanding
         member.last_activity = member.joined_at
         member.account_status = "active" if member.is_active else "inactive"
         if credit_score_blocks_loans(member):
@@ -1126,15 +1130,19 @@ def _enrich_members(qs):
             member.loan_availability_status = "active" if member.has_available_loan else "inactive"
         total_active_loans += member.active_loan_count
         total_outstanding += member.total_outstanding
-    return members, total_active_loans, total_outstanding
+        total_adjusted_outstanding += member.total_adjusted_outstanding
+    return members, total_active_loans, total_outstanding, total_adjusted_outstanding
 
 
-def _member_list_context(members, total_active_loans, total_outstanding, query, status):
+def _member_list_context(members, total_active_loans, total_outstanding, query, status, total_adjusted_outstanding=None):
+    if total_adjusted_outstanding is None:
+        total_adjusted_outstanding = total_outstanding
     return {
         "members": members,
         "member_count": len(members),
         "total_active_loans": total_active_loans,
         "total_outstanding": total_outstanding,
+        "total_adjusted_outstanding": total_adjusted_outstanding,
         "query": query,
         "filters": {"q": query, "status": status},
         "borrower_status_filters": [{"value": "active", "label": "Active"}, {"value": "inactive", "label": "Inactive"}],
@@ -1146,10 +1154,21 @@ def _member_list_context(members, total_active_loans, total_outstanding, query, 
 def borrowers(request):
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
-    members, total_active_loans, total_outstanding = _enrich_members(
+    members, total_active_loans, total_outstanding, total_adjusted_outstanding = _enrich_members(
         _members_queryset(query, status, active_loans_only=True),
     )
-    return render(request, "officer/borrowers.html", _member_list_context(members, total_active_loans, total_outstanding, query, status))
+    return render(
+        request,
+        "officer/borrowers.html",
+        _member_list_context(
+            members,
+            total_active_loans,
+            total_outstanding,
+            query,
+            status,
+            total_adjusted_outstanding=total_adjusted_outstanding,
+        ),
+    )
 
 
 @login_required
@@ -1157,9 +1176,18 @@ def borrowers(request):
 def all_members(request):
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
-    members, total_active_loans, total_outstanding = _enrich_members(_members_queryset(query, status))
+    members, total_active_loans, total_outstanding, total_adjusted_outstanding = _enrich_members(
+        _members_queryset(query, status)
+    )
     members_with_loans = sum(1 for member in members if member.active_loan_count > 0)
-    context = _member_list_context(members, total_active_loans, total_outstanding, query, status)
+    context = _member_list_context(
+        members,
+        total_active_loans,
+        total_outstanding,
+        query,
+        status,
+        total_adjusted_outstanding=total_adjusted_outstanding,
+    )
     context["members_with_loans"] = members_with_loans
     return render(request, "officer/all_members.html", context)
 
