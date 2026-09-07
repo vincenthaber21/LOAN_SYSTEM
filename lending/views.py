@@ -16,7 +16,7 @@ from django.utils import timezone
 from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .models import Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, Manager, Notification, Payment, User
-from .services import BalanceExtensionError, balance_extension_previews, can_extend_loan_balance, disburse_application, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_officer_activity_log, mark_overdue_installments, normalize_credit_score, original_schedule_display_rows, record_payment, reject_superseded_applications, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE
+from .services import BalanceExtensionError, adjust_payment, balance_extension_previews, can_extend_loan_balance, disburse_application, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_officer_activity_log, mark_overdue_installments, normalize_credit_score, original_schedule_display_rows, record_payment, reject_superseded_applications, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE
 
 
 def _parse_disbursed_date(value):
@@ -730,6 +730,26 @@ def officer_dashboard(request):
         {"label": "Pending review", "value": pending_count, "note": date_note},
         {"label": "Overdue loans", "value": overdue_loans, "note": date_note},
     ]
+
+    total_outstanding = loans_as_of.aggregate(value=Sum("outstanding_balance"))["value"] or Decimal("0.00")
+    total_adjusted_outstanding = sum(
+        (adjust_payment(balance) for balance in loans_as_of.values_list("outstanding_balance", flat=True)),
+        Decimal("0.00"),
+    )
+    dashboard_metrics.insert(
+        2,
+        {
+            "label": "Outstanding",
+            "value": f"₱{total_adjusted_outstanding:,.0f}",
+            "note": (
+                f"Cash-adjusted · Exact ₱{total_outstanding:,.0f}"
+                if total_outstanding != total_adjusted_outstanding
+                else date_note
+            ),
+            "positive": True,
+        },
+    )
+
     status_breakdown = [
         {
             "label": dict(LoanApplication.Status.choices).get(row["status"], row["status"]),
@@ -747,6 +767,8 @@ def officer_dashboard(request):
         "is_all_view": is_all_view,
         "total_loans": loans_as_of.count(),
         "total_disbursed": total_disbursed,
+        "total_outstanding": total_outstanding,
+        "total_adjusted_outstanding": total_adjusted_outstanding,
         "pending_applications": pending_count,
         "overdue_loans": overdue_loans,
         "portfolio_at_risk": Decimal("7.4"),

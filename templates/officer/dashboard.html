@@ -227,7 +227,7 @@
 <div class="card-soft mb-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <div><div class="eyebrow">Portfolio</div><h2 class="card-title mt-1">All loans{% if not is_all_view and not is_today_view %} as of {{ overview_date_label }}{% endif %}</h2></div>
-    <span class="badge status-neutral">{{ portfolio_loans|length }} loan{{ portfolio_loans|length|pluralize }}</span>
+    <span class="badge status-neutral">{{ portfolio_loans|length }} loan{{ portfolio_loans|length|pluralize }} · {{ total_adjusted_outstanding|peso }}</span>
   </div>
   {% if portfolio_loans %}
   <div class="table-responsive">
@@ -238,7 +238,12 @@
         <tr>
           <td><div class="person"><span class="avatar">{{ loan.application.initials }}</span><span><span class="person-name d-block">{{ loan.application.borrower_name }}</span><span class="person-sub">{{ loan.reference }}</span></span></div></td>
           <td><strong>{{ loan.principal|peso }}</strong></td>
-          <td>{{ loan.outstanding_balance|peso }}</td>
+          <td>
+            <strong class="text-nowrap d-block">{{ loan.adjusted_outstanding_balance|peso }}</strong>
+            {% if loan.outstanding_balance != loan.adjusted_outstanding_balance %}
+            <span class="text-muted small d-block">Exact {{ loan.outstanding_balance|peso }}</span>
+            {% endif %}
+          </td>
           <td>{{ loan.product_name }}</td>
           <td>{{ loan.start_date }}</td>
           <td>{% include "includes/status_badge.html" with status=loan.status label=loan.status_label %}</td>
