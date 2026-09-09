@@ -110,6 +110,39 @@
 
   <div class="col-lg-8">
     <div class="card-soft mb-4 fade-up-3">
+      <div class="card-header d-flex justify-content-between align-items-start">
+        <div>
+          <div class="eyebrow">Contribution ledger</div>
+          <h2 class="card-title mt-1 mb-1">Member contributions.</h2>
+        </div>
+        <span class="badge rounded-pill status-neutral">{{ ledger.contribution_count }} record{{ ledger.contribution_count|pluralize }}</span>
+      </div>
+      <div class="card-body p-0">
+        {% if contributions %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Date</th><th>Period</th><th>Method</th><th>Reference</th><th class="text-end">Amount</th><th>Recorded by</th></tr></thead>
+            <tbody>
+              {% for tx in contributions %}
+              <tr>
+                <td>{{ tx.created_at|date:"M d, Y" }}</td>
+                <td>{{ tx.period_display }}</td>
+                <td>{{ tx.method_label }}</td>
+                <td>{{ tx.reference_number|default:"—" }}</td>
+                <td class="text-end fw-semibold text-success">+{{ tx.amount|peso }}</td>
+                <td>{{ tx.recorded_by.display_name|default:"—" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-4">{% include "includes/empty_state.html" with icon="bi-cash-stack" title="No contributions yet" description="Record the member's first contribution to start the ledger." %}</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card-soft mb-4 fade-up-3">
       <div class="card-header d-flex flex-wrap justify-content-between align-items-start gap-2">
         <div>
           <div class="eyebrow">Contribution periods</div>
@@ -163,39 +196,6 @@
         </div>
         {% else %}
         {% include "includes/empty_state.html" with icon="bi-calendar-range" title="No periods defined" description="Add a from/to date range to organize member contributions." %}
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="card-soft mb-4 fade-up-3">
-      <div class="card-header d-flex justify-content-between align-items-start">
-        <div>
-          <div class="eyebrow">Contribution ledger</div>
-          <h2 class="card-title mt-1 mb-1">Member contributions.</h2>
-        </div>
-        <span class="badge rounded-pill status-neutral">{{ ledger.contribution_count }} record{{ ledger.contribution_count|pluralize }}</span>
-      </div>
-      <div class="card-body p-0">
-        {% if contributions %}
-        <div class="table-responsive">
-          <table class="table table-hover align-middle mb-0">
-            <thead><tr><th>Date</th><th>Period</th><th>Method</th><th>Reference</th><th class="text-end">Amount</th><th>Recorded by</th></tr></thead>
-            <tbody>
-              {% for tx in contributions %}
-              <tr>
-                <td>{{ tx.created_at|date:"M d, Y" }}</td>
-                <td>{{ tx.period_display }}</td>
-                <td>{{ tx.method_label }}</td>
-                <td>{{ tx.reference_number|default:"—" }}</td>
-                <td class="text-end fw-semibold text-success">+{{ tx.amount|peso }}</td>
-                <td>{{ tx.recorded_by.display_name|default:"—" }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="p-4">{% include "includes/empty_state.html" with icon="bi-cash-stack" title="No contributions yet" description="Record the member's first contribution to start the ledger." %}</div>
         {% endif %}
       </div>
     </div>

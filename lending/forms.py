@@ -38,6 +38,9 @@ PENDING_APPLICATION_STATUSES = [
 
 OPEN_APPLICATION_STATUSES = PENDING_APPLICATION_STATUSES
 
+# Same product can be availed again once an open loan is paid down this far.
+REAPPLY_PROGRESS_PERCENT = 70
+
 
 def _style_form_fields(form):
     for field in form.fields.values():
@@ -48,19 +51,29 @@ def _style_form_fields(form):
             widget.attrs.setdefault("class", "form-control")
 
 
-def unavailable_product_ids_for_borrower(borrower):
-    """Product IDs the borrower cannot apply for (active loan or open application)."""
-    if not borrower:
-        return set()
-    active_product_ids = Loan.objects.filter(
+def _blocking_active_product_ids(borrower):
+    """Product IDs with an active/overdue loan still below the re-apply progress threshold."""
+    blocked = set()
+    loans = Loan.objects.filter(
         application__borrower=borrower,
         status__in=[Loan.Status.ACTIVE, Loan.Status.OVERDUE],
-    ).values_list("application__loan_product_id", flat=True)
+    ).select_related("application")
+    for loan in loans:
+        product_id = loan.application.loan_product_id
+        if product_id and loan.progress_percent < REAPPLY_PROGRESS_PERCENT:
+            blocked.add(product_id)
+    return blocked
+
+
+def unavailable_product_ids_for_borrower(borrower):
+    """Product IDs the borrower cannot apply for (underpaid active loan or open application)."""
+    if not borrower:
+        return set()
     pending_product_ids = LoanApplication.objects.filter(
         borrower=borrower,
         status__in=PENDING_APPLICATION_STATUSES,
     ).values_list("loan_product_id", flat=True)
-    return {pk for pk in active_product_ids if pk} | {pk for pk in pending_product_ids if pk}
+    return _blocking_active_product_ids(borrower) | {pk for pk in pending_product_ids if pk}
 
 
 def available_loan_products_for_borrower(borrower):
@@ -77,12 +90,21 @@ def available_loan_products_for_borrower(borrower):
 def duplicate_application_error(borrower, product, exclude_pk=None):
     if not borrower or not product:
         return None
-    if Loan.objects.filter(
-        application__borrower=borrower,
-        application__loan_product=product,
-        status__in=[Loan.Status.ACTIVE, Loan.Status.OVERDUE],
-    ).exists():
-        return f"This borrower already has an active {product.name} loan."
+    blocking_loan = (
+        Loan.objects.filter(
+            application__borrower=borrower,
+            application__loan_product=product,
+            status__in=[Loan.Status.ACTIVE, Loan.Status.OVERDUE],
+        )
+        .select_related("application")
+        .first()
+    )
+    if blocking_loan and blocking_loan.progress_percent < REAPPLY_PROGRESS_PERCENT:
+        return (
+            f"This borrower already has an active {product.name} loan "
+            f"(paid down {blocking_loan.progress_percent}%; "
+            f"re-apply is allowed at {REAPPLY_PROGRESS_PERCENT}%+)."
+        )
     qs = LoanApplication.objects.filter(
         borrower=borrower,
         loan_product=product,
@@ -982,6 +1004,27 @@ class ReviewForm(forms.ModelForm):
 
 
 class PaymentForm(forms.ModelForm):
+    savings_adjustment = forms.DecimalField(
+        required=False,
+        min_value=Decimal("0.00"),
+        max_digits=12,
+        decimal_places=2,
+        label="To savings (cash rounding)",
+        widget=forms.NumberInput(
+            attrs={"step": "0.01", "min": "0", "class": "form-control", "inputmode": "decimal"}
+        ),
+    )
+    mutual_aid_contribution = forms.DecimalField(
+        required=False,
+        min_value=Decimal("0.00"),
+        max_digits=12,
+        decimal_places=2,
+        label="To mutual aid",
+        widget=forms.NumberInput(
+            attrs={"step": "0.01", "min": "0", "class": "form-control", "inputmode": "decimal"}
+        ),
+    )
+
     class Meta:
         model = Payment
         fields = ("amount", "method", "reference_number")
@@ -1001,6 +1044,48 @@ class PaymentForm(forms.ModelForm):
         if amount is not None and self.max_amount is not None and amount > self.max_amount:
             raise forms.ValidationError(f"Amount cannot exceed the {self.max_amount_label} of ₱{self.max_amount:,.2f}.")
         return amount
+
+    def clean(self):
+        cleaned = super().clean()
+        amount = cleaned.get("amount")
+
+        savings = cleaned.get("savings_adjustment")
+        if savings is None:
+            savings = Decimal("0.00")
+        else:
+            savings = Decimal(str(savings)).quantize(Decimal("0.01"))
+        if savings < 0:
+            self.add_error("savings_adjustment", "Savings amount cannot be negative.")
+            savings = Decimal("0.00")
+        cleaned["savings_adjustment"] = max(Decimal("0.00"), savings)
+
+        mutual_aid = cleaned.get("mutual_aid_contribution")
+        if mutual_aid is None:
+            mutual_aid = Decimal("0.00")
+        else:
+            mutual_aid = Decimal(str(mutual_aid)).quantize(Decimal("0.01"))
+        if mutual_aid < 0:
+            self.add_error("mutual_aid_contribution", "Mutual aid amount cannot be negative.")
+            mutual_aid = Decimal("0.00")
+        cleaned["mutual_aid_contribution"] = max(Decimal("0.00"), mutual_aid)
+
+        if amount is not None:
+            if savings > amount:
+                self.add_error(
+                    "savings_adjustment",
+                    f"Savings cannot exceed the payment amount of ₱{amount:,.2f}.",
+                )
+            if mutual_aid > amount:
+                self.add_error(
+                    "mutual_aid_contribution",
+                    f"Mutual aid cannot exceed the payment amount of ₱{amount:,.2f}.",
+                )
+            if savings + mutual_aid > amount:
+                self.add_error(
+                    "mutual_aid_contribution",
+                    "Savings plus mutual aid cannot exceed the payment amount.",
+                )
+        return cleaned
 
 
 class BalanceExtensionForm(forms.Form):

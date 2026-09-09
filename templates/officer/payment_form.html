@@ -2,7 +2,7 @@
 {% load lending_tags %}
 {% block title %}Record payment{% endblock %}
 {% block topbar_title %}Record a payment{% endblock %}
-{% block topbar_context %}Applied to the oldest unpaid installment first.{% endblock %}
+{% block topbar_context %}Cash-adjusted remittance: loan + ₱{{ daily_mutual_aid_amount }} mutual aid / working day; rounding difference goes to savings.{% endblock %}
 {% block content %}
 <div class="page-heading">
   <div>
@@ -20,22 +20,32 @@
         <form method="post" data-client-validation novalidate id="paymentForm">
           {% csrf_token %}
           {% include "includes/form_errors.html" %}
-          <div class="mb-3">
-            <label class="form-label d-block label-required">Pay <span class="text-danger">*</span></label>
-            <div class="d-flex flex-wrap gap-3" id="payFrequencyGroup" role="radiogroup" aria-label="Pay period">
-              {% for value, label in pay_frequency_choices %}
-              <div class="form-check form-check-inline m-0">
-                <input class="form-check-input" type="radio" name="pay_frequency" id="pay_{{ value }}" value="{{ value }}" {% if pay_frequency == value %}checked{% endif %} required>
-                <label class="form-check-label" for="pay_{{ value }}">{{ label }}</label>
-              </div>
-              {% endfor %}
-            </div>
-          </div>
+          <input type="hidden" name="pay_frequency" value="{{ pay_frequency }}">
           <div class="mb-3">
             <label class="form-label label-required" for="id_amount">Amount <span class="text-danger">*</span></label>
-            <div class="input-group"><span class="input-group-text">₱</span><input class="form-control {% if form.amount.errors %}is-invalid{% endif %}" id="id_amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="{{ form.amount.value|default:pay_amounts.daily }}" data-max-amount="{{ max_payment_amount }}" data-max-label="{{ max_payment_label }}" required></div>
+            <div class="input-group"><span class="input-group-text">₱</span><input class="form-control {% if form.amount.errors %}is-invalid{% endif %}" id="id_amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="{{ form.amount.value|default:suggested_amount }}" data-max-amount="{{ max_payment_amount }}" data-max-label="{{ max_payment_label }}" required></div>
             <div class="invalid-feedback d-block{% if not form.amount.errors %} d-none{% endif %}" id="amountError">{% for error in form.amount.errors %}{{ error }}{% endfor %}</div>
-            <div class="form-text">Select Daily, Weekly, Biweekly, or Monthly to fill the adjusted remittance (cash-rounded).</div>
+            <div class="form-text">Prefilled from the member’s {{ pay_frequency_label }} plan (loan exact {{ exact_for_frequency|peso }} + mutual aid {{ default_mutual_aid_contribution|peso }} → {{ suggested_amount|peso }}).</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="id_mutual_aid_contribution">To mutual aid</label>
+            <div class="input-group">
+              <span class="input-group-text">₱</span>
+              <input class="form-control {% if form.mutual_aid_contribution.errors %}is-invalid{% endif %}" id="id_mutual_aid_contribution" name="mutual_aid_contribution" type="text" inputmode="decimal" autocomplete="off" value="{{ form.mutual_aid_contribution.value|default:default_mutual_aid_contribution }}">
+            </div>
+            {% for error in form.mutual_aid_contribution.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="form-text">₱{{ daily_mutual_aid_amount }} × working days covered by the amount (one day ≈ ₱{{ daily_collect_unit }}). Updates as you type.</div>
+            <div class="invalid-feedback d-none" id="mutualAidError"></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="id_savings_adjustment">To savings (cash rounding)</label>
+            <div class="input-group">
+              <span class="input-group-text">₱</span>
+              <input class="form-control {% if form.savings_adjustment.errors %}is-invalid{% endif %}" id="id_savings_adjustment" name="savings_adjustment" type="text" inputmode="decimal" autocomplete="off" value="{{ form.savings_adjustment.value|default:default_savings_adjustment }}">
+            </div>
+            {% for error in form.savings_adjustment.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="form-text">Auto-fills from adjusted − exact on the loan portion. Edit for manual amounts.</div>
+            <div class="invalid-feedback d-none" id="savingsError"></div>
           </div>
           <div class="mb-3">
             <label class="form-label">{{ form.method.label }}</label>
@@ -56,23 +66,31 @@
   <div class="col-lg-5">
     <div class="card-soft">
       <div class="card-header"><h2 class="card-title">Loan summary</h2></div>
-      <div class="card-body">
+      <div class="card-body"
+           id="loanPaymentSummary"
+           data-principal="{{ loan.principal }}"
+           data-rate="{{ loan.interest_rate }}"
+           data-periods="{{ remaining_periods }}">
+        <div class="detail-label">Member pay plan</div>
+        <div class="detail-value mb-3">{{ pay_frequency_label }}</div>
+        <div class="detail-label">Current principal</div>
+        <div class="detail-value" id="currentPrincipal">{{ loan.principal|peso }}</div>
+        <div class="text-muted small mb-3" id="principalAfter"></div>
         <div class="detail-label">Outstanding balance</div>
         <div class="detail-value" id="outstandingBalance" data-base="{{ loan.outstanding_balance }}">{{ loan.adjusted_outstanding_balance|peso }}</div>
-        <div class="text-muted small mb-1">Exact {{ loan.outstanding_balance|peso }}</div>
+        <div class="text-muted small mb-1">Exact {{ loan.outstanding_balance|peso }} · max collect {{ max_payment_amount|peso }}</div>
         <div class="text-muted small mb-3" id="outstandingAfter"></div>
+        <div class="detail-label">To mutual aid</div>
+        <div class="detail-value text-primary" id="mutualAidCredit">{{ default_mutual_aid_contribution|peso }}</div>
+        <div class="text-muted small mb-3" id="mutualAidDaysHint">Credited to KAPAMILYA MUTUAL AID.</div>
+        <div class="detail-label">To savings (cash rounding)</div>
+        <div class="detail-value text-success" id="savingsCredit">{{ default_savings_adjustment|peso }}</div>
+        <div class="text-muted small mb-1" id="loanAppliedHint"></div>
+        <div class="text-muted small mb-3">Deposited to Membership/Savings.</div>
         {% if installment %}
         <div class="detail-label">Applying to</div><div class="detail-value mb-3">Installment #{{ installment.installment_number }} · due {{ installment.due_date }}</div>
-        <div class="detail-label">Remaining on this installment</div>
-        <div class="detail-value" id="installmentRemaining" data-base="{{ installment.remaining }}">{{ installment.adjusted_remaining|peso }}</div>
-        <div class="text-muted small mb-1">Exact {{ installment.remaining|peso }}</div>
-        <div class="text-muted small" id="installmentAfter"></div>
         {% elif loan.next_installment %}
         <div class="detail-label">Next installment due</div><div class="detail-value mb-3">{{ loan.next_installment.due_date }}</div>
-        <div class="detail-label">Remaining on this installment</div>
-        <div class="detail-value" id="installmentRemaining" data-base="{{ loan.next_installment.remaining }}">{{ loan.next_installment.adjusted_remaining|peso }}</div>
-        <div class="text-muted small mb-1">Exact {{ loan.next_installment.remaining|peso }}</div>
-        <div class="text-muted small" id="installmentAfter"></div>
         {% else %}
         <p class="text-muted mb-0">This loan has no unpaid installments left.</p>
         {% endif %}
@@ -95,6 +113,10 @@
           <dt class="col-5">Loan</dt><dd class="col-7">{{ loan.reference }}</dd>
           <dt class="col-5">Borrower</dt><dd class="col-7">{{ loan.application.borrower_name }}</dd>
           <dt class="col-5">Amount</dt><dd class="col-7" id="confirmPaymentAmount">—</dd>
+          <dt class="col-5">To loan</dt><dd class="col-7" id="confirmLoanAmount">—</dd>
+          <dt class="col-5">To mutual aid</dt><dd class="col-7" id="confirmMutualAidAmount">—</dd>
+          <dt class="col-5">To savings</dt><dd class="col-7" id="confirmSavingsAmount">—</dd>
+          <dt class="col-5">New principal</dt><dd class="col-7" id="confirmNewPrincipal">—</dd>
           <dt class="col-5">Method</dt><dd class="col-7" id="confirmPaymentMethod">—</dd>
           <dt class="col-5">Reference number</dt><dd class="col-7" id="confirmPaymentReference">—</dd>
         </dl>
@@ -110,17 +132,25 @@
 <script>
 (function () {
   var amountInput = document.getElementById('id_amount');
+  var savingsInput = document.getElementById('id_savings_adjustment');
+  var mutualAidInput = document.getElementById('id_mutual_aid_contribution');
   if (!amountInput) { return; }
   var amountForm = amountInput.closest('form');
   var amountError = document.getElementById('amountError');
-  var amounts = {
-    daily: {{ pay_amounts.daily|stringformat:".2f" }},
-    weekly: {{ pay_amounts.weekly|stringformat:".2f" }},
-    biweekly: {{ pay_amounts.biweekly|stringformat:".2f" }},
-    monthly: {{ pay_amounts.monthly|stringformat:".2f" }}
-  };
+  var savingsError = document.getElementById('savingsError');
+  var mutualAidError = document.getElementById('mutualAidError');
   var maxAmount = parseFloat(amountInput.dataset.maxAmount) || 0;
   var maxLabel = amountInput.dataset.maxLabel || 'outstanding balance';
+  var summaryEl = document.getElementById('loanPaymentSummary');
+  var principalBase = summaryEl ? parseFloat(summaryEl.dataset.principal) || 0 : 0;
+  var interestRate = summaryEl ? parseFloat(summaryEl.dataset.rate) || 0 : 0;
+  var periods = summaryEl ? parseInt(summaryEl.dataset.periods, 10) || 0 : 0;
+  var savingsManual = false;
+  var mutualAidManual = false;
+  var defaultMutualAid = {{ default_mutual_aid_contribution|stringformat:".2f" }};
+  var dailyMutualAid = {{ daily_mutual_aid_amount|stringformat:".2f" }};
+  var dailyCollectUnit = {{ daily_collect_unit|stringformat:".2f" }};
+  var dailyLoanExact = {{ loan.daily_payment|stringformat:".2f" }};
 
   function formatAmount(raw) {
     var clean = String(raw).replace(/[^\d.]/g, '');
@@ -135,19 +165,99 @@
     return formattedInt + decPart;
   }
 
-  var outstandingEl = document.getElementById('outstandingBalance');
   var outstandingAfterEl = document.getElementById('outstandingAfter');
-  var installmentEl = document.getElementById('installmentRemaining');
-  var installmentAfterEl = document.getElementById('installmentAfter');
-  var outstandingBase = outstandingEl ? parseFloat(outstandingEl.dataset.base) || 0 : 0;
-  var installmentBase = installmentEl ? parseFloat(installmentEl.dataset.base) || 0 : 0;
+  var principalAfterEl = document.getElementById('principalAfter');
+  var savingsCreditEl = document.getElementById('savingsCredit');
+  var mutualAidCreditEl = document.getElementById('mutualAidCredit');
+  var mutualAidDaysHint = document.getElementById('mutualAidDaysHint');
+  var loanAppliedHint = document.getElementById('loanAppliedHint');
 
   function peso(value) {
-    return '₱' + formatAmount(value.toFixed(2));
+    return '₱' + formatAmount(Number(value).toFixed(2));
+  }
+
+  function round2(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  }
+
+  function parseMoney(el) {
+    if (!el) return 0;
+    return parseFloat(String(el.value).replace(/,/g, '')) || 0;
+  }
+
+  var outstandingExactBase = round2(parseFloat(document.getElementById('outstandingBalance').dataset.base) || 0);
+  var exactBases = [
+    {{ loan.daily_payment|stringformat:".2f" }},
+    {{ loan.weekly_payment|stringformat:".2f" }},
+    {{ loan.biweekly_payment|stringformat:".2f" }},
+    {{ loan.monthly_payment|stringformat:".2f" }},
+    {{ exact_for_frequency|stringformat:".2f" }},
+    {{ loan.outstanding_balance|stringformat:".2f" }}
+  ];
+
+  function adjustPaymentJs(value) {
+    var amount = round2(value);
+    if (amount <= 0) return 0;
+    if (amount % 5 === 0) return amount;
+    return round2(Math.ceil(amount / 5) * 5);
+  }
+
+  function daysCoveredByAmount(amount) {
+    amount = round2(amount);
+    var unit = round2(dailyCollectUnit);
+    if (amount <= 0 || unit <= 0 || dailyMutualAid <= 0) return 0;
+    var days = Math.floor(amount / unit);
+    if (days < 1) days = 1;
+    if (periods > 0) days = Math.min(days, periods);
+    return days;
+  }
+
+  function autoMutualAidForAmount(amount) {
+    var days = daysCoveredByAmount(amount);
+    if (days <= 0) return 0;
+    return round2(Math.min(days * dailyMutualAid, amount));
+  }
+
+  function autoSavingsForLoanPortion(loanPortion) {
+    loanPortion = round2(loanPortion);
+    for (var i = 0; i < exactBases.length; i++) {
+      var exact = round2(Math.min(exactBases[i], outstandingExactBase || exactBases[i]));
+      if (exact <= 0) continue;
+      var adjusted = adjustPaymentJs(exact);
+      if (loanPortion === adjusted && adjusted > exact) {
+        return round2(adjusted - exact);
+      }
+    }
+    var adjustedOut = adjustPaymentJs(outstandingExactBase);
+    if (outstandingExactBase > 0 && loanPortion > outstandingExactBase && loanPortion <= adjustedOut) {
+      return round2(loanPortion - outstandingExactBase);
+    }
+    return 0;
+  }
+
+  function previewAfterPayment(amount, mutualAid, savings) {
+    amount = round2(amount);
+    mutualAid = round2(Math.max(0, Math.min(mutualAid, amount)));
+    var afterMutual = round2(amount - mutualAid);
+    savings = round2(Math.max(0, Math.min(savings, afterMutual)));
+    var loanPart = round2(afterMutual - savings);
+    var newPrincipal = Math.max(0, round2(principalBase - loanPart));
+    if (newPrincipal <= 0 || periods <= 0) {
+      return { principal: 0, outstanding: 0, loan: loanPart, savings: savings, mutualAid: mutualAid };
+    }
+    var months = periods / 22;
+    var interest = round2(newPrincipal * (interestRate / 100) * months);
+    return {
+      principal: newPrincipal,
+      outstanding: round2(newPrincipal + interest),
+      loan: loanPart,
+      savings: savings,
+      mutualAid: mutualAid
+    };
   }
 
   function validateAmount() {
-    var amount = parseFloat(String(amountInput.value).replace(/,/g, '')) || 0;
+    var amount = parseMoney(amountInput);
     amountInput.classList.remove('is-invalid');
     amountInput.setCustomValidity('');
     if (amountError) {
@@ -167,55 +277,147 @@
     return true;
   }
 
+  function validateMutualAid() {
+    if (!mutualAidInput) return true;
+    var amount = parseMoney(amountInput);
+    var mutualAid = parseMoney(mutualAidInput);
+    mutualAidInput.classList.remove('is-invalid');
+    mutualAidInput.setCustomValidity('');
+    if (mutualAidError) {
+      mutualAidError.classList.add('d-none');
+      mutualAidError.textContent = '';
+    }
+    if (mutualAid < 0) {
+      var neg = 'Mutual aid amount cannot be negative.';
+      if (mutualAidError) {
+        mutualAidError.textContent = neg;
+        mutualAidError.classList.remove('d-none');
+      }
+      mutualAidInput.classList.add('is-invalid');
+      mutualAidInput.setCustomValidity(neg);
+      return false;
+    }
+    if (mutualAid > amount) {
+      var msg = 'Mutual aid cannot exceed the payment amount (₱' + formatAmount(amount.toFixed(2)) + ').';
+      if (mutualAidError) {
+        mutualAidError.textContent = msg;
+        mutualAidError.classList.remove('d-none');
+      }
+      mutualAidInput.classList.add('is-invalid');
+      mutualAidInput.setCustomValidity(msg);
+      return false;
+    }
+    return true;
+  }
+
+  function validateSavings() {
+    if (!savingsInput) return true;
+    var amount = parseMoney(amountInput);
+    var mutualAid = parseMoney(mutualAidInput);
+    var savings = parseMoney(savingsInput);
+    var afterMutual = round2(amount - mutualAid);
+    savingsInput.classList.remove('is-invalid');
+    savingsInput.setCustomValidity('');
+    if (savingsError) {
+      savingsError.classList.add('d-none');
+      savingsError.textContent = '';
+    }
+    if (savings < 0) {
+      var neg = 'Savings amount cannot be negative.';
+      if (savingsError) {
+        savingsError.textContent = neg;
+        savingsError.classList.remove('d-none');
+      }
+      savingsInput.classList.add('is-invalid');
+      savingsInput.setCustomValidity(neg);
+      return false;
+    }
+    if (savings > afterMutual) {
+      var msg = 'Savings cannot exceed the loan portion (₱' + formatAmount(afterMutual.toFixed(2)) + ').';
+      if (savingsError) {
+        savingsError.textContent = msg;
+        savingsError.classList.remove('d-none');
+      }
+      savingsInput.classList.add('is-invalid');
+      savingsInput.setCustomValidity(msg);
+      return false;
+    }
+    return true;
+  }
+
   function updateSummary() {
-    var amount = parseFloat(String(amountInput.value).replace(/,/g, '')) || 0;
+    var amount = parseMoney(amountInput);
+    if (mutualAidInput && !mutualAidManual) {
+      var autoMa = autoMutualAidForAmount(amount);
+      mutualAidInput.value = formatAmount(autoMa.toFixed(2));
+    }
+    var mutualAid = parseMoney(mutualAidInput);
+    var days = daysCoveredByAmount(amount);
+    var loanPortion = round2(Math.max(0, amount - mutualAid));
+    if (savingsInput && !savingsManual) {
+      var autoSav = autoSavingsForLoanPortion(loanPortion);
+      savingsInput.value = formatAmount(autoSav.toFixed(2));
+    }
+    var savings = parseMoney(savingsInput);
+    var preview = amount > 0 ? previewAfterPayment(amount, mutualAid, savings) : null;
+    if (principalAfterEl) {
+      principalAfterEl.textContent = preview ? peso(preview.principal) + ' principal after this payment' : '';
+    }
     if (outstandingAfterEl) {
-      outstandingAfterEl.textContent = amount > 0 ? peso(Math.max(0, outstandingBase - amount)) + ' after this payment' : '';
+      outstandingAfterEl.textContent = preview ? peso(preview.outstanding) + ' balance after recalculation' : '';
     }
-    if (installmentAfterEl) {
-      installmentAfterEl.textContent = amount > 0 ? peso(Math.max(0, installmentBase - amount)) + ' after this payment' : '';
+    if (mutualAidCreditEl) {
+      mutualAidCreditEl.textContent = preview ? peso(preview.mutualAid) : '₱0.00';
+    }
+    if (mutualAidDaysHint) {
+      if (preview && days > 0) {
+        mutualAidDaysHint.textContent = days + ' working day' + (days === 1 ? '' : 's') + ' × ' + peso(dailyMutualAid) + ' → KAPAMILYA MUTUAL AID.';
+      } else {
+        mutualAidDaysHint.textContent = 'Credited to KAPAMILYA MUTUAL AID.';
+      }
+    }
+    if (savingsCreditEl) {
+      savingsCreditEl.textContent = preview ? peso(preview.savings) : '₱0.00';
+    }
+    if (loanAppliedHint) {
+      loanAppliedHint.textContent = preview ? peso(preview.loan) + ' applied to loan' : '';
     }
     validateAmount();
+    validateMutualAid();
+    validateSavings();
   }
 
-  function setAmountFromFrequency(freq) {
-    var value = amounts[freq];
-    if (value == null) { return; }
-    amountInput.value = formatAmount(Number(value).toFixed(2));
-    updateSummary();
-  }
-
-  document.querySelectorAll('input[name="pay_frequency"]').forEach(function (radio) {
-    radio.addEventListener('change', function () {
-      if (radio.checked) { setAmountFromFrequency(radio.value); }
+  function bindMoneyInput(el, onManual) {
+    if (!el) return;
+    el.addEventListener('input', function () {
+      var oldLength = el.value.length;
+      var oldPos = el.selectionStart;
+      var formatted = formatAmount(el.value);
+      el.value = formatted;
+      var newPos = Math.max(0, oldPos + (formatted.length - oldLength));
+      el.setSelectionRange(newPos, newPos);
+      if (onManual) onManual();
+      updateSummary();
     });
-  });
-
-  amountInput.addEventListener('input', function () {
-    var oldLength = amountInput.value.length;
-    var oldPos = amountInput.selectionStart;
-    var formatted = formatAmount(amountInput.value);
-    amountInput.value = formatted;
-    var newPos = Math.max(0, oldPos + (formatted.length - oldLength));
-    amountInput.setSelectionRange(newPos, newPos);
-    updateSummary();
-  });
-
-  if (amountInput.value) {
-    amountInput.value = formatAmount(amountInput.value);
   }
+
+  bindMoneyInput(amountInput, function () { savingsManual = false; mutualAidManual = false; });
+  bindMoneyInput(savingsInput, function () { savingsManual = true; });
+  bindMoneyInput(mutualAidInput, function () { mutualAidManual = true; });
+
+  if (amountInput.value) amountInput.value = formatAmount(amountInput.value);
+  if (savingsInput && savingsInput.value) savingsInput.value = formatAmount(savingsInput.value);
+  if (mutualAidInput && mutualAidInput.value) mutualAidInput.value = formatAmount(mutualAidInput.value);
   updateSummary();
-  if (amountInput.classList.contains('is-invalid')) {
-    validateAmount();
-  }
 
   if (amountForm) {
     amountForm.addEventListener('submit', function () {
       amountInput.value = String(amountInput.value).replace(/,/g, '');
+      if (savingsInput) savingsInput.value = String(savingsInput.value).replace(/,/g, '') || '0';
+      if (mutualAidInput) mutualAidInput.value = String(mutualAidInput.value).replace(/,/g, '') || '0';
     });
   }
 
-  // Confirm-before-submit for the payment form.
   var paymentForm = document.getElementById('paymentForm');
   var methodSelect = document.getElementById('id_method');
   var referenceInput = document.getElementById('id_reference_number');
@@ -236,12 +438,20 @@
     }
     e.preventDefault();
 
-    if (!paymentForm.checkValidity()) {
+    if (!paymentForm.checkValidity() || !validateAmount() || !validateMutualAid() || !validateSavings()) {
       paymentForm.reportValidity();
       return;
     }
 
+    var amount = parseMoney(amountInput);
+    var mutualAid = parseMoney(mutualAidInput);
+    var savings = parseMoney(savingsInput);
+    var preview = previewAfterPayment(amount, mutualAid, savings);
     document.getElementById('confirmPaymentAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
+    document.getElementById('confirmLoanAmount').textContent = peso(preview.loan);
+    document.getElementById('confirmMutualAidAmount').textContent = peso(preview.mutualAid);
+    document.getElementById('confirmSavingsAmount').textContent = peso(preview.savings);
+    document.getElementById('confirmNewPrincipal').textContent = peso(preview.principal);
     document.getElementById('confirmPaymentMethod').textContent = methodSelect ? selectedText(methodSelect) : '—';
     document.getElementById('confirmPaymentReference').textContent = (referenceInput && referenceInput.value.trim()) || '—';
 

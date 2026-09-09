@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
+from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 
 from django.db import transaction
 from django.utils import timezone
@@ -12,6 +12,8 @@ CREDIT_SCORE_PRECISION = Decimal("0.1")
 MIN_CREDIT_SCORE_FOR_LOANS = Decimal("50.0")
 BALANCE_EXTENSION_RATE = Decimal("5.00")
 MAX_BALANCE_EXTENSION_MONTHS = 3
+# Loan fund releases are only allowed on Fridays (Monday=0 … Sunday=6).
+DISBURSEMENT_WEEKDAY = 4
 
 
 def adjust_payment(amount):
@@ -33,6 +35,95 @@ def adjust_payment(amount):
     adjusted = (amount / Decimal("5")).to_integral_value(rounding=ROUND_CEILING) * Decimal("5")
     return adjusted.quantize(Decimal("0.01"))
 
+
+def payment_adjustment_surplus(exact_amount):
+    """Cash-rounding uplift (adjusted − exact) that is credited to member savings."""
+    exact_amount = Decimal(str(exact_amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if exact_amount <= 0:
+        return Decimal("0.00")
+    adjusted = adjust_payment(exact_amount)
+    return max(Decimal("0.00"), (adjusted - exact_amount).quantize(Decimal("0.01")))
+
+
+def split_payment_for_savings(loan, amount, installment=None, savings_override=None):
+    """Split a collected remittance into loan principal reduction and savings credit.
+
+    Officers collect the cash-adjusted amount. The exact portion reduces the loan;
+    the rounding difference (adjusted − exact) is deposited to the member's savings.
+
+    Example: exact ₱1,430.30 → adjusted ₱1,435.00 → loan ₱1,430.30, savings ₱4.70.
+
+    `savings_override` lets officers manually set the savings portion (0 … amount).
+    """
+    amount = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if amount <= 0:
+        return Decimal("0.00"), Decimal("0.00")
+
+    if savings_override is not None:
+        surplus = Decimal(str(savings_override or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if surplus < 0:
+            surplus = Decimal("0.00")
+        if surplus > amount:
+            surplus = amount
+        return (amount - surplus).quantize(Decimal("0.01")), surplus
+
+    outstanding = (loan.outstanding_balance or Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    candidates = []
+    if installment is not None:
+        candidates.append(installment.remaining)
+    for frequency in ("daily", "weekly", "biweekly", "monthly"):
+        candidates.append(loan.suggested_payment_for(frequency, adjust=False))
+        # Raw period totals (uncapped) so schedule PAYMENT/EXACT pairs still match.
+        mapping = {
+            "daily": loan.daily_payment,
+            "weekly": loan.weekly_payment,
+            "biweekly": loan.biweekly_payment,
+            "monthly": loan.monthly_payment,
+        }
+        candidates.append(mapping[frequency])
+    next_item = loan.next_installment
+    if next_item is not None:
+        candidates.append(next_item.remaining)
+    candidates.append(outstanding)
+
+    seen = set()
+    for exact in candidates:
+        exact = Decimal(str(exact or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if exact <= 0 or exact in seen:
+            continue
+        seen.add(exact)
+        capped_exact = min(exact, outstanding) if outstanding > 0 else exact
+        adjusted = adjust_payment(capped_exact)
+        if amount == adjusted and adjusted > capped_exact:
+            return capped_exact, (adjusted - capped_exact).quantize(Decimal("0.01"))
+
+    # Paying the cash-adjusted outstanding (or any amount between exact and adjusted).
+    adjusted_outstanding = adjust_payment(outstanding)
+    if outstanding > 0 and amount > outstanding and amount <= adjusted_outstanding:
+        return outstanding, (amount - outstanding).quantize(Decimal("0.01"))
+
+    # Entire collection applies to the loan (no identifiable rounding surplus).
+    return amount, Decimal("0.00")
+
+
+def credit_payment_adjustment_to_savings(loan, surplus, *, payment=None, recorded_by=None):
+    """Deposit the cash-rounding surplus from a loan payment into membership savings."""
+    surplus = Decimal(str(surplus or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if surplus <= 0:
+        return None
+
+    from savings.services import credit_payment_adjustment_from_loan
+
+    payment_ref = ""
+    if payment is not None:
+        payment_ref = payment.reference_number or f"PAY-{payment.pk}"
+    return credit_payment_adjustment_from_loan(
+        loan.application.borrower,
+        surplus,
+        loan_reference=loan.reference,
+        payment_reference=payment_ref,
+        created_by=recorded_by,
+    )
 
 def application_type_for_member(member):
     """New for first-time applicants; Renew when the member already has loan history."""
@@ -151,6 +242,94 @@ WORKING_DAYS_PER_WEEK = 5
 WORKING_DAYS_PER_BIWEEK = 10
 
 
+def daily_mutual_aid_amount():
+    """Compulsory mutual aid per working day from Features (default ₱15)."""
+    from .models import Features
+
+    amount = Features.load().daily_mutual_aid_amount
+    return Decimal(str(amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def mutual_aid_working_days_for_frequency(frequency):
+    """Working days covered by a remittance frequency (daily / weekly / …)."""
+    return {
+        "daily": 1,
+        "weekly": WORKING_DAYS_PER_WEEK,
+        "biweekly": WORKING_DAYS_PER_BIWEEK,
+        "monthly": WORKING_DAYS_PER_MONTH,
+    }.get(str(frequency or "daily").lower(), 1)
+
+
+def mutual_aid_for_pay_frequency(frequency):
+    """Mutual aid portion for a pay period: daily rate × working days in that period."""
+    per_day = daily_mutual_aid_amount()
+    if per_day <= 0:
+        return Decimal("0.00")
+    days = mutual_aid_working_days_for_frequency(frequency)
+    return (per_day * Decimal(days)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def mutual_aid_days_covered_by_amount(loan, amount, *, max_days=None):
+    """How many working days a remittance covers (loan daily + ₱15 mutual aid per day)."""
+    amount = Decimal(str(amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    per_day_ma = daily_mutual_aid_amount()
+    if amount <= 0 or per_day_ma <= 0:
+        return 0
+
+    daily_loan = Decimal(str(loan.daily_payment or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if daily_loan <= 0:
+        return 1
+
+    unit = adjust_payment(daily_loan) + per_day_ma
+    if unit <= 0:
+        return 1
+
+    days = int((amount / unit).to_integral_value(rounding=ROUND_FLOOR))
+    if days < 1:
+        days = 1
+
+    if max_days is None:
+        max_days = loan.installments.exclude(status=Installment.Status.PAID).count()
+    max_days = int(max_days or 0)
+    if max_days > 0:
+        days = min(days, max_days)
+    return days
+
+
+def mutual_aid_for_remittance_amount(loan, amount, *, max_days=None):
+    """Mutual aid for a collected amount: ₱15 × working days covered by that remittance."""
+    per_day = daily_mutual_aid_amount()
+    if per_day <= 0:
+        return Decimal("0.00")
+    days = mutual_aid_days_covered_by_amount(loan, amount, max_days=max_days)
+    if days <= 0:
+        return Decimal("0.00")
+    total = (per_day * Decimal(days)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    amount = Decimal(str(amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return min(total, amount) if amount > 0 else Decimal("0.00")
+
+
+def credit_payment_mutual_aid(loan, amount, *, payment=None, recorded_by=None, pay_frequency="daily"):
+    """Credit the mutual-aid portion of a loan remittance to KAP mutual aid."""
+    amount = Decimal(str(amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if amount <= 0:
+        return None
+
+    from mutual_aid.services import credit_kap_mutual_aid_from_loan_payment
+
+    payment_ref = ""
+    if payment is not None:
+        payment_ref = payment.reference_number or f"PAY-{payment.pk}"
+    return credit_kap_mutual_aid_from_loan_payment(
+        loan.application.borrower,
+        amount,
+        loan_reference=loan.reference,
+        payment_reference=payment_ref,
+        recorded_by=recorded_by,
+        pay_frequency=pay_frequency,
+    )
+
+
 def loan_term_months(loan):
     """Approved term for schedule generation (application term when loan can still be rebuilt)."""
     application_term = loan.application.final_term_months or loan.application.term_months
@@ -257,8 +436,10 @@ def loan_term_expired(loan):
 
 
 def can_extend_loan_balance(loan):
-    """Expired-term loans with an outstanding balance can be restructured (1–3 months @ 5%)."""
+    """Expired-term loans with remaining principal can be restructured (1–3 months @ 5%)."""
     if loan.status == Loan.Status.PAID:
+        return False
+    if (loan.principal or Decimal("0.00")) <= 0:
         return False
     if (loan.outstanding_balance or Decimal("0.00")) <= 0:
         return False
@@ -266,8 +447,12 @@ def can_extend_loan_balance(loan):
 
 
 def balance_extension_principal(loan):
-    """Cash-adjusted outstanding balance used as principal for remaining-balance extensions."""
-    return adjust_payment(loan.outstanding_balance or Decimal("0.00"))
+    """Remaining capital used as principal for balance extensions.
+
+    Payments reduce principal directly (e.g. ₱20,000 − ₱3,000 = ₱17,000), then the
+    same flat formula is applied on that new principal. Cash-adjusted for remittance.
+    """
+    return adjust_payment(loan.principal or Decimal("0.00"))
 
 
 def balance_extension_quote(principal, months):
@@ -287,7 +472,7 @@ def balance_extension_quote(principal, months):
 
 
 def balance_extension_previews(loan):
-    """Quotes for 1–3 month balance extensions on the adjusted outstanding balance."""
+    """Quotes for 1–3 month balance extensions on the remaining capital (principal)."""
     remaining = balance_extension_principal(loan)
     return [balance_extension_quote(remaining, months) for months in range(1, MAX_BALANCE_EXTENSION_MONTHS + 1)]
 
@@ -296,14 +481,84 @@ class BalanceExtensionError(ValueError):
     """Raised when a remaining-balance extension cannot be applied."""
 
 
+def _flat_amounts_for_periods(principal, interest_rate, periods):
+    """Flat interest for an exact number of working-day periods (same formula, proportional months)."""
+    principal = Decimal(str(principal))
+    periods = int(periods)
+    if periods <= 0:
+        return {
+            "principal": principal,
+            "total_interest": Decimal("0.00"),
+            "total_payable": principal,
+            "periods": 0,
+            "per_day": Decimal("0.00"),
+            "months": Decimal("0"),
+        }
+    rate = Decimal(str(interest_rate)) / Decimal("100")
+    months = Decimal(periods) / Decimal(WORKING_DAYS_PER_MONTH)
+    total_interest = (principal * rate * months).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total_payable = (principal + total_interest).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    per_day = (total_payable / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return {
+        "principal": principal,
+        "total_interest": total_interest,
+        "total_payable": total_payable,
+        "periods": periods,
+        "per_day": per_day,
+        "months": months,
+    }
+
+
+def _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due_date, periods):
+    """Replace unpaid installments with a flat schedule on the reduced principal."""
+    loan.installments.exclude(status=Installment.Status.PAID).delete()
+    amounts = _flat_amounts_for_periods(new_principal, loan.interest_rate, periods)
+    payment = amounts["per_day"]
+    principal_per = (new_principal / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    interest_per = (amounts["total_interest"] / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    principal_remaining = new_principal
+    interest_remaining = amounts["total_interest"]
+    due_date = start_due_date
+    paid_count = loan.installments.filter(status=Installment.Status.PAID).count()
+    rows = []
+    for offset in range(periods):
+        if offset > 0:
+            due_date = _next_working_day(due_date)
+        number = paid_count + offset + 1
+        if offset == periods - 1:
+            principal = principal_remaining
+            interest = interest_remaining
+            payment_for_period = principal + interest
+        else:
+            principal = principal_per
+            interest = interest_per
+            payment_for_period = payment
+        rows.append(
+            Installment(
+                loan=loan,
+                installment_number=number,
+                due_date=due_date,
+                principal_component=principal,
+                interest_component=interest,
+                amount_due=payment_for_period,
+            )
+        )
+        principal_remaining = max(Decimal("0.00"), principal_remaining - principal)
+        interest_remaining = max(Decimal("0.00"), interest_remaining - interest)
+    Installment.objects.bulk_create(rows)
+    return amounts
+
+
 @transaction.atomic
 def extend_loan_balance(loan, months):
-    """Restructure an expired loan's remaining balance over 1–3 months at 5% flat interest.
+    """Restructure an expired loan's remaining capital over 1–3 months at 5% flat interest.
 
-    Uses the cash-adjusted outstanding balance as principal and the same working-day
-    flat formula as origination:
-        total_interest = adjusted_remaining * 0.05 * months
-        total_payable  = adjusted_remaining + total_interest
+    Uses remaining principal (after payments) and the same working-day flat formula:
+        total_interest = adjusted_principal * 0.05 * months
+        total_payable  = adjusted_principal + total_interest
+
+    Example: principal ₱20,000 with ₱3,000 paid → new principal ₱17,000, then 5% flat.
     """
     months = int(months)
     if months < 1 or months > MAX_BALANCE_EXTENSION_MONTHS:
@@ -317,7 +572,7 @@ def extend_loan_balance(loan, months):
 
     remaining = balance_extension_principal(loan)
     if remaining <= 0:
-        raise BalanceExtensionError("Adjusted remaining balance must be greater than zero.")
+        raise BalanceExtensionError("Adjusted remaining principal must be greater than zero.")
     quote = balance_extension_quote(remaining, months)
     payments_sum = sum((payment.amount for payment in loan.payments.all()), Decimal("0.00"))
 
@@ -368,10 +623,13 @@ def schedule_is_stale(loan):
 def generate_schedule(loan):
     """Build one installment per working day (Mon–Fri) for the loan term.
 
-    Flat interest is charged on the original principal for every month of the term:
+    Flat interest is charged on the current principal for every month of the term:
 
         total_interest = principal * (rate/100) * term_months
         total_payable  = principal + total_interest
+
+    Payments reduce principal (e.g. ₱20,000 − ₱3,000 → ₱17,000) and the same
+    formula is reapplied on the new principal for the remaining working days.
 
     Interest begins on the Monday on/after `schedule_start_date` (or disbursement).
     That total is then split evenly across `term_months * 22` working-day payments.
@@ -485,6 +743,51 @@ def _schedule_period_buckets(installments, days_per_period, label_prefix):
     return buckets
 
 
+def _mutual_aid_for_day_count(day_count):
+    """Mutual aid for a schedule row covering `day_count` working days."""
+    per_day = daily_mutual_aid_amount()
+    if per_day <= 0:
+        return Decimal("0.00")
+    days = max(1, int(day_count or 1))
+    return (per_day * Decimal(days)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _annotate_schedule_with_mutual_aid(schedule, view_mode):
+    """Attach mutual-aid amounts and fold them into the collect (adjusted) total."""
+    annotated = []
+    for row in schedule:
+        if view_mode == "day":
+            day_count = 1
+            mutual_aid = _mutual_aid_for_day_count(day_count)
+            loan_adjusted = row.adjusted_amount
+            annotated.append(
+                {
+                    "installment_number": row.installment_number,
+                    "due_date": row.due_date,
+                    "amount": row.amount,
+                    "loan_adjusted_amount": loan_adjusted,
+                    "mutual_aid": mutual_aid,
+                    "adjusted_amount": loan_adjusted + mutual_aid,
+                    "principal": row.principal,
+                    "interest": row.interest,
+                    "status": row.status,
+                    "status_label": row.status_label,
+                    "is_next": row.is_next,
+                    "day_count": day_count,
+                }
+            )
+        else:
+            day_count = int(row.get("day_count") or 1)
+            mutual_aid = _mutual_aid_for_day_count(day_count)
+            loan_adjusted = row["adjusted_amount"]
+            row = dict(row)
+            row["loan_adjusted_amount"] = loan_adjusted
+            row["mutual_aid"] = mutual_aid
+            row["adjusted_amount"] = loan_adjusted + mutual_aid
+            annotated.append(row)
+    return annotated
+
+
 def schedule_month_buckets(installments):
     """Group daily installments into loan months (22 working days each)."""
     return _schedule_period_buckets(installments, WORKING_DAYS_PER_MONTH, "Month")
@@ -544,12 +847,14 @@ def next_due_for_display(loan, view_mode="day"):
 
     if view_mode == "day":
         amount = next_item.remaining
+        mutual_aid = mutual_aid_for_pay_frequency(frequency)
         return {
             "due_date": next_item.due_date,
             "label": "Daily",
             "frequency": frequency,
             "amount": amount,
-            "adjusted_amount": adjust_payment(amount),
+            "mutual_aid": mutual_aid,
+            "adjusted_amount": adjust_payment(amount) + mutual_aid,
         }
 
     installments = list(loan.installments.all())
@@ -571,6 +876,7 @@ def next_due_for_display(loan, view_mode="day"):
         return None
 
     amount = bucket["remaining"]
+    mutual_aid = mutual_aid_for_pay_frequency(frequency)
     return {
         "due_date": bucket["due_date"],
         "start_date": bucket["start_date"],
@@ -578,7 +884,8 @@ def next_due_for_display(loan, view_mode="day"):
         "label": bucket.get("label") or label,
         "frequency": frequency,
         "amount": amount,
-        "adjusted_amount": adjust_payment(amount),
+        "mutual_aid": mutual_aid,
+        "adjusted_amount": adjust_payment(amount) + mutual_aid,
     }
 
 
@@ -740,6 +1047,8 @@ def _schedule_display_from_installments(installments, term_months, view_mode="mo
     else:
         paid_count = sum(1 for row in schedule if row.status == Installment.Status.PAID)
 
+    schedule = _annotate_schedule_with_mutual_aid(schedule, view_mode)
+
     return {
         "view_mode": view_mode,
         "schedule": schedule,
@@ -747,6 +1056,7 @@ def _schedule_display_from_installments(installments, term_months, view_mode="mo
         "paid_payment_count": paid_count,
         "month_options": month_options,
         "selected_month": str(selected_month) if selected_month else "",
+        "daily_mutual_aid_amount": daily_mutual_aid_amount(),
     }
 
 
@@ -764,6 +1074,46 @@ def _kap_mutual_aid_contribution_amount():
     return Decimal("0.00")
 
 
+class DisbursementDayError(ValueError):
+    """Raised when a loan release is attempted outside the Friday-only window."""
+
+
+def is_disbursement_weekday(value=None):
+    """True when the date is a Friday (loan disbursement day)."""
+    value = value or timezone.localdate()
+    return value.weekday() == DISBURSEMENT_WEEKDAY
+
+
+def next_disbursement_weekday(from_date=None):
+    """Return the next Friday on or after `from_date` (today when omitted)."""
+    from_date = from_date or timezone.localdate()
+    days_ahead = (DISBURSEMENT_WEEKDAY - from_date.weekday()) % 7
+    return from_date + timedelta(days=days_ahead)
+
+
+def disbursement_day_error_message(*, today=None, disbursed_date=None):
+    """Human-readable reason why a disbursement cannot proceed."""
+    today = today or timezone.localdate()
+    next_friday = next_disbursement_weekday(today)
+    if not is_disbursement_weekday(today):
+        return (
+            "Loan disbursements are only allowed on Fridays. "
+            f"Next release day is {next_friday.strftime('%A, %b %d, %Y')}."
+        )
+    if disbursed_date is not None and not is_disbursement_weekday(disbursed_date):
+        return "Disbursement date must be a Friday."
+    return ""
+
+
+def ensure_disbursement_allowed(disbursed_date=None, *, today=None):
+    """Raise DisbursementDayError unless today and the release date are Fridays."""
+    today = today or timezone.localdate()
+    release_date = disbursed_date or today
+    message = disbursement_day_error_message(today=today, disbursed_date=release_date)
+    if message:
+        raise DisbursementDayError(message)
+
+
 @transaction.atomic
 def disburse_application(
     application,
@@ -778,6 +1128,8 @@ def disburse_application(
 ):
     if hasattr(application, "loan"):
         return application.loan
+    release_date = disbursed_date or timezone.localdate()
+    ensure_disbursement_allowed(release_date)
     rate = application.final_interest_rate or application.loan_product.interest_rate
     term = application.final_term_months or application.term_months
     grace_period_days = application.loan_product.grace_period_days if application.loan_product else 0
@@ -792,11 +1144,11 @@ def disburse_application(
         interest_rate=rate,
         term_months=term,
         grace_period_days=grace_period_days,
-        disbursed_date=disbursed_date or timezone.localdate(),
+        disbursed_date=release_date,
         total_payable=total_payable,
         # Nothing has been paid yet, so what's owed (outstanding_balance) equals the
-        # full total_payable. From here, record_payment() below subtracts each
-        # payment from this field: outstanding_balance = total_payable - sum(payments).
+        # full total_payable. Payments reduce principal and rebuild interest on the
+        # remaining capital with the same flat formula.
         outstanding_balance=total_payable,
         disbursement_method=method,
         disbursement_reference=reference,
@@ -926,60 +1278,158 @@ def _apply_late_month_credit_penalty(borrower, loan, month_number):
 
 
 @transaction.atomic
-def record_payment(loan, amount, method, reference, user, installment=None):
+def record_payment(
+    loan,
+    amount,
+    method,
+    reference,
+    user,
+    installment=None,
+    savings_adjustment=None,
+    mutual_aid_contribution=None,
+    pay_frequency="daily",
+):
+    """Record a payment that reduces principal, then recalculates with the same flat formula.
+
+    Cash-adjusted remittances are split: the exact portion reduces principal, the
+    rounding uplift goes to Membership/Savings, and the mutual-aid portion
+    (₱15 × working days by default) is credited to KAP mutual aid.
+    """
     loan = Loan.objects.select_for_update().get(pk=loan.pk)
+    amount = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if mutual_aid_contribution is None:
+        mutual_aid = mutual_aid_for_remittance_amount(loan, amount)
+    else:
+        mutual_aid = Decimal(str(mutual_aid_contribution or 0)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    if mutual_aid < 0:
+        mutual_aid = Decimal("0.00")
+    if mutual_aid > amount:
+        mutual_aid = amount
+
+    remittance_for_loan = (amount - mutual_aid).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    loan_amount, savings_surplus = split_payment_for_savings(
+        loan,
+        remittance_for_loan,
+        installment=installment,
+        savings_override=savings_adjustment,
+    )
+    # Keep savings from eating into the mutual-aid carve-out if an override was too high.
+    if savings_surplus > remittance_for_loan:
+        savings_surplus = remittance_for_loan
+        loan_amount = Decimal("0.00")
+
     payment = loan.payments.create(
         amount=amount,
+        savings_adjustment=savings_surplus,
+        mutual_aid_contribution=mutual_aid,
         method=method,
         reference_number=reference or f"PAY-{timezone.now():%Y%m%d%H%M%S}",
         recorded_by=user,
         installment=installment,
     )
-    remaining = amount
-    installments = (
-        [loan.installments.select_for_update().get(pk=installment.pk)]
-        if installment
-        else list(loan.installments.select_for_update().filter(status__in=["pending", "overdue"]).order_by("due_date"))
-    )
-    touched_months = set()
     paid_date = timezone.localdate()
-    for item in installments:
-        if remaining <= 0:
-            break
-        applied = min(remaining, item.remaining)
-        item.amount_paid += applied
-        if item.amount_paid >= item.amount_due:
+
+    # Snapshot overdue months before the schedule is rebuilt (for late credit penalties).
+    overdue_month_numbers = sorted(
+        {
+            loan_month_number(number)
+            for number in loan.installments.filter(status=Installment.Status.OVERDUE).values_list(
+                "installment_number", flat=True
+            )
+        }
+    )
+
+    if loan.disbursed_principal is None:
+        loan.disbursed_principal = loan.principal
+
+    unpaid = list(
+        loan.installments.exclude(status=Installment.Status.PAID).order_by("installment_number", "due_date")
+    )
+    periods_remaining = len(unpaid)
+    start_due = unpaid[0].due_date if unpaid else _first_installment_due_date(loan)
+
+    # Only the exact loan portion reduces principal; surplus goes to savings / mutual aid.
+    new_principal = max(
+        Decimal("0.00"),
+        (loan.principal - loan_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+    )
+    loan_payments_sum = sum(
+        (item.loan_amount_applied for item in loan.payments.all()),
+        Decimal("0.00"),
+    )
+
+    if new_principal <= 0:
+        for item in loan.installments.exclude(status=Installment.Status.PAID):
+            item.amount_paid = item.amount_due
             item.status = Installment.Status.PAID
             item.paid_date = paid_date
-            touched_months.add(loan_month_number(item.installment_number))
-        item.save(update_fields=["amount_paid", "status", "paid_date"])
-        remaining -= applied
+            item.save(update_fields=["amount_paid", "status", "paid_date"])
+        loan.principal = Decimal("0.00")
+        loan.outstanding_balance = Decimal("0.00")
+        loan.status = Loan.Status.PAID
+        loan.save(update_fields=["disbursed_principal", "principal", "outstanding_balance", "status"])
+        loan.application.status = LoanApplication.Status.CLOSED
+        loan.application.save(update_fields=["status"])
+    else:
+        if periods_remaining <= 0:
+            periods_remaining = max(1, working_day_count(loan.term_months))
+            start_due = _interest_start_monday(paid_date)
+        amounts = _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due, periods_remaining)
+        remaining_months = max(
+            1,
+            int(
+                (Decimal(periods_remaining) / Decimal(WORKING_DAYS_PER_MONTH)).to_integral_value(
+                    rounding=ROUND_CEILING
+                )
+            ),
+        )
+        loan.principal = new_principal
+        loan.term_months = remaining_months
+        loan.outstanding_balance = amounts["total_payable"]
+        loan.total_payable = (loan_payments_sum + amounts["total_payable"]).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        loan.status = Loan.Status.ACTIVE
+        loan.save(
+            update_fields=[
+                "disbursed_principal",
+                "principal",
+                "term_months",
+                "outstanding_balance",
+                "total_payable",
+                "status",
+            ]
+        )
+        loan.application.status = LoanApplication.Status.ACTIVE
+        loan.application.save(update_fields=["status"])
 
-    # Credit score: −0.1 only when a loan month is paid after its month-end due date.
-    # On-time monthly remittances (paid on/before month end) do not deduct, even if
-    # individual working days inside the month were past their daily due dates.
-    if touched_months:
+    if overdue_month_numbers:
         borrower = User.objects.select_for_update().get(pk=loan.application.borrower_id)
-        for month_number in sorted(touched_months):
+        for month_number in overdue_month_numbers:
             month_end = _month_end_due_date(loan, month_number)
             if month_end and paid_date > month_end:
                 _apply_late_month_credit_penalty(borrower, loan, month_number)
 
-    # outstanding_balance is kept as total_payable minus every payment recorded so
-    # far, rather than recomputed from scratch each time — but it's the same number:
-    # outstanding_balance == total_payable - sum(loan.payments.values('amount')).
-    # clamped at 0 so a stray overpayment can't push the balance negative.
-    loan.outstanding_balance = max(Decimal("0.00"), loan.outstanding_balance - amount)
-    # Balance hit zero -> the loan is fully repaid, so flip its status to PAID
-    # automatically. Any partial payment leaves it ACTIVE (installments still track
-    # per-period paid/pending/overdue individually).
-    loan.status = Loan.Status.PAID if loan.outstanding_balance == 0 else Loan.Status.ACTIVE
-    loan.save(update_fields=["outstanding_balance", "status"])
-    loan.application.status = LoanApplication.Status.CLOSED if loan.status == Loan.Status.PAID else LoanApplication.Status.ACTIVE
-    loan.application.save(update_fields=["status"])
+    if savings_surplus > 0:
+        credit_payment_adjustment_to_savings(
+            loan,
+            savings_surplus,
+            payment=payment,
+            recorded_by=user,
+        )
+    if mutual_aid > 0:
+        credit_payment_mutual_aid(
+            loan,
+            mutual_aid,
+            payment=payment,
+            recorded_by=user,
+            pay_frequency=pay_frequency,
+        )
+
     return payment
-
-
 @transaction.atomic
 def mark_overdue_installments():
     today = timezone.localdate()
@@ -1143,13 +1593,87 @@ def get_borrower_credit_summary(borrower, exclude_application=None):
     }
 
 
+ACTIVITY_PERIOD_FILTERS = [
+    {"value": "all", "label": "All time"},
+    {"value": "day", "label": "Today"},
+    {"value": "week", "label": "This week"},
+    {"value": "month", "label": "This month"},
+    {"value": "custom", "label": "Custom range"},
+]
+
+
+def _parse_iso_date(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return timezone.localtime(value).date() if timezone.is_aware(value) else value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_activity_date_range(period="all", date_from=None, date_to=None, today=None):
+    today = today or timezone.localdate()
+    if period not in {"all", "day", "week", "month", "custom"}:
+        period = "all"
+
+    if period == "day":
+        return period, today, today
+    if period == "week":
+        start = today - timedelta(days=today.weekday())
+        return period, start, start + timedelta(days=6)
+    if period == "month":
+        start = today.replace(day=1)
+        if start.month == 12:
+            end = date(start.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end = date(start.year, start.month + 1, 1) - timedelta(days=1)
+        return period, start, end
+    if period == "custom":
+        start = _parse_iso_date(date_from)
+        end = _parse_iso_date(date_to)
+        if start and end and start > end:
+            start, end = end, start
+        return period, start, end
+    return "all", None, None
+
+
+def activity_range_label(period, date_from, date_to):
+    if period == "all" or (not date_from and not date_to):
+        return "All time"
+    if date_from and date_to and date_from == date_to:
+        day_label = date_from.strftime("%b %d, %Y")
+        return f"Today · {day_label}" if period == "day" else day_label
+    start_label = date_from.strftime("%b %d, %Y") if date_from else "…"
+    end_label = date_to.strftime("%b %d, %Y") if date_to else "…"
+    if date_from and date_to and date_from.year == date_to.year:
+        start_label = date_from.strftime("%b %d")
+    if period == "week":
+        return f"This week · {start_label} – {end_label}"
+    if period == "month":
+        return f"This month · {start_label} – {end_label}"
+    return f"{start_label} – {end_label}"
+
+
 def _activity_sort_key(value):
     if isinstance(value, datetime):
         return value if timezone.is_aware(value) else timezone.make_aware(value)
     return timezone.make_aware(datetime.combine(value, datetime.min.time()))
 
 
-def get_officer_activity_log(officer, activity_type="all"):
+def _activity_event_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        aware = value if timezone.is_aware(value) else timezone.make_aware(value)
+        return timezone.localtime(aware).date()
+    return value
+
+
+def get_officer_activity_log(officer, activity_type="all", date_from=None, date_to=None):
     events = []
 
     if activity_type in ("all", "application"):
@@ -1186,7 +1710,7 @@ def get_officer_activity_log(officer, activity_type="all"):
                     "url_kwargs": {"application_id": application.pk},
                 })
 
-    if activity_type in ("all", "payment"):
+    if activity_type in ("all", "payment", "collection"):
         payments = officer.recorded_payments.select_related(
             "loan", "loan__application", "loan__application__borrower", "loan__application__loan_product"
         )
@@ -1194,7 +1718,7 @@ def get_officer_activity_log(officer, activity_type="all"):
             loan = payment.loan
             events.append({
                 "kind": "payment",
-                "title": f"Payment recorded · {loan.reference}",
+                "title": f"Pay collection · {loan.reference}",
                 "description": f"{payment.get_method_display()} · ref {payment.reference_number or payment.pk}",
                 "member_name": loan.application.borrower_name,
                 "borrower_id": loan.application.borrower_id,
@@ -1202,7 +1726,7 @@ def get_officer_activity_log(officer, activity_type="all"):
                 "amount": payment.amount,
                 "created_at": payment.payment_date,
                 "status": "paid",
-                "status_label": "Payment",
+                "status_label": "Pay collection",
                 "url_name": "payment_receipt",
                 "url_kwargs": {"payment_id": payment.pk},
             })
@@ -1224,6 +1748,19 @@ def get_officer_activity_log(officer, activity_type="all"):
                 "url_name": "disbursement_receipt",
                 "url_kwargs": {"disbursement_id": loan.application_id},
             })
+
+    if date_from or date_to:
+        filtered = []
+        for event in events:
+            event_date = _activity_event_date(event.get("created_at"))
+            if event_date is None:
+                continue
+            if date_from and event_date < date_from:
+                continue
+            if date_to and event_date > date_to:
+                continue
+            filtered.append(event)
+        events = filtered
 
     events.sort(key=lambda event: _activity_sort_key(event["created_at"]), reverse=True)
     return events

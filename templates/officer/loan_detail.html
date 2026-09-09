@@ -3,6 +3,40 @@
 {% block title %}Loan {{ loan.reference }}{% endblock %}
 {% block topbar_title %}Loan detail{% endblock %}
 {% block topbar_context %}A complete view of this loan.{% endblock %}
+{% block head %}
+<style>
+  .pay-choice-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem 1.25rem;
+    align-items: center;
+  }
+  .pay-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-weight: 500;
+  }
+  .pay-choice-dot {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .pay-choice.is-selected {
+    color: var(--bs-primary, #0d6efd);
+    font-weight: 700;
+  }
+  .pay-choice.is-selected .pay-choice-dot {
+    border-color: var(--bs-primary, #0d6efd);
+    box-shadow: inset 0 0 0 .22rem var(--bs-primary, #0d6efd);
+    background: #fff;
+  }
+</style>
+{% endblock %}
 {% block content %}
 <div class="page-heading">
   <div>
@@ -10,7 +44,7 @@
     <div class="eyebrow mt-3">{{ loan.reference }}</div>
     <h1>{{ loan.product_name }}</h1>
     <p>
-      Opened {{ loan.start_date }} · {{ loan.term_months }} month term
+      Opened {{ loan.start_date }} · {{ loan.term_months }} month term · Pay {{ loan.application.get_payment_frequency_display }}
       {% if loan.is_rescheduled %}
       · <span class="badge status-rescheduled">Rescheduled {{ loan.reschedule_date_display }}</span>
       {% endif %}
@@ -47,13 +81,13 @@
           <div class="eyebrow">Remaining balance</div>
           <div class="amount">{{ loan.adjusted_outstanding_balance|peso }}</div>
           <p class="mt-2 mb-1 text-white-50">Exact {{ loan.remaining_balance|peso }}</p>
-          <p class="mt-0">Original amount {{ loan.original_amount|peso }} · {{ loan.status_label }}{% if loan.is_rescheduled %} · Rescheduled {{ loan.reschedule_date_display }}{% endif %}</p>
+          <p class="mt-0">Principal {{ loan.principal|peso }} · Original {{ loan.original_amount|peso }} · {{ loan.status_label }}{% if loan.is_rescheduled %} · Rescheduled {{ loan.reschedule_date_display }}{% endif %}</p>
         </div>
         <div class="col-sm-5 text-sm-end">
           <div class="amount-label">Next payment{% if next_due %} · {{ next_due.label }}{% endif %}</div>
           {% if next_due %}
           <div class="text-white fw-semibold mt-1">{{ next_due.adjusted_amount|peso }}</div>
-          <div class="small text-white-50">Exact {{ next_due.amount|peso }} · {{ next_due.due_date }}</div>
+          <div class="small text-white-50">Loan exact {{ next_due.amount|peso }}{% if next_due.mutual_aid %} + mutual aid {{ next_due.mutual_aid|peso }}{% endif %} · {{ next_due.due_date }}</div>
           {% else %}
           <div class="text-white fw-semibold mt-1">{{ loan.next_payment_amount|peso }}</div>
           <div class="small text-white-50">{{ loan.next_payment_date }}</div>
@@ -68,8 +102,22 @@
       </div>
       <div class="card-body">
         <div class="row g-4">
+          <div class="col-12">
+            <div class="detail-label">Proposed plan payment</div>
+            <div class="detail-value mb-2">How the member chose to pay</div>
+            <div class="kap-choice-list pay-choice-display" role="list" aria-label="Member payment frequency">
+              <span class="pay-choice is-selected" role="listitem">
+                <span class="pay-choice-dot" aria-hidden="true"></span>
+                {{ loan.application.get_payment_frequency_display }}
+              </span>
+            </div>
+            <div class="text-muted small mt-2">
+              Chosen remittance · {{ loan.application.get_payment_frequency_display }}
+              {{ chosen_pay_amount|peso }}
+              <span class="ms-1">(loan exact {{ chosen_pay_amount_exact|peso }} + {{ plan_mutual_aid_amount|peso }} mutual aid)</span>
+            </div>
+          </div>
           <div class="col-sm-4"><div class="detail-label">Interest rate</div><div class="detail-value">{{ loan.interest_rate }}% fixed</div></div>
-          <div class="col-sm-4"><div class="detail-label">Payment frequency</div><div class="detail-value">{{ loan.payment_frequency }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Payments remaining</div><div class="detail-value">{{ loan.payments_remaining }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Origination date</div><div class="detail-value">{{ loan.start_date }}</div></div>
           {% if loan.is_rescheduled %}
@@ -79,6 +127,8 @@
             <div class="text-muted small">Term starts {{ loan.reschedule_interest_start_display }}</div>
           </div>
           {% endif %}
+          <div class="col-sm-4"><div class="detail-label">Current principal</div><div class="detail-value">{{ loan.principal|peso }}</div></div>
+          <div class="col-sm-4"><div class="detail-label">Original principal</div><div class="detail-value">{{ loan.original_amount|peso }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Maturity date</div><div class="detail-value">{{ loan.maturity_date }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Loan reference</div><div class="detail-value">{{ loan.reference }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Disbursement method</div><div class="detail-value">{{ loan.disbursement_method }}</div></div>
@@ -86,6 +136,11 @@
             <div class="detail-label">Payment per day</div>
             <div class="detail-value">{{ loan.adjusted_daily_payment|peso }}</div>
             <div class="text-muted small">Exact {{ loan.daily_payment|peso }}</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Mutual aid / day</div>
+            <div class="detail-value">{{ daily_mutual_aid_amount|peso }}</div>
+            <div class="text-muted small">Collected with every working-day remittance</div>
           </div>
           <div class="col-sm-4">
             <div class="detail-label">Payment per month</div>
@@ -110,7 +165,7 @@
         <h2 class="card-title">Pay remaining balance</h2>
       </div>
       <div class="card-body">
-        <p class="text-muted mb-3">This loan’s term has ended with a balance still outstanding. Choose how many months (maximum 3) to repay the remaining amount. Flat interest applies at {{ extension_rate }}%.</p>
+        <p class="text-muted mb-3">This loan’s term has ended with principal still outstanding. Choose how many months (maximum 3) to repay the remaining principal. Flat interest applies at {{ extension_rate }}% on that principal (same formula as origination).</p>
         <form method="post" novalidate>
           {% csrf_token %}
           {% include "includes/form_errors.html" with form=extension_form %}
@@ -207,7 +262,16 @@
             {% for payment in payments %}
             <tr>
               <td>{{ payment.payment_date }}</td>
-              <td><strong>{{ payment.amount|peso }}</strong></td>
+              <td>
+                <strong>{{ payment.amount|peso }}</strong>
+                {% if payment.savings_adjustment or payment.mutual_aid_contribution %}
+                <div class="text-muted small">
+                  Loan {{ payment.loan_amount_applied|peso }}
+                  {% if payment.savings_adjustment %} · Savings {{ payment.savings_adjustment|peso }}{% endif %}
+                  {% if payment.mutual_aid_contribution %} · Mutual aid {{ payment.mutual_aid_contribution|peso }}{% endif %}
+                </div>
+                {% endif %}
+              </td>
               <td>{{ payment.get_method_display }}</td>
               <td>{{ payment.reference_number|default:"—" }}</td>
               <td>{{ payment.recorded_by.display_name|default:"—" }}</td>
@@ -229,6 +293,13 @@
         <div class="d-flex justify-content-between small mb-2"><span>Paid down</span><strong>{{ loan.paid_percentage }}%</strong></div>
         <div class="progress mb-3"><div class="progress-bar" style="width:{{ loan.paid_percentage }}%"></div></div>
         <p class="text-muted small mb-0">{{ loan.total_paid|peso }} paid across {{ loan.payments_made }} payments.</p>
+        {% if loan.status == "active" or loan.status == "overdue" %}
+          {% if loan.paid_percentage >= 70 %}
+          <p class="text-success small mb-0 mt-2"><i class="bi bi-check-circle me-1"></i>Same loan product can be availed again (70%+ paid down).</p>
+          {% else %}
+          <p class="text-muted small mb-0 mt-2">Same loan product becomes available again at 70% paid down.</p>
+          {% endif %}
+        {% endif %}
       </div>
     </div>
     <div class="info-strip"><i class="bi bi-shield-check me-2"></i><span>Only access information needed for the work in front of you.</span></div>

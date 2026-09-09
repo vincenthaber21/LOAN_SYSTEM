@@ -953,6 +953,18 @@ class Payment(models.Model):
     loan = models.ForeignKey(Loan, on_delete=models.CASCADE, related_name="payments")
     installment = models.ForeignKey(Installment, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    savings_adjustment = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Cash-rounding surplus (adjusted − exact) credited to the member's savings.",
+    )
+    mutual_aid_contribution = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Portion of this remittance credited to KAP mutual aid (₱15 × working days).",
+    )
     payment_date = models.DateField(default=timezone.localdate)
     method = models.CharField(max_length=30, choices=Method.choices, default=Method.BANK_TRANSFER)
     reference_number = models.CharField(max_length=80, default="", blank=True)
@@ -960,6 +972,14 @@ class Payment(models.Model):
 
     def __str__(self):
         return self.reference_number or f"PAY-{self.pk:05d}"
+
+    @property
+    def loan_amount_applied(self):
+        """Portion applied to the loan (excludes savings surplus and mutual aid)."""
+        extras = (self.savings_adjustment or Decimal("0.00")) + (
+            self.mutual_aid_contribution or Decimal("0.00")
+        )
+        return max(Decimal("0.00"), self.amount - extras)
 
 
 class Notification(models.Model):
@@ -1033,6 +1053,14 @@ class Features(models.Model):
     store_name = models.CharField(max_length=120, default=DEFAULT_STORE_NAME)
     tagline = models.CharField(max_length=120, default=DEFAULT_TAGLINE, blank=True)
     logo = models.ImageField(upload_to="branding/", blank=True, null=True)
+    daily_mutual_aid_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("15.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Compulsory mutual aid collected with every working-day remittance (₱). "
+        "Weekly = ×5, biweekly = ×10, monthly = ×22.",
+    )
 
     class Meta:
         verbose_name = "Features"

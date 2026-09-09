@@ -1075,7 +1075,7 @@
       createBtn.disabled = true;
     } else if (products.length === 0 && borrowerSelect.value) {
       if (borrowerHasActiveLoan || blockedProductCount > 0) {
-        availabilityHint.textContent = 'This borrower has active or pending loans on all available products. Choose a different product type or wait until an existing loan is closed.';
+        availabilityHint.textContent = 'This borrower has active loans under 70% paid down or pending applications on all products. Re-apply for the same product once paid down reaches 70%+.';
       } else {
         availabilityHint.textContent = 'No active loan products are available right now.';
       }
@@ -1083,7 +1083,7 @@
       createBtn.disabled = true;
     } else if (borrowerSelect.value) {
       if (borrowerHasActiveLoan || blockedProductCount > 0) {
-        availabilityHint.textContent = 'Products with an active or pending loan for this borrower are hidden. Other products remain available.';
+        availabilityHint.textContent = 'Products with a pending application or active loan under 70% paid down are hidden. Same product is available again at 70%+ paid down.';
       } else {
         availabilityHint.textContent = 'All active loan products are available for this borrower.';
       }

@@ -1,0 +1,66 @@
+{% load lending_tags %}
+<div class="card-soft fade-up-3 mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div>
+      <div class="eyebrow">Repayments</div>
+      <h2 class="card-title mt-1">Pay collection</h2>
+      <span class="text-muted small">{{ date_range_label }} · loan payments recorded by this {{ staff_label }}.</span>
+    </div>
+    <span class="badge status-paid">{{ collection_total|peso }} · {{ collection_count }} payment{{ collection_count|pluralize }}</span>
+  </div>
+  {% if collection_events %}
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Member</th>
+          <th>Reference</th>
+          <th>Amount</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in collection_events %}
+        <tr>
+          <td class="text-muted">{{ event.created_at_display }}</td>
+          <td>
+            {% if event.borrower_id %}
+            <a class="person" href="{% url 'borrower_detail' borrower_id=event.borrower_id %}">
+              <span class="person-name d-block">{{ event.member_name }}</span>
+            </a>
+            {% else %}
+            —
+            {% endif %}
+          </td>
+          <td class="fw-semibold">{{ event.reference }}</td>
+          <td><strong>{{ event.amount|peso }}</strong></td>
+          <td class="text-nowrap">
+            {% if event.detail_url %}
+            <a class="btn btn-sm btn-light" href="{{ event.detail_url }}"><i class="bi bi-box-arrow-up-right me-1"></i>Open</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="fw-semibold">
+          <td colspan="3">Total collected</td>
+          <td>{{ collection_total|peso }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% if collection_has_more %}
+  <div class="card-body border-top d-flex justify-content-between align-items-center">
+    <span class="text-muted small">Showing {{ collection_events|length }} of {{ collection_count }} collections.</span>
+    <a class="btn btn-sm btn-outline-primary" href="?{{ collection_filter_query }}">View all pay collection</a>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card-body">
+    {% include "includes/empty_state.html" with icon="bi-cash-stack" title="No pay collection in this period" description="Loan payments recorded by this staff member will appear here." %}
+  </div>
+  {% endif %}
+</div>

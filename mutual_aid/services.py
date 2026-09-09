@@ -1,4 +1,3 @@
-from datetime import datetime, time
 from decimal import Decimal
 
 from django.db import transaction
@@ -20,10 +19,8 @@ class MutualAidError(Exception):
 
 
 def _datetime_on_date(value):
-    dt = datetime.combine(value, time.min)
-    if timezone.is_naive(dt):
-        return timezone.make_aware(dt, timezone.get_current_timezone())
-    return dt
+    current = timezone.localtime()
+    return current.replace(year=value.year, month=value.month, day=value.day)
 
 
 def resolve_kap_mutual_aid_plan():
@@ -124,6 +121,48 @@ def credit_kap_mutual_aid_from_disbursement(
         amount,
         MutualAidContribution.Method.ONLINE,
         reference=reference[:60],
+        recorded_by=recorded_by,
+        notes=notes,
+        occurred_on=credited_on,
+    )
+
+
+@transaction.atomic
+def credit_kap_mutual_aid_from_loan_payment(
+    member,
+    amount,
+    *,
+    loan_reference="",
+    payment_reference="",
+    recorded_by=None,
+    pay_frequency="daily",
+    occurred_on=None,
+):
+    """Credit daily mutual aid collected with a loan remittance."""
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        return None
+
+    credited_on = occurred_on or timezone.localdate()
+    plan = resolve_kap_mutual_aid_plan()
+    membership = get_or_enroll_member(
+        member,
+        plan,
+        enrolled_by=recorded_by,
+        notes="Enrolled automatically from loan payment mutual aid.",
+        enrolled_on=credited_on,
+    )
+    reference = (payment_reference or f"PAY-{loan_reference}-MA")[:60]
+    freq = (pay_frequency or "daily").replace("_", " ")
+    notes = (
+        f"Daily mutual aid ({freq}) collected with loan payment "
+        f"{payment_reference or loan_reference or ''}.".strip()
+    )
+    return record_contribution(
+        membership,
+        amount,
+        MutualAidContribution.Method.CASH,
+        reference=reference,
         recorded_by=recorded_by,
         notes=notes,
         occurred_on=credited_on,

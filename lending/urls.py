@@ -59,6 +59,7 @@ urlpatterns = [
     path("officer/disbursement/<int:disbursement_id>/receipt/", views.disbursement_receipt, name="disbursement_receipt"),
     path("officer/reports/", views.reports, name="reports"),
     path("officer/reports/export/", views.export_portfolio_csv, name="export_portfolio_csv"),
+    path("officer/reports/cashflow.csv", views.export_cashflow_csv, name="export_cashflow_csv"),
     path("officer/applications/export/", views.export_applications_csv, name="export_applications_csv"),
     path("officer/borrowers/export/", views.export_borrowers_csv, name="export_borrowers_csv"),
     path("officer/disbursement/export/", views.export_disbursements_csv, name="export_disbursements_csv"),

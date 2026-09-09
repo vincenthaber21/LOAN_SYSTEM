@@ -13,10 +13,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
+from .cashflow_reports import cashflow_report_context, resolve_staff_user
 from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .models import Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, Manager, Notification, Payment, User
-from .services import BalanceExtensionError, adjust_payment, balance_extension_previews, can_extend_loan_balance, disburse_application, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_officer_activity_log, mark_overdue_installments, normalize_credit_score, original_schedule_display_rows, record_payment, reject_superseded_applications, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE
+from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, activity_range_label, adjust_payment, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_officer_activity_log, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
 
 
 def _parse_disbursed_date(value):
@@ -563,6 +564,7 @@ def schedule(request, loan_id):
             "schedule_plan": "original" if showing_original else "current",
             "showing_original": showing_original,
             "original_terms": original_terms,
+            "daily_mutual_aid_amount": display.get("daily_mutual_aid_amount") or daily_mutual_aid_amount(),
         },
     )
 
@@ -1329,86 +1331,154 @@ def edit_manager(request, manager_id):
     return render(request, "officer/edit_manager.html", {"form": form, "manager": manager})
 
 
-@login_required
-@role_required("admin")
-def manager_activity_log(request, manager_id):
-    manager = get_object_or_404(Manager, pk=manager_id)
+def _build_activity_log_context(request, staff):
     activity_type = request.GET.get("type", "all")
+    if activity_type in {"collection", "pay_collection"}:
+        activity_type = "payment"
     if activity_type not in {"all", "application", "payment", "disbursement"}:
         activity_type = "all"
-    events = get_officer_activity_log(manager, activity_type=activity_type)
+    period, date_from, date_to = resolve_activity_date_range(
+        request.GET.get("period", "all"),
+        request.GET.get("from"),
+        request.GET.get("to"),
+    )
+    events = get_officer_activity_log(
+        staff,
+        activity_type=activity_type,
+        date_from=date_from,
+        date_to=date_to,
+    )
     for event in events:
         event["created_at_display"] = format_activity_timestamp(event["created_at"])
         if event.get("url_name"):
             event["detail_url"] = reverse(event["url_name"], kwargs=event["url_kwargs"])
+
+    if activity_type == "payment":
+        collection_events = events
+    else:
+        collection_events = get_officer_activity_log(
+            staff,
+            activity_type="payment",
+            date_from=date_from,
+            date_to=date_to,
+        )
+        for event in collection_events:
+            event["created_at_display"] = format_activity_timestamp(event["created_at"])
+            if event.get("url_name"):
+                event["detail_url"] = reverse(event["url_name"], kwargs=event["url_kwargs"])
+    collection_total = sum((event.get("amount") or Decimal("0.00")) for event in collection_events)
+    collection_preview = collection_events[:20]
+    show_collection_section = activity_type != "payment"
+    if show_collection_section and activity_type == "all":
+        events = [event for event in events if event.get("kind") != "payment"]
     paginator = Paginator(events, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
-    query_string = f"&type={activity_type}" if activity_type != "all" else ""
-    application_count = manager.reviewed_applications.filter(decision_date__isnull=False).count()
-    payment_count = manager.recorded_payments.count()
-    disbursement_count = manager.disbursed_loans.count()
-    payment_total = manager.recorded_payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
-    disbursed_total = manager.disbursed_loans.aggregate(total=Sum("principal"))["total"] or Decimal("0.00")
-    return render(request, "officer/manager_activity_log.html", {
-        "manager": manager,
+
+    query_parts = []
+    if activity_type != "all":
+        query_parts.append(f"type={activity_type}")
+    if period != "all":
+        query_parts.append(f"period={period}")
+        if period == "custom":
+            if date_from:
+                query_parts.append(f"from={date_from.isoformat()}")
+            if date_to:
+                query_parts.append(f"to={date_to.isoformat()}")
+    query_string = f"&{'&'.join(query_parts)}" if query_parts else ""
+
+    applications = staff.reviewed_applications.filter(decision_date__isnull=False)
+    payments = staff.recorded_payments.all()
+    loans = staff.disbursed_loans.all()
+    if date_from:
+        applications = applications.filter(decision_date__date__gte=date_from)
+        payments = payments.filter(payment_date__gte=date_from)
+        loans = loans.filter(disbursed_date__gte=date_from)
+    if date_to:
+        applications = applications.filter(decision_date__date__lte=date_to)
+        payments = payments.filter(payment_date__lte=date_to)
+        loans = loans.filter(disbursed_date__lte=date_to)
+
+    application_count = applications.count()
+    payment_count = payments.count()
+    disbursement_count = loans.count()
+    payment_total = payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    disbursed_total = loans.aggregate(total=Sum("principal"))["total"] or Decimal("0.00")
+
+    custom_from = ""
+    custom_to = ""
+    if period == "custom":
+        custom_from = date_from.isoformat() if date_from else (request.GET.get("from") or "")
+        custom_to = date_to.isoformat() if date_to else (request.GET.get("to") or "")
+
+    collection_query_parts = ["type=payment"]
+    if period != "all":
+        collection_query_parts.append(f"period={period}")
+        if period == "custom":
+            if date_from:
+                collection_query_parts.append(f"from={date_from.isoformat()}")
+            if date_to:
+                collection_query_parts.append(f"to={date_to.isoformat()}")
+    collection_filter_query = "&".join(collection_query_parts)
+
+    return {
         "activity": page_obj,
         "page_obj": page_obj,
         "is_paginated": page_obj.has_other_pages(),
         "query_string": query_string,
-        "filters": {"type": activity_type},
+        "filters": {
+            "type": activity_type,
+            "period": period,
+            "date_from": custom_from,
+            "date_to": custom_to,
+        },
         "activity_type_filters": [
             {"value": "all", "label": "All activity"},
             {"value": "application", "label": "Applications"},
-            {"value": "payment", "label": "Payments"},
+            {"value": "payment", "label": "Pay collection"},
             {"value": "disbursement", "label": "Disbursements"},
         ],
+        "activity_period_filters": ACTIVITY_PERIOD_FILTERS,
+        "date_range_label": activity_range_label(period, date_from, date_to),
+        "collection_events": collection_preview,
+        "collection_count": len(collection_events),
+        "collection_total": collection_total,
+        "collection_has_more": len(collection_events) > len(collection_preview),
+        "collection_filter_query": collection_filter_query,
+        "show_collection_section": show_collection_section,
         "activity_summary": [
             {"label": "Applications processed", "value": application_count, "note": "Decisions recorded"},
-            {"label": "Payments recorded", "value": payment_count, "note": f"₱{payment_total:,.0f} collected"},
-            {"label": "Disbursements released", "value": disbursement_count, "note": f"₱{disbursed_total:,.0f} principal"},
+            {
+                "label": "Pay collection",
+                "value": f"₱{payment_total:,.0f}",
+                "note": f"{payment_count} payment{'s' if payment_count != 1 else ''} recorded",
+                "positive": payment_total > 0,
+            },
+            {
+                "label": "Disbursements released",
+                "value": f"₱{disbursed_total:,.0f}",
+                "note": f"{disbursement_count} loan{'s' if disbursement_count != 1 else ''} · principal",
+                "positive": disbursed_total > 0,
+            },
         ],
-    })
+    }
+
+
+@login_required
+@role_required("admin")
+def manager_activity_log(request, manager_id):
+    manager = get_object_or_404(Manager, pk=manager_id)
+    context = _build_activity_log_context(request, manager)
+    context["manager"] = manager
+    return render(request, "officer/manager_activity_log.html", context)
 
 
 @login_required
 @role_required("admin")
 def officer_activity_log(request, officer_id):
     officer = get_object_or_404(LoanOfficer, pk=officer_id)
-    activity_type = request.GET.get("type", "all")
-    if activity_type not in {"all", "application", "payment", "disbursement"}:
-        activity_type = "all"
-    events = get_officer_activity_log(officer, activity_type=activity_type)
-    for event in events:
-        event["created_at_display"] = format_activity_timestamp(event["created_at"])
-        if event.get("url_name"):
-            event["detail_url"] = reverse(event["url_name"], kwargs=event["url_kwargs"])
-    paginator = Paginator(events, 20)
-    page_obj = paginator.get_page(request.GET.get("page"))
-    query_string = f"&type={activity_type}" if activity_type != "all" else ""
-    application_count = officer.reviewed_applications.filter(decision_date__isnull=False).count()
-    payment_count = officer.recorded_payments.count()
-    disbursement_count = officer.disbursed_loans.count()
-    payment_total = officer.recorded_payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
-    disbursed_total = officer.disbursed_loans.aggregate(total=Sum("principal"))["total"] or Decimal("0.00")
-    return render(request, "officer/officer_activity_log.html", {
-        "officer": officer,
-        "activity": page_obj,
-        "page_obj": page_obj,
-        "is_paginated": page_obj.has_other_pages(),
-        "query_string": query_string,
-        "filters": {"type": activity_type},
-        "activity_type_filters": [
-            {"value": "all", "label": "All activity"},
-            {"value": "application", "label": "Applications"},
-            {"value": "payment", "label": "Payments"},
-            {"value": "disbursement", "label": "Disbursements"},
-        ],
-        "activity_summary": [
-            {"label": "Applications processed", "value": application_count, "note": "Decisions recorded"},
-            {"label": "Payments recorded", "value": payment_count, "note": f"₱{payment_total:,.0f} collected"},
-            {"label": "Disbursements released", "value": disbursement_count, "note": f"₱{disbursed_total:,.0f} principal"},
-        ],
-    })
+    context = _build_activity_log_context(request, officer)
+    context["officer"] = officer
+    return render(request, "officer/officer_activity_log.html", context)
 
 
 def _activity_sort_key(value):
@@ -1531,6 +1601,11 @@ def officer_loan_detail(request, loan_id):
             )
             return redirect("officer_loan_detail", loan_id=loan.id)
 
+    pay_freq = loan.application.payment_frequency or "daily"
+    mutual_aid_daily = daily_mutual_aid_amount()
+    mutual_aid_for_plan = mutual_aid_for_pay_frequency(pay_freq)
+    loan_exact = loan.suggested_payment_for(pay_freq, adjust=False)
+    loan_adjusted = loan.suggested_payment_for(pay_freq, adjust=True)
     return render(
         request,
         "officer/loan_detail.html",
@@ -1542,6 +1617,12 @@ def officer_loan_detail(request, loan_id):
             "extension_form": extension_form,
             "extension_previews": extension_previews,
             "extension_rate": BALANCE_EXTENSION_RATE,
+            "pay_frequency": pay_freq,
+            "pay_frequency_choices": list(LoanApplication.PaymentFrequency.choices),
+            "chosen_pay_amount": loan_adjusted + mutual_aid_for_plan,
+            "chosen_pay_amount_exact": loan_exact,
+            "daily_mutual_aid_amount": mutual_aid_daily,
+            "plan_mutual_aid_amount": mutual_aid_for_plan,
         },
     )
 
@@ -1587,6 +1668,7 @@ def officer_schedule(request, loan_id):
             "schedule_plan": "original" if showing_original else "current",
             "showing_original": showing_original,
             "original_terms": original_terms,
+            "daily_mutual_aid_amount": display.get("daily_mutual_aid_amount") or daily_mutual_aid_amount(),
         },
     )
 
@@ -1597,16 +1679,31 @@ def officer_make_payment(request, loan_id):
     loan = get_object_or_404(Loan.objects.select_related("application", "application__borrower"), pk=loan_id)
     installment_id = request.GET.get("installment")
     installment = loan.installments.filter(pk=installment_id).first() if installment_id else None
-    max_amount = installment.remaining if installment else loan.outstanding_balance
-    max_amount_label = "remaining on this installment" if installment else "outstanding balance"
+    exact_max = installment.remaining if installment else loan.outstanding_balance
+    remaining_periods = loan.installments.exclude(status=Installment.Status.PAID).count()
+    if installment:
+        remaining_periods = 1
 
     pay_frequency = request.POST.get("pay_frequency") or request.GET.get("pay") or (loan.application.payment_frequency or "daily")
     if pay_frequency not in {"daily", "weekly", "biweekly", "monthly"}:
         pay_frequency = "daily"
 
+    max_mutual_aid = (
+        daily_mutual_aid_amount() * Decimal(remaining_periods)
+    ).quantize(Decimal("0.01")) if remaining_periods else daily_mutual_aid_amount()
+    max_amount = adjust_payment(exact_max) + max_mutual_aid
+    max_amount_label = (
+        "adjusted remaining on this installment plus mutual aid"
+        if installment
+        else "adjusted outstanding balance plus mutual aid"
+    )
+
     def _capped(frequency):
-        amount = loan.suggested_payment_for(frequency)
-        return min(amount, max_amount) if max_amount is not None else amount
+        exact = loan.suggested_payment_for(frequency, adjust=False)
+        adjusted = adjust_payment(exact)
+        mutual = mutual_aid_for_pay_frequency(frequency)
+        total = adjusted + mutual
+        return min(total, max_amount) if max_amount is not None else total
 
     pay_amounts = {
         "daily": _capped("daily"),
@@ -1614,18 +1711,61 @@ def officer_make_payment(request, loan_id):
         "biweekly": _capped("biweekly"),
         "monthly": _capped("monthly"),
     }
-    suggested = pay_amounts[pay_frequency]
+    suggested = pay_amounts[pay_frequency] if not installment else (
+        adjust_payment(exact_max) + mutual_aid_for_pay_frequency("daily")
+    )
+    exact_for_frequency = loan.suggested_payment_for(pay_frequency, adjust=False)
+    default_mutual_aid = mutual_aid_for_remittance_amount(
+        loan, suggested, max_days=remaining_periods
+    )
+    loan_portion_suggested = (suggested - default_mutual_aid).quantize(Decimal("0.01"))
+    if loan_portion_suggested < 0:
+        loan_portion_suggested = Decimal("0.00")
+    _, default_savings = split_payment_for_savings(
+        loan, loan_portion_suggested, installment=installment
+    )
     form = PaymentForm(
         request.POST or None,
         instance=Payment(installment=installment),
-        initial={"amount": suggested},
+        initial={
+            "amount": suggested,
+            "savings_adjustment": default_savings,
+            "mutual_aid_contribution": default_mutual_aid,
+        },
         max_amount=max_amount,
         max_amount_label=max_amount_label,
     )
     if request.method == "POST" and form.is_valid():
-        payment = record_payment(loan, form.cleaned_data["amount"], form.cleaned_data["method"], form.cleaned_data["reference_number"], request.user, installment)
-        messages.success(request, f"Payment of ₱{payment.amount:,.2f} recorded for {loan.reference}.")
+        payment = record_payment(
+            loan,
+            form.cleaned_data["amount"],
+            form.cleaned_data["method"],
+            form.cleaned_data["reference_number"],
+            request.user,
+            installment,
+            savings_adjustment=form.cleaned_data.get("savings_adjustment"),
+            mutual_aid_contribution=form.cleaned_data.get("mutual_aid_contribution"),
+            pay_frequency=pay_frequency if not installment else "daily",
+        )
+        loan.refresh_from_db()
+        parts = [
+            f"Payment of ₱{payment.amount:,.2f} recorded for {loan.reference}.",
+            f"₱{payment.loan_amount_applied:,.2f} applied to loan (new principal ₱{loan.principal:,.2f}).",
+        ]
+        if payment.savings_adjustment:
+            parts.append(f"₱{payment.savings_adjustment:,.2f} credited to member savings.")
+        if payment.mutual_aid_contribution:
+            parts.append(f"₱{payment.mutual_aid_contribution:,.2f} credited to mutual aid.")
+        messages.success(request, " ".join(parts))
         return redirect("payment_receipt", payment_id=payment.pk)
+
+    frequency_labels = {
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "biweekly": "Biweekly",
+        "monthly": "Monthly",
+    }
+    daily_unit = adjust_payment(loan.daily_payment) + daily_mutual_aid_amount()
     return render(
         request,
         "officer/payment_form.html",
@@ -1636,15 +1776,33 @@ def officer_make_payment(request, loan_id):
             "max_payment_amount": max_amount,
             "max_payment_label": max_amount_label,
             "pay_frequency": pay_frequency,
-            "pay_frequency_choices": [
-                ("daily", "Daily"),
-                ("weekly", "Weekly"),
-                ("biweekly", "Biweekly"),
-                ("monthly", "Monthly"),
-            ],
+            "pay_frequency_label": frequency_labels.get(pay_frequency, pay_frequency.title()),
+            "suggested_amount": suggested,
+            "default_savings_adjustment": default_savings,
+            "default_mutual_aid_contribution": default_mutual_aid,
+            "daily_mutual_aid_amount": daily_mutual_aid_amount(),
+            "daily_collect_unit": daily_unit,
             "pay_amounts": pay_amounts,
+            "remaining_periods": remaining_periods,
+            "exact_max": exact_max,
+            "exact_for_frequency": exact_for_frequency,
+            "adjustment_preview": payment_adjustment_surplus(exact_for_frequency),
         },
     )
+
+
+def _disbursement_day_context():
+    today = timezone.localdate()
+    allowed = is_disbursement_weekday(today)
+    next_friday = next_disbursement_weekday(today)
+    return {
+        "disbursement_allowed_today": allowed,
+        "disbursement_day_label": "Friday",
+        "next_disbursement_date": next_friday,
+        "next_disbursement_date_label": next_friday.strftime("%A, %b %d, %Y"),
+        "disbursement_day_message": disbursement_day_error_message(today=today) if not allowed else "",
+        "default_disbursed_date": (today if allowed else next_friday).isoformat(),
+    }
 
 
 @login_required
@@ -1663,6 +1821,7 @@ def disbursement(request):
     )
     released_paginator = Paginator(released_qs, 10)
     released_page = released_paginator.get_page(request.GET.get("page"))
+    day_ctx = _disbursement_day_context()
     return render(request, "officer/disbursements.html", {
         "applications": ready,
         "disbursements": ready,
@@ -1676,6 +1835,7 @@ def disbursement(request):
             {"label": "Awaiting check", "value": ready.count(), "note": "Two-part verification"},
             {"label": "Released this month", "value": f"₱{Loan.objects.filter(disbursed_date__month=timezone.localdate().month).aggregate(value=Sum('principal'))['value'] or Decimal('0'):,.0f}", "note": "Recorded in portfolio"},
         ],
+        **day_ctx,
     })
 
 
@@ -1689,6 +1849,7 @@ def disburse(request, disbursement_id):
     )
     existing_loan = getattr(application, "loan", None)
     deductions = standard_disbursement_deductions()
+    day_ctx = _disbursement_day_context()
     if existing_loan:
         return render(
             request,
@@ -1697,37 +1858,42 @@ def disburse(request, disbursement_id):
                 "application": application,
                 "existing_loan": existing_loan,
                 "standard_deductions": deductions,
+                **day_ctx,
             },
         )
+    amount = application.amount_requested
     if request.method == "POST":
-        amount = application.amount_requested
         processing_fee = deductions["processing_fee"]
         other_fees = deductions["other_fees"]
+        form_context = {
+            "application": application,
+            "form_data": request.POST,
+            "standard_deductions": deductions,
+            "net_release_preview": amount - deductions["total"],
+            **day_ctx,
+        }
+        if not day_ctx["disbursement_allowed_today"]:
+            messages.error(request, day_ctx["disbursement_day_message"])
+            return render(request, "officer/disburse_form.html", form_context)
         if deductions["total"] > amount:
             messages.error(request, "Standard deductions exceed the amount to release.")
-            return render(
-                request,
-                "officer/disburse_form.html",
-                {
-                    "application": application,
-                    "form_data": request.POST,
-                    "default_disbursed_date": timezone.localdate().isoformat(),
-                    "standard_deductions": deductions,
-                    "net_release_preview": amount - deductions["total"],
-                    "processing_fee_error": "Standard deductions exceed the amount to release.",
-                },
+            form_context["processing_fee_error"] = "Standard deductions exceed the amount to release."
+            return render(request, "officer/disburse_form.html", form_context)
+        try:
+            loan = disburse_application(
+                application,
+                amount,
+                request.POST.get("method", "Bank transfer"),
+                request.POST.get("reference", ""),
+                disbursed_date=_parse_disbursed_date(request.POST.get("disbursed_date")),
+                processing_fee=processing_fee,
+                other_fees=other_fees,
+                other_fees_description=deductions["other_fees_description"],
+                disbursed_by=request.user,
             )
-        loan = disburse_application(
-            application,
-            amount,
-            request.POST.get("method", "Bank transfer"),
-            request.POST.get("reference", ""),
-            disbursed_date=_parse_disbursed_date(request.POST.get("disbursed_date")),
-            processing_fee=processing_fee,
-            other_fees=other_fees,
-            other_fees_description=deductions["other_fees_description"],
-            disbursed_by=request.user,
-        )
+        except DisbursementDayError as exc:
+            messages.error(request, str(exc))
+            return render(request, "officer/disburse_form.html", form_context)
         membership_deposit = next(
             (item["amount"] for item in deductions["line_items"] if item["key"] == "membership_savings"),
             Decimal("0.00"),
@@ -1750,51 +1916,68 @@ def disburse(request, disbursement_id):
         else:
             messages.success(request, f"{loan.reference} is now active and its repayment schedule has been generated.")
         return redirect("disbursement_receipt", disbursement_id=application.pk)
-    amount = application.amount_requested
     return render(request, "officer/disburse_form.html", {
         "application": application,
         "form_data": {},
-        "default_disbursed_date": timezone.localdate().isoformat(),
         "standard_deductions": deductions,
         "net_release_preview": amount - deductions["total"],
+        **day_ctx,
     })
 
 
 @login_required
 @role_required("officer")
 def reports(request):
-    report_periods = [
-        {"value": "30", "label": "Last 30 days"},
-        {"value": "90", "label": "Last 90 days"},
-        {"value": "365", "label": "Last 12 months"},
-    ]
-    period_days = {"30": 30, "90": 90, "365": 365}
-    selected_period = request.GET.get("period", "30")
-    if selected_period not in period_days:
-        selected_period = "30"
-    period_label = next(p["label"] for p in report_periods if p["value"] == selected_period)
+    staff_user_id = request.GET.get("staff", "")
+    cashflow = cashflow_report_context(
+        lookback_key=request.GET.get("period", "30"),
+        granularity=request.GET.get("grain", "day"),
+        staff_user_id=staff_user_id,
+    )
+    staff_user = cashflow["selected_staff"]
 
     loans = Loan.objects.select_related("application", "application__loan_product")
     product_id = request.GET.get("product", "")
     if product_id:
         loans = loans.filter(application__loan_product_id=product_id)
+    if staff_user is not None:
+        loans = loans.filter(disbursed_by=staff_user)
 
-    cutoff = timezone.localdate() - timedelta(days=period_days[selected_period])
-    period_loans = loans.filter(disbursed_date__gte=cutoff)
-
+    period_loans = loans.filter(
+        disbursed_date__gte=cashflow["date_from"],
+        disbursed_date__lte=cashflow["date_to"],
+    )
     total_disbursed = period_loans.aggregate(value=Sum("principal"))["value"] or Decimal("0.00")
-    collected = period_loans.aggregate(value=Sum("payments__amount"))["value"] or Decimal("0.00")
-    outstanding = period_loans.aggregate(value=Sum("outstanding_balance"))["value"] or Decimal("0.00")
-
+    outstanding = loans.aggregate(value=Sum("outstanding_balance"))["value"] or Decimal("0.00")
     period_count = period_loans.count()
     defaulted_count = period_loans.filter(status=Loan.Status.DEFAULTED).count()
     default_rate = (Decimal(defaulted_count) / Decimal(period_count) * 100) if period_count else Decimal("0.00")
 
     report_metrics = [
-        {"label": "Disbursed", "value": f"₱{total_disbursed:,.0f}", "note": "Principal released", "positive": True},
-        {"label": "Collected", "value": f"₱{collected:,.0f}", "note": "Payments recorded", "positive": True},
-        {"label": "Outstanding", "value": f"₱{outstanding:,.0f}", "note": "Current balance"},
-        {"label": "Default rate", "value": f"{default_rate:.1f}%", "note": "Of loans in this period"},
+        {
+            "label": "Collection",
+            "value": f"₱{cashflow['collection']['total_amount']:,.0f}",
+            "note": f"{cashflow['collection']['total_count']} payment{'s' if cashflow['collection']['total_count'] != 1 else ''}",
+            "positive": cashflow["collection"]["total_amount"] > 0,
+        },
+        {
+            "label": "Mutual aid",
+            "value": f"₱{cashflow['mutual_aid']['total_amount']:,.0f}",
+            "note": f"{cashflow['mutual_aid']['total_count']} contribution{'s' if cashflow['mutual_aid']['total_count'] != 1 else ''}",
+            "positive": cashflow["mutual_aid"]["total_amount"] > 0,
+        },
+        {
+            "label": "Savings deposits",
+            "value": f"₱{cashflow['savings']['total_amount']:,.0f}",
+            "note": f"{cashflow['savings']['total_count']} deposit{'s' if cashflow['savings']['total_count'] != 1 else ''}",
+            "positive": cashflow["savings"]["total_amount"] > 0,
+        },
+        {
+            "label": "Disbursed",
+            "value": f"₱{total_disbursed:,.0f}",
+            "note": f"Outstanding ₱{outstanding:,.0f} · Default {default_rate:.1f}%",
+            "positive": total_disbursed > 0,
+        },
     ]
 
     today = timezone.localdate()
@@ -1847,15 +2030,23 @@ def reports(request):
         for index, row in enumerate(product_mix[:3])
     ]
 
+    export_query = (
+        f"?period={cashflow['selected_lookback']}"
+        f"&grain={cashflow['selected_granularity']}"
+        f"&staff={cashflow['selected_staff_id']}"
+    )
+    if product_id:
+        export_query += f"&product={product_id}"
+
     return render(request, "officer/reports.html", {
+        **cashflow,
         "loans": period_loans,
         "total_disbursed": total_disbursed,
-        "collected": collected,
         "outstanding": outstanding,
         "default_rate": default_rate,
         "loan_type_filter": product_id,
-        "report_periods": report_periods,
-        "selected_period": selected_period,
+        "report_periods": cashflow["lookbacks"],
+        "selected_period": cashflow["selected_lookback"],
         "products": [
             {"value": str(product.pk), "label": f"{product.name} ({product.get_loan_type_display()})"}
             for product in LoanProduct.objects.all().order_by("name")
@@ -1865,10 +2056,16 @@ def reports(request):
         "origination_chart_y_ticks": origination_chart_y_ticks,
         "origination_year_total": origination_year_total,
         "origination_chart_period_label": origination_chart_period_label,
-        "chart_period_label": period_label,
+        "chart_period_label": cashflow["lookback_label"],
         "portfolio_mix": portfolio_mix,
+        "cashflow_export_url": reverse("export_cashflow_csv") + export_query,
         "available_exports": [
-            {"label": "Portfolio CSV", "description": "All disbursed loans", "url": reverse("export_portfolio_csv")},
+            {
+                "label": "Cashflow CSV",
+                "description": "Collection, mutual aid & savings",
+                "url": reverse("export_cashflow_csv") + export_query,
+            },
+            {"label": "Portfolio CSV", "description": "All disbursed loans", "url": reverse("export_portfolio_csv") + export_query},
             {"label": "Application CSV", "description": "Application queue", "url": reverse("export_applications_csv")},
             {"label": "Borrower CSV", "description": "Borrower directory", "url": reverse("export_borrowers_csv")},
         ],
@@ -1877,22 +2074,111 @@ def reports(request):
 
 @login_required
 @role_required("officer")
+def export_cashflow_csv(request):
+    cashflow = cashflow_report_context(
+        lookback_key=request.GET.get("period", "30"),
+        granularity=request.GET.get("grain", "day"),
+        staff_user_id=request.GET.get("staff", ""),
+    )
+    response = HttpResponse(content_type="text/csv")
+    staff_slug = cashflow["selected_staff_id"] or "all-staff"
+    filename = (
+        f"cashflow-{cashflow['selected_granularity']}-"
+        f"{staff_slug}-"
+        f"{cashflow['date_from']}-to-{cashflow['date_to']}.csv"
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Cashflow report"])
+    writer.writerow(["Period", cashflow["lookback_label"]])
+    writer.writerow(["Granularity", cashflow["granularity_label"]])
+    writer.writerow(["Staff", cashflow["staff_label"]])
+    writer.writerow([
+        "Date from",
+        cashflow["date_from"].isoformat(),
+        "Date to",
+        cashflow["date_to"].isoformat(),
+    ])
+    writer.writerow([])
+
+    writer.writerow(["Collection (loan payments)"])
+    writer.writerow(["Period", "Payments", "Amount"])
+    for row in cashflow["collection"]["rows"]:
+        writer.writerow([row["label"], row["count"], row["amount"]])
+    writer.writerow([
+        "Total",
+        cashflow["collection"]["total_count"],
+        cashflow["collection"]["total_amount"],
+    ])
+    writer.writerow([])
+
+    writer.writerow(["Mutual aid contributions"])
+    writer.writerow(["Period", "Contributions", "Amount"])
+    for row in cashflow["mutual_aid"]["rows"]:
+        writer.writerow([row["label"], row["count"], row["amount"]])
+    writer.writerow([
+        "Total",
+        cashflow["mutual_aid"]["total_count"],
+        cashflow["mutual_aid"]["total_amount"],
+    ])
+    writer.writerow([])
+
+    writer.writerow(["Savings"])
+    writer.writerow(["Period", "Deposits count", "Deposits", "Interest", "Withdrawals", "Net"])
+    for row in cashflow["savings"]["rows"]:
+        writer.writerow([
+            row["label"],
+            row["count"],
+            row["amount"],
+            row["interest"],
+            row["withdrawals"],
+            row["net"],
+        ])
+    writer.writerow([
+        "Total",
+        cashflow["savings"]["total_count"],
+        cashflow["savings"]["total_amount"],
+        cashflow["savings"]["total_interest"],
+        cashflow["savings"]["total_withdrawals"],
+        cashflow["savings"]["total_net"],
+    ])
+    return response
+
+
+@login_required
+@role_required("officer")
 def export_portfolio_csv(request):
-    loans = Loan.objects.select_related("application__borrower", "application__loan_product")
+    loans = Loan.objects.select_related(
+        "application__borrower",
+        "application__loan_product",
+        "disbursed_by",
+    )
     product_id = request.GET.get("product", "")
     if product_id:
         loans = loans.filter(application__loan_product_id=product_id)
+    staff_user = resolve_staff_user(request.GET.get("staff", ""))
+    if staff_user is not None:
+        loans = loans.filter(disbursed_by=staff_user)
     period_days = {"30": 30, "90": 90, "365": 365}
     period = request.GET.get("period", "")
     if period in period_days:
-        cutoff = timezone.localdate() - timedelta(days=period_days[period])
+        cutoff = timezone.localdate() - timedelta(days=period_days[period] - 1)
         loans = loans.filter(disbursed_date__gte=cutoff)
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="lumen-loan-portfolio.csv"'
     writer = csv.writer(response)
-    writer.writerow(["Loan ID", "Borrower", "Type", "Principal", "Outstanding", "Status", "Disbursed"])
+    writer.writerow(["Loan ID", "Borrower", "Type", "Principal", "Outstanding", "Status", "Disbursed", "Disbursed by"])
     for loan in loans:
-        writer.writerow([loan.reference, loan.application.borrower.display_name(), loan.application.loan_product.get_loan_type_display(), loan.principal, loan.outstanding_balance, loan.get_status_display(), loan.disbursed_date])
+        writer.writerow([
+            loan.reference,
+            loan.application.borrower.display_name(),
+            loan.application.loan_product.get_loan_type_display(),
+            loan.principal,
+            loan.outstanding_balance,
+            loan.get_status_display(),
+            loan.disbursed_date,
+            loan.disbursed_by.display_name() if loan.disbursed_by else "",
+        ])
     return response
 
 
@@ -1983,9 +2269,12 @@ def payment_receipt(request, payment_id):
         payment_qs = payment_qs.filter(loan__application__borrower=request.user)
     payment = get_object_or_404(payment_qs, pk=payment_id)
     loan = payment.loan
-    paid_through = loan.payments.filter(pk__lte=payment.pk).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    paid_through = sum(
+        (item.loan_amount_applied for item in loan.payments.filter(pk__lte=payment.pk)),
+        Decimal("0.00"),
+    )
     balance_after = max(Decimal("0.00"), loan.total_payable - paid_through)
-    balance_before = balance_after + payment.amount
+    balance_before = balance_after + payment.loan_amount_applied
     return render(request, "shared/payment_receipt.html", {
         "payment": payment,
         "loan": loan,

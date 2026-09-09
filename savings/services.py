@@ -121,6 +121,42 @@ def credit_membership_savings_from_disbursement(
 
 
 @transaction.atomic
+def credit_payment_adjustment_from_loan(
+    member,
+    amount,
+    *,
+    loan_reference="",
+    payment_reference="",
+    created_by=None,
+):
+    """Credit cash-rounding surplus from a loan remittance to Membership/Savings Deposit."""
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        return None
+
+    product = resolve_membership_savings_product()
+    account = get_or_open_account(
+        member,
+        product,
+        opened_by=created_by or member,
+    )
+    reference = f"ADJ-{payment_reference}" if payment_reference else f"ADJ-{loan_reference}"
+    notes = (
+        f"Cash-rounding adjustment from loan payment on {loan_reference}."
+        if loan_reference
+        else "Cash-rounding adjustment from loan payment."
+    )
+    return record_deposit(
+        account,
+        amount,
+        SavingsTransaction.Method.CASH,
+        reference=reference[:60],
+        created_by=created_by,
+        notes=notes,
+    )
+
+
+@transaction.atomic
 def open_account(member, product, opened_by=None, initial_deposit=None, opened_on=None):
     if not product.is_active:
         raise SavingsError("This savings product is not available.")

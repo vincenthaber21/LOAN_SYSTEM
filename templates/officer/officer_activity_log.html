@@ -2,7 +2,7 @@
 {% load lending_tags %}
 {% block title %}Activity log · {{ officer.display_name }}{% endblock %}
 {% block topbar_title %}Officer activity log{% endblock %}
-{% block topbar_context %}Monitor applications, payments, and disbursements handled by this officer.{% endblock %}
+{% block topbar_context %}Monitor applications, pay collection, and disbursements handled by this officer.{% endblock %}
 {% block content %}
 
 <div class="page-heading fade-up">
@@ -32,15 +32,15 @@
     <div class="card-soft metric-card">
       <div class="metric-label">{{ metric.label }}</div>
       <div class="metric-value">{{ metric.value }}</div>
-      <div class="metric-note">{{ metric.note }}</div>
+      <div class="metric-note {% if metric.positive %}positive{% endif %}">{{ metric.note }}</div>
     </div>
   </div>
   {% endfor %}
 </div>
 
-<form class="filter-bar mb-4 fade-up-2" method="get" action="{% url 'officer_activity_log' officer_id=officer.id %}">
+<form class="filter-bar mb-4 fade-up-2" method="get" action="{% url 'officer_activity_log' officer_id=officer.id %}" id="activity-filter-form">
   <div class="row g-2 align-items-end">
-    <div class="col-sm-6 col-lg-4">
+    <div class="col-sm-6 col-lg-3">
       <label class="form-label" for="activity_type">Activity type</label>
       <select class="form-select" id="activity_type" name="type">
         {% for option in activity_type_filters %}
@@ -48,17 +48,33 @@
         {% endfor %}
       </select>
     </div>
+    <div class="col-sm-6 col-lg-3">
+      <label class="form-label" for="activity_period">Period</label>
+      <select class="form-select" id="activity_period" name="period">
+        {% for option in activity_period_filters %}
+        <option value="{{ option.value }}" {% if filters.period == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-6 col-lg-2 activity-custom-range {% if filters.period != 'custom' %}d-none{% endif %}">
+      <label class="form-label" for="activity_from">From</label>
+      <input class="form-control" type="date" id="activity_from" name="from" value="{{ filters.date_from }}" {% if filters.period != 'custom' %}disabled{% endif %}>
+    </div>
+    <div class="col-sm-6 col-lg-2 activity-custom-range {% if filters.period != 'custom' %}d-none{% endif %}">
+      <label class="form-label" for="activity_to">To</label>
+      <input class="form-control" type="date" id="activity_to" name="to" value="{{ filters.date_to }}" {% if filters.period != 'custom' %}disabled{% endif %}>
+    </div>
     <div class="col-sm-6 col-lg-2"><button class="btn btn-primary w-100" type="submit">Filter</button></div>
   </div>
 </form>
 
-<div class="card-soft fade-up-3">
+<div class="card-soft fade-up-3{% if show_collection_section %} mb-4{% endif %}">
   <div class="card-header d-flex justify-content-between align-items-center">
     <div>
-      <h2 class="card-title">Activity history</h2>
-      <span class="text-muted small">Every application decision, payment, and disbursement linked to this officer.</span>
+      <h2 class="card-title">{% if filters.type == "payment" %}Pay collection{% elif filters.type == "disbursement" %}Disbursements{% elif filters.type == "application" %}Applications{% else %}Activity history{% endif %}</h2>
+      <span class="text-muted small">{{ date_range_label }} · {% if filters.type == "payment" %}loan payments recorded by this officer.{% elif filters.type == "disbursement" %}loans released by this officer.{% else %}applications and disbursements linked to this officer.{% endif %}</span>
     </div>
-    <span class="badge status-neutral">{{ page_obj.paginator.count }} event{{ page_obj.paginator.count|pluralize }}</span>
+    <span class="badge {% if filters.type == 'payment' %}status-paid{% else %}status-neutral{% endif %}">{% if filters.type == "payment" %}{{ collection_total|peso }} · {% endif %}{{ page_obj.paginator.count }} event{{ page_obj.paginator.count|pluralize }}</span>
   </div>
   {% if activity %}
   <div class="table-responsive">
@@ -102,6 +118,15 @@
         </tr>
         {% endfor %}
       </tbody>
+      {% if filters.type == "payment" %}
+      <tfoot>
+        <tr class="fw-semibold">
+          <td colspan="5">Total collected</td>
+          <td>{{ collection_total|peso }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+      {% endif %}
     </table>
   </div>
   {% if is_paginated %}
@@ -121,9 +146,43 @@
   {% endif %}
   {% else %}
   <div class="card-body">
+    {% if filters.period != "all" %}
+    {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity in this period" description="Try a different day, week, month, or custom date range." %}
+    {% else %}
     {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity recorded yet" description="Applications, payments, and disbursements handled by this officer will appear here." %}
+    {% endif %}
   </div>
   {% endif %}
 </div>
 
+{% if show_collection_section %}
+{% include "includes/activity_pay_collection.html" with staff_label="officer" %}
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var form = document.getElementById("activity-filter-form");
+  var period = document.getElementById("activity_period");
+  if (!form || !period) return;
+
+  function syncCustomRange() {
+    var isCustom = period.value === "custom";
+    form.querySelectorAll(".activity-custom-range").forEach(function (el) {
+      el.classList.toggle("d-none", !isCustom);
+    });
+    form.querySelectorAll(".activity-custom-range input").forEach(function (input) {
+      input.disabled = !isCustom;
+    });
+  }
+
+  period.addEventListener("change", function () {
+    syncCustomRange();
+    if (period.value !== "custom") form.submit();
+  });
+  syncCustomRange();
+})();
+</script>
 {% endblock %}

@@ -71,7 +71,13 @@
     <div class="receipt-row"><dt>Loan reference</dt><dd>{{ loan.reference }}</dd></div>
     <div class="receipt-row"><dt>Loan product</dt><dd>{{ loan.product_name }}</dd></div>
     <div class="receipt-row"><dt>Payment method</dt><dd>{{ payment.get_method_display }}</dd></div>
-    <div class="receipt-row"><dt>Applied to</dt><dd>{% if payment.installment %}Installment #{{ payment.installment.installment_number }} · due {{ payment.installment.due_date }}{% else %}Oldest unpaid installments first{% endif %}</dd></div>
+    <div class="receipt-row"><dt>Applied to loan</dt><dd>{{ payment.loan_amount_applied|peso }} · principal reduction</dd></div>
+    {% if payment.savings_adjustment %}
+    <div class="receipt-row"><dt>To member savings</dt><dd>{{ payment.savings_adjustment|peso }} · cash-rounding adjustment</dd></div>
+    {% endif %}
+    {% if payment.mutual_aid_contribution %}
+    <div class="receipt-row"><dt>To mutual aid</dt><dd>{{ payment.mutual_aid_contribution|peso }} · daily KAP contribution</dd></div>
+    {% endif %}
     <div class="receipt-row"><dt>Recorded by</dt><dd>{{ payment.recorded_by.display_name|default:"Borrower self-service" }}</dd></div>
     <div class="receipt-row"><dt>Outstanding balance before</dt><dd>{{ balance_before|peso }}</dd></div>
     <div class="receipt-row"><dt>Outstanding balance after</dt><dd>{{ balance_after|peso }}</dd></div>

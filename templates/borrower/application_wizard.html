@@ -121,7 +121,7 @@
     {% if credit_score_blocked %}
       {% include "includes/empty_state.html" with icon="bi-shield-exclamation" title="Loan applications unavailable" description=credit_score_block_message action_url=support_url action_label="Contact support" %}
     {% else %}
-      {% include "includes/empty_state.html" with icon="bi-inbox" title="No loan products available right now" description="You may already have an open application or active loan. Check your overview or contact support if you need help." action_url=support_url action_label="Contact support" %}
+      {% include "includes/empty_state.html" with icon="bi-inbox" title="No loan products available right now" description="You may already have an open application or an active loan under 70% paid down. The same product becomes available again once paid down reaches 70%+." action_url=support_url action_label="Contact support" %}
     {% endif %}
   </div>
 </div>

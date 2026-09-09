@@ -622,8 +622,8 @@ class DisbursementAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
 
 @admin.register(Features)
 class FeaturesAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
-    list_display = ("store_name", "tagline")
-    fields = ("store_name", "tagline", "logo")
+    list_display = ("store_name", "tagline", "daily_mutual_aid_amount")
+    fields = ("store_name", "tagline", "logo", "daily_mutual_aid_amount")
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
@@ -659,7 +659,16 @@ class InstallmentAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
-    list_display = ("__str__", "loan", "amount", "method", "payment_date", "recorded_by")
+    list_display = (
+        "__str__",
+        "loan",
+        "amount",
+        "savings_adjustment",
+        "mutual_aid_contribution",
+        "method",
+        "payment_date",
+        "recorded_by",
+    )
     list_filter = ("method", "payment_date")
     search_fields = (
         "loan__application__borrower__full_name",

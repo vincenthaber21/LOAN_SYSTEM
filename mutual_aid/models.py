@@ -255,7 +255,7 @@ class MutualAidContribution(models.Model):
     )
 
     class Meta:
-        ordering = ["-created_at"]
+        ordering = ["-created_at", "-pk"]
         indexes = [
             models.Index(fields=["membership", "-created_at"]),
         ]

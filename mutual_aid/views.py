@@ -41,7 +41,7 @@ def _membership_ledger(membership):
         contribution_count=Count("id"),
         total_amount=Sum("amount"),
     )
-    last_contribution = contributions.select_related("recorded_by").order_by("-created_at").first()
+    last_contribution = contributions.select_related("recorded_by").order_by("-created_at", "-pk").first()
     return {
         "contribution_count": agg["contribution_count"] or 0,
         "total_amount": agg["total_amount"] or Decimal("0.00"),
@@ -228,7 +228,7 @@ def officer_mutual_aid_membership_detail(request, membership_id):
                 messages.error(request, str(exc))
 
     contributions = list(
-        membership.contributions.select_related("recorded_by", "period").order_by("-created_at")[:50]
+        membership.contributions.select_related("recorded_by", "period").order_by("-created_at", "-pk")[:50]
     )
     claims = membership.claims.select_related("reviewed_by", "disbursed_by").order_by("-created_at")[:20]
     ledger = _membership_ledger(membership)
@@ -403,7 +403,7 @@ def mutual_aid_dashboard(request):
     recent_contributions = (
         MutualAidContribution.objects.filter(membership__member=request.user)
         .select_related("membership", "membership__plan", "period")
-        .order_by("-created_at")[:8]
+        .order_by("-created_at", "-pk")[:8]
     )
     recent_claims = (
         MutualAidClaim.objects.filter(membership__member=request.user)
@@ -424,7 +424,7 @@ def mutual_aid_dashboard(request):
 @role_required("member")
 def mutual_aid_membership_detail(request, membership_id):
     membership = get_object_or_404(_member_memberships(request.user), pk=membership_id)
-    contributions = membership.contributions.select_related("period").order_by("-created_at")[:50]
+    contributions = membership.contributions.select_related("period").order_by("-created_at", "-pk")[:50]
     claims = membership.claims.order_by("-created_at")[:20]
     ledger = _membership_ledger(membership)
     return render(request, "mutual_aid/membership_detail.html", {

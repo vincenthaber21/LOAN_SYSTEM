@@ -113,8 +113,9 @@
             <tr>
               <th>#</th>
               <th>{% if view_mode == "day" %}Due date{% else %}Period{% endif %}</th>
-              <th>Payment</th>
-              <th>Exact</th>
+              <th>Collect</th>
+              <th>Loan exact</th>
+              <th>Mutual aid</th>
               <th>Principal</th>
               <th>Interest</th>
               <th>Status</th>
@@ -139,6 +140,7 @@
               </td>
               <td class="fw-semibold">{{ payment.adjusted_amount|peso }}</td>
               <td class="text-muted">{{ payment.amount|peso }}</td>
+              <td class="text-muted">{{ payment.mutual_aid|peso }}</td>
               <td>{{ payment.principal|peso }}</td>
               <td>{{ payment.interest|peso }}</td>
               <td>
@@ -188,6 +190,9 @@
         <div class="detail-label">Payment per day</div>
         <div class="detail-value mb-1">{{ loan.adjusted_daily_payment|peso }}</div>
         <div class="text-muted small mb-3">Exact {{ loan.daily_payment|peso }}</div>
+        <div class="detail-label">Mutual aid / day</div>
+        <div class="detail-value mb-1">{{ daily_mutual_aid_amount|peso }}</div>
+        <div class="text-muted small mb-3">Added to every working-day remittance</div>
         <div class="detail-label">Payment per month</div>
         <div class="detail-value mb-1">{{ loan.adjusted_monthly_payment|peso }}</div>
         <div class="text-muted small mb-3">Exact {{ loan.monthly_payment|peso }}</div>

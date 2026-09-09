@@ -51,6 +51,15 @@
 </div>
 
 {% else %}
+{% if not disbursement_allowed_today %}
+<div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="status">
+  <i class="bi bi-calendar-x mt-1"></i>
+  <div>
+    <strong>Friday release only.</strong>
+    {{ disbursement_day_message }}
+  </div>
+</div>
+{% endif %}
 <div class="row g-4">
   <div class="col-lg-7">
     <div class="card-soft">
@@ -65,12 +74,12 @@
           </div>
           <div class="mb-3">
             <label class="form-label" for="disbursed_date">Disbursement date</label>
-            <input class="form-control" id="disbursed_date" name="disbursed_date" type="date" value="{{ form_data.disbursed_date|default:default_disbursed_date }}">
-            <div class="form-text">Interest and the first payment due date are calculated from this date.</div>
+            <input class="form-control" id="disbursed_date" name="disbursed_date" type="date" value="{{ form_data.disbursed_date|default:default_disbursed_date }}" {% if not disbursement_allowed_today %}readonly{% endif %}>
+            <div class="form-text">Must be a Friday. Interest and the first payment due date are calculated from this date.</div>
           </div>
           <div class="mb-3">
             <label class="form-label" for="method">Method</label>
-            <select class="form-select" id="method" name="method">
+            <select class="form-select" id="method" name="method" {% if not disbursement_allowed_today %}disabled{% endif %}>
               <option{% if not form_data.method or form_data.method == "Bank transfer" %} selected{% endif %}>Bank transfer</option>
               <option{% if form_data.method == "GCash" %} selected{% endif %}>GCash</option>
               <option{% if form_data.method == "Cash" %} selected{% endif %}>Cash</option>
@@ -78,7 +87,7 @@
           </div>
           <div class="mb-4">
             <label class="form-label" for="reference">Reference</label>
-            <input class="form-control" id="reference" name="reference" placeholder="e.g. LUMEN-240617" value="{{ form_data.reference|default:'' }}">
+            <input class="form-control" id="reference" name="reference" placeholder="e.g. LUMEN-240617" value="{{ form_data.reference|default:'' }}" {% if not disbursement_allowed_today %}readonly{% endif %}>
           </div>
           <hr class="my-4">
           <h3 class="h6 mb-1">Automatic deductions</h3>
@@ -109,7 +118,9 @@
           <input type="hidden" id="other_fees_description" name="other_fees_description" value="{{ standard_deductions.other_fees_description }}">
           <div class="d-flex justify-content-between">
             <a class="btn btn-outline-secondary" href="{% url 'disbursements' %}">Cancel</a>
-            <button class="btn btn-primary" type="submit" id="submitDisburseBtn">Confirm disbursement <i class="bi bi-arrow-right ms-1"></i></button>
+            <button class="btn btn-primary" type="submit" id="submitDisburseBtn" {% if not disbursement_allowed_today %}disabled{% endif %}>
+              {% if disbursement_allowed_today %}Confirm disbursement <i class="bi bi-arrow-right ms-1"></i>{% else %}Available on Friday{% endif %}
+            </button>
           </div>
         </form>
       </div>
@@ -220,6 +231,18 @@
       if (!disburseForm.checkValidity()) {
         disburseForm.reportValidity();
         return;
+      }
+
+      if (disbursedDateInput && disbursedDateInput.value) {
+        var parts = disbursedDateInput.value.split('-').map(Number);
+        var selected = new Date(parts[0], parts[1] - 1, parts[2]);
+        // JS: Sunday=0 … Friday=5
+        if (selected.getDay() !== 5) {
+          disbursedDateInput.setCustomValidity('Disbursement date must be a Friday.');
+          disbursedDateInput.reportValidity();
+          disbursedDateInput.setCustomValidity('');
+          return;
+        }
       }
 
       document.getElementById('confirmDisburseAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
