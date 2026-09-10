@@ -53,9 +53,9 @@
 {% else %}
 {% if not disbursement_allowed_today %}
 <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="status">
-  <i class="bi bi-calendar-x mt-1"></i>
+  <i class="bi {% if disbursement_is_release_day %}bi-clock{% else %}bi-calendar-x{% endif %} mt-1"></i>
   <div>
-    <strong>Friday release only.</strong>
+    <strong>{% if disbursement_is_release_day %}{{ disbursement_day_label }} release starts at {{ disbursement_start_time_label }}.{% else %}{{ disbursement_day_label }} release only.{% endif %}</strong>
     {{ disbursement_day_message }}
   </div>
 </div>
@@ -75,7 +75,7 @@
           <div class="mb-3">
             <label class="form-label" for="disbursed_date">Disbursement date</label>
             <input class="form-control" id="disbursed_date" name="disbursed_date" type="date" value="{{ form_data.disbursed_date|default:default_disbursed_date }}" {% if not disbursement_allowed_today %}readonly{% endif %}>
-            <div class="form-text">Must be a Friday. Interest and the first payment due date are calculated from this date.</div>
+            <div class="form-text">{% if disbursement_condition_enabled %}Must be a {{ disbursement_day_label }}, and releases unlock at {{ disbursement_start_time_label }}. {% endif %}Interest and the first payment due date are calculated from this date.</div>
           </div>
           <div class="mb-3">
             <label class="form-label" for="method">Method</label>
@@ -119,7 +119,7 @@
           <div class="d-flex justify-content-between">
             <a class="btn btn-outline-secondary" href="{% url 'disbursements' %}">Cancel</a>
             <button class="btn btn-primary" type="submit" id="submitDisburseBtn" {% if not disbursement_allowed_today %}disabled{% endif %}>
-              {% if disbursement_allowed_today %}Confirm disbursement <i class="bi bi-arrow-right ms-1"></i>{% else %}Available on Friday{% endif %}
+              {% if disbursement_allowed_today %}Confirm disbursement <i class="bi bi-arrow-right ms-1"></i>{% elif disbursement_is_release_day %}Available at {{ disbursement_start_time_label }}{% else %}Available on {{ disbursement_day_label }}{% endif %}
             </button>
           </div>
         </form>
@@ -233,12 +233,13 @@
         return;
       }
 
-      if (disbursedDateInput && disbursedDateInput.value) {
+      if (disbursedDateInput && disbursedDateInput.value && {{ disbursement_condition_enabled|yesno:"true,false" }}) {
         var parts = disbursedDateInput.value.split('-').map(Number);
         var selected = new Date(parts[0], parts[1] - 1, parts[2]);
-        // JS: Sunday=0 … Friday=5
-        if (selected.getDay() !== 5) {
-          disbursedDateInput.setCustomValidity('Disbursement date must be a Friday.');
+        // Python weekday Mon=0…Sun=6 → JS getDay() Sun=0…Sat=6
+        var requiredJsDay = ({{ disbursement_weekday|default:4 }} + 1) % 7;
+        if (selected.getDay() !== requiredJsDay) {
+          disbursedDateInput.setCustomValidity('Disbursement date must be a {{ disbursement_day_label|default:"Friday"|escapejs }}.');
           disbursedDateInput.reportValidity();
           disbursedDateInput.setCustomValidity('');
           return;

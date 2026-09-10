@@ -1,10 +1,10 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Installment, Loan, LoanApplication, Notification, User
+from .models import DisbursementSetting, Installment, Loan, LoanApplication, Notification, User
 
 INITIAL_CREDIT_SCORE = Decimal("100.000")
 LATE_PAYMENT_CREDIT_PENALTY = Decimal("0.1")
@@ -12,8 +12,41 @@ CREDIT_SCORE_PRECISION = Decimal("0.1")
 MIN_CREDIT_SCORE_FOR_LOANS = Decimal("50.0")
 BALANCE_EXTENSION_RATE = Decimal("5.00")
 MAX_BALANCE_EXTENSION_MONTHS = 3
-# Loan fund releases are only allowed on Fridays (Monday=0 … Sunday=6).
-DISBURSEMENT_WEEKDAY = 4
+# Fallback when DisbursementSetting is unavailable (Monday=0 … Sunday=6).
+DISBURSEMENT_WEEKDAY = DisbursementSetting.Weekday.FRIDAY
+
+
+def get_disbursement_setting():
+    """Return the singleton disbursement weekday / time / condition settings."""
+    return DisbursementSetting.load()
+
+
+def get_disbursement_weekday():
+    """Configured release weekday (0=Monday … 6=Sunday)."""
+    return get_disbursement_setting().disbursement_weekday
+
+
+def get_disbursement_start_time():
+    """Configured local time when officers may start releasing funds."""
+    return get_disbursement_setting().disbursement_start_time or time(8, 0)
+
+
+def is_disbursement_condition_enabled():
+    """True when the weekday/time disbursement rule is active."""
+    return get_disbursement_setting().condition_enabled
+
+
+def disbursement_weekday_label(weekday=None):
+    """Display name for a weekday number (defaults to the configured day)."""
+    weekday = get_disbursement_weekday() if weekday is None else weekday
+    return dict(DisbursementSetting.Weekday.choices).get(weekday, "Friday")
+
+
+def disbursement_start_time_label(value=None):
+    """Friendly clock time, e.g. '8:00 AM'."""
+    value = get_disbursement_start_time() if value is None else value
+    formatted = value.strftime("%I:%M %p")
+    return formatted.lstrip("0") if formatted.startswith("0") else formatted
 
 
 def adjust_payment(amount):
@@ -125,13 +158,16 @@ def credit_payment_adjustment_to_savings(loan, surplus, *, payment=None, recorde
         created_by=recorded_by,
     )
 
-def application_type_for_member(member):
+def application_type_for_member(member, exclude_pk=None):
     """New for first-time applicants; Renew when the member already has loan history."""
     if not member:
         return LoanApplication.ApplicationType.NEW
-    has_loan = Loan.objects.filter(application__borrower=member).exists()
-    has_prior_application = LoanApplication.objects.filter(borrower=member).exists()
-    if has_loan or has_prior_application:
+    loans = Loan.objects.filter(application__borrower=member)
+    prior_applications = LoanApplication.objects.filter(borrower=member)
+    if exclude_pk:
+        loans = loans.exclude(application_id=exclude_pk)
+        prior_applications = prior_applications.exclude(pk=exclude_pk)
+    if loans.exists() or prior_applications.exists():
         return LoanApplication.ApplicationType.RENEW
     return LoanApplication.ApplicationType.NEW
 
@@ -806,12 +842,17 @@ def schedule_biweek_buckets(installments):
 def application_schedule_view_mode(loan):
     """Map the application's Pay frequency to the schedule Display view."""
     frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
+    return payment_frequency_to_view_mode(frequency)
+
+
+def payment_frequency_to_view_mode(frequency):
+    """Map a payment-frequency choice to the schedule Display view."""
     return {
         "daily": "day",
         "weekly": "week",
         "biweekly": "biweek",
         "monthly": "month",
-    }.get(frequency, "month")
+    }.get(str(frequency or "").lower(), "month")
 
 
 def view_mode_to_pay_frequency(view_mode):
@@ -998,6 +1039,67 @@ def original_schedule_display_rows(loan, view_mode="month", month=None):
     return display
 
 
+def application_payment_preview(application, view_mode=None, month=None, start_date=None):
+    """In-memory repayment schedule preview for an application (pre-approval / pre-disbursement).
+
+    Uses requested amount, product (or final) rate/term, and assumed release date.
+    Dates shift once the real disbursement date is recorded.
+    """
+    principal = application.amount_requested
+    if principal is None:
+        raise ValueError("Application has no requested amount.")
+    rate = application.final_interest_rate
+    if rate is None and application.loan_product_id:
+        rate = application.loan_product.interest_rate
+    if rate is None:
+        raise ValueError("Application has no interest rate (assign a loan product).")
+    term = application.final_term_months or application.term_months
+    if not term:
+        raise ValueError("Application has no term months.")
+    assumed_release = start_date or next_disbursement_weekday()
+    amounts = calculate_flat_loan_amounts(principal, rate, term)
+    installments = build_virtual_installments(principal, rate, term, assumed_release)
+    default_view = payment_frequency_to_view_mode(application.payment_frequency)
+    display = _schedule_display_from_installments(
+        installments,
+        term,
+        view_mode=view_mode or default_view,
+        month=month,
+    )
+    per_day = amounts["per_day"]
+    per_week = (per_day * Decimal(WORKING_DAYS_PER_WEEK)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    per_biweek = (per_day * Decimal(WORKING_DAYS_PER_BIWEEK)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    per_month = amounts["per_month"]
+    interest_start = _interest_start_monday(assumed_release)
+    display.update({
+        "preview_terms": {
+            "principal": amounts["principal"],
+            "interest_rate": rate,
+            "term_months": int(term),
+            "periods": amounts["periods"],
+            "total_interest": amounts["total_interest"],
+            "total_payable": amounts["total_payable"],
+            "adjusted_total_payable": adjust_payment(amounts["total_payable"]),
+            "per_day": per_day,
+            "adjusted_per_day": adjust_payment(per_day),
+            "per_week": per_week,
+            "adjusted_per_week": adjust_payment(per_week),
+            "per_biweek": per_biweek,
+            "adjusted_per_biweek": adjust_payment(per_biweek),
+            "per_month": per_month,
+            "adjusted_per_month": adjust_payment(per_month),
+            "assumed_release_date": assumed_release,
+            "interest_start_date": interest_start,
+            "payment_frequency": application.payment_frequency,
+            "payment_frequency_label": application.get_payment_frequency_display(),
+            "product_name": application.product_name,
+        },
+        "application_pay_frequency": application.payment_frequency,
+        "default_view_mode": default_view,
+    })
+    return display
+
+
 def _schedule_display_from_installments(installments, term_months, view_mode="month", month=None):
     """Build schedule rows for day, week, biweek, or month display from installment rows."""
     aliases = {
@@ -1075,41 +1177,61 @@ def _kap_mutual_aid_contribution_amount():
 
 
 class DisbursementDayError(ValueError):
-    """Raised when a loan release is attempted outside the Friday-only window."""
+    """Raised when a loan release is attempted outside the configured weekday/time window."""
 
 
 def is_disbursement_weekday(value=None):
-    """True when the date is a Friday (loan disbursement day)."""
+    """True when the date matches the configured disbursement weekday."""
     value = value or timezone.localdate()
-    return value.weekday() == DISBURSEMENT_WEEKDAY
+    return value.weekday() == get_disbursement_weekday()
+
+
+def is_disbursement_time_open(*, now=None):
+    """True when the current local time is at or after the configured start time."""
+    now = now or timezone.localtime()
+    return now.time() >= get_disbursement_start_time()
 
 
 def next_disbursement_weekday(from_date=None):
-    """Return the next Friday on or after `from_date` (today when omitted)."""
+    """Return the next configured release day on or after `from_date` (today when omitted)."""
     from_date = from_date or timezone.localdate()
-    days_ahead = (DISBURSEMENT_WEEKDAY - from_date.weekday()) % 7
+    target = get_disbursement_weekday()
+    days_ahead = (target - from_date.weekday()) % 7
     return from_date + timedelta(days=days_ahead)
 
 
-def disbursement_day_error_message(*, today=None, disbursed_date=None):
+def disbursement_day_error_message(*, today=None, disbursed_date=None, now=None):
     """Human-readable reason why a disbursement cannot proceed."""
+    if not is_disbursement_condition_enabled():
+        return ""
+    now = now or timezone.localtime()
     today = today or timezone.localdate()
-    next_friday = next_disbursement_weekday(today)
+    day_label = disbursement_weekday_label()
+    start_label = disbursement_start_time_label()
+    next_day = next_disbursement_weekday(today)
     if not is_disbursement_weekday(today):
         return (
-            "Loan disbursements are only allowed on Fridays. "
-            f"Next release day is {next_friday.strftime('%A, %b %d, %Y')}."
+            f"Loan disbursements are only allowed on {day_label}s from {start_label}. "
+            f"Next release day is {next_day.strftime('%A, %b %d, %Y')}."
+        )
+    if not is_disbursement_time_open(now=now):
+        return (
+            f"Loan disbursements start at {start_label} on {day_label}s. "
+            f"You can release funds after {start_label}."
         )
     if disbursed_date is not None and not is_disbursement_weekday(disbursed_date):
-        return "Disbursement date must be a Friday."
+        return f"Disbursement date must be a {day_label}."
     return ""
 
 
-def ensure_disbursement_allowed(disbursed_date=None, *, today=None):
-    """Raise DisbursementDayError unless today and the release date are Fridays."""
+def ensure_disbursement_allowed(disbursed_date=None, *, today=None, now=None):
+    """Raise DisbursementDayError unless the weekday/time condition allows the release."""
+    if not is_disbursement_condition_enabled():
+        return
+    now = now or timezone.localtime()
     today = today or timezone.localdate()
     release_date = disbursed_date or today
-    message = disbursement_day_error_message(today=today, disbursed_date=release_date)
+    message = disbursement_day_error_message(today=today, disbursed_date=release_date, now=now)
     if message:
         raise DisbursementDayError(message)
 

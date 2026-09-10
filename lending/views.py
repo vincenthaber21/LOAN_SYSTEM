@@ -17,7 +17,7 @@ from .cashflow_reports import cashflow_report_context, resolve_staff_user
 from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .models import Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, Manager, Notification, Payment, User
-from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, activity_range_label, adjust_payment, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_officer_activity_log, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
+from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
 
 
 def _parse_disbursed_date(value):
@@ -734,20 +734,12 @@ def officer_dashboard(request):
     ]
 
     total_outstanding = loans_as_of.aggregate(value=Sum("outstanding_balance"))["value"] or Decimal("0.00")
-    total_adjusted_outstanding = sum(
-        (adjust_payment(balance) for balance in loans_as_of.values_list("outstanding_balance", flat=True)),
-        Decimal("0.00"),
-    )
     dashboard_metrics.insert(
         2,
         {
             "label": "Outstanding",
-            "value": f"₱{total_adjusted_outstanding:,.0f}",
-            "note": (
-                f"Cash-adjusted · Exact ₱{total_outstanding:,.0f}"
-                if total_outstanding != total_adjusted_outstanding
-                else date_note
-            ),
+            "value": f"₱{total_outstanding:,.2f}",
+            "note": date_note,
             "positive": True,
         },
     )
@@ -770,7 +762,6 @@ def officer_dashboard(request):
         "total_loans": loans_as_of.count(),
         "total_disbursed": total_disbursed,
         "total_outstanding": total_outstanding,
-        "total_adjusted_outstanding": total_adjusted_outstanding,
         "pending_applications": pending_count,
         "overdue_loans": overdue_loans,
         "portfolio_at_risk": Decimal("7.4"),
@@ -797,7 +788,7 @@ def officer_dashboard(request):
 @login_required
 @role_required("officer")
 def applications(request):
-    qs = LoanApplication.objects.select_related("borrower", "loan_product")
+    qs = LoanApplication.objects.select_related("borrower", "loan_product").prefetch_related("loan")
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "")
     loan_type = request.GET.get("loan_type", "")
@@ -845,24 +836,77 @@ def application_review(request, application_id):
             messages.success(request, "Application marked as rejected.")
             return redirect("application_review", application_id)
     else:
-        form = ReviewForm(instance=application, initial={"final_interest_rate": application.loan_product.interest_rate, "final_term_months": application.term_months})
+        product_rate = application.loan_product.interest_rate if application.loan_product_id else None
+        form = ReviewForm(
+            instance=application,
+            initial={
+                "final_interest_rate": product_rate,
+                "final_term_months": application.term_months,
+            },
+        )
     credit_summary = get_borrower_credit_summary(application.borrower, exclude_application=application)
+    schedule_preview = []
+    schedule_preview_terms = None
+    schedule_view_mode = request.GET.get("view") or payment_frequency_to_view_mode(application.payment_frequency)
+    schedule_month_options = []
+    schedule_selected_month = ""
+    schedule_payment_count = 0
+    schedule_preview_ready = False
+    schedule_preview_error = ""
+    preview_mutual_aid = daily_mutual_aid_amount()
+    try:
+        preview = application_payment_preview(
+            application,
+            view_mode=request.GET.get("view"),
+            month=request.GET.get("month", ""),
+        )
+        schedule_preview = preview["schedule"]
+        schedule_preview_terms = preview["preview_terms"]
+        schedule_view_mode = preview["view_mode"]
+        schedule_month_options = preview["month_options"]
+        schedule_selected_month = preview["selected_month"]
+        schedule_payment_count = preview["payment_count"]
+        preview_mutual_aid = preview.get("daily_mutual_aid_amount") or preview_mutual_aid
+        schedule_preview_ready = True
+    except Exception as exc:
+        schedule_preview_error = str(exc) or "Could not build a payment preview for this application."
+
     return render(request, "officer/application_review.html", {
         "application": application,
         "form": form,
         "credit_summary": credit_summary,
         "documents": application.documents.all(),
         "applicant_snapshot": [
+            {"label": "Loan product", "value": application.product_name},
+            {
+                "label": "Product type",
+                "value": (
+                    application.loan_product.get_loan_type_display()
+                    if application.loan_product_id
+                    else "—"
+                ),
+            },
+            {"label": "Amount requested", "value": f"₱{application.amount_requested:,.2f}"},
+            {"label": "Chosen to pay", "value": application.get_payment_frequency_display()},
+            {"label": "Requested term", "value": f"{application.term_months} months"},
             {"label": "Date of application", "value": application.submitted_at},
             {"label": "Email", "value": application.borrower.email},
             {"label": "Phone", "value": application.borrower_tel_mobile or application.borrower.phone or "Not provided"},
             {"label": "Monthly income", "value": f"₱{application.borrower.monthly_income:,.0f}" if application.borrower.monthly_income else "Not provided"},
             {"label": "Credit score", "value": format_credit_score(application.borrower.credit_score)},
             {"label": "Employment", "value": application.borrower_occupation or application.borrower.employment_status or "Not provided"},
-            {"label": "Requested term", "value": f"{application.term_months} months"},
-            {"label": "Payment frequency", "value": application.get_payment_frequency_display()},
         ],
         "review_notes": [{"author": application.reviewed_by.display_name(), "created_at": application.decision_date, "body": application.review_notes}] if application.review_notes and application.reviewed_by else [],
+        "schedule_preview": schedule_preview,
+        "schedule_preview_terms": schedule_preview_terms,
+        "schedule_preview_ready": schedule_preview_ready,
+        "schedule_preview_error": schedule_preview_error,
+        "schedule_view_mode": schedule_view_mode,
+        "schedule_month_options": schedule_month_options,
+        "schedule_selected_month": schedule_selected_month,
+        "schedule_payment_count": schedule_payment_count,
+        "daily_mutual_aid_amount": preview_mutual_aid,
+        "application_pay_frequency": application.payment_frequency,
     })
 
 
@@ -899,15 +943,38 @@ def application_delete(request, application_id):
 @role_required("officer")
 def officer_available_products(request):
     borrower_id = request.GET.get("borrower")
+    exclude_pk = request.GET.get("exclude_application") or None
+    if exclude_pk:
+        try:
+            exclude_pk = int(exclude_pk)
+        except (TypeError, ValueError):
+            exclude_pk = None
+    include_product = None
+    editing_application = None
+    if exclude_pk:
+        editing_application = LoanApplication.objects.filter(pk=exclude_pk).select_related("loan_product").first()
+        if editing_application:
+            include_product = editing_application.loan_product
     borrower = User.member_accounts().filter(pk=borrower_id, is_active=True).first()
+    if not borrower and borrower_id and editing_application and str(editing_application.borrower_id) == str(borrower_id):
+        borrower = editing_application.borrower
     borrower_inactive = bool(borrower_id) and not borrower
     borrower_has_active_loan = bool(borrower and borrower.has_active_loan)
-    credit_score_blocked = bool(borrower and credit_score_blocks_loans(borrower))
-    blocked_product_count = len(unavailable_product_ids_for_borrower(borrower)) if borrower else 0
-    if borrower_inactive or credit_score_blocked:
+    credit_score_blocked = bool(borrower and credit_score_blocks_loans(borrower) and not exclude_pk)
+    blocked_product_count = (
+        len(unavailable_product_ids_for_borrower(borrower, exclude_application_pk=exclude_pk))
+        if borrower
+        else 0
+    )
+    if borrower_inactive or (credit_score_blocked and not exclude_pk):
         products = LoanProduct.objects.none()
     else:
-        products = available_loan_products_for_borrower(borrower)
+        products = available_loan_products_for_borrower(
+            borrower,
+            exclude_application_pk=exclude_pk,
+            include_product=include_product,
+            ignore_credit_block=bool(exclude_pk),
+        )
     return JsonResponse({
         "borrower_inactive": borrower_inactive,
         "borrower_has_active_loan": borrower_has_active_loan,
@@ -930,8 +997,11 @@ def _split_member_name(member):
     """Best-effort surname / first / middle from stored member name fields."""
     first = (member.first_name or "").strip()
     last = (member.last_name or "").strip()
+    stored_middle = (getattr(member, "middle_initial", None) or "").strip()
     full = (member.full_name or member.get_full_name() or "").strip()
     if first or last:
+        if stored_middle:
+            return {"surname": last, "first_name": first, "middle_name": stored_middle}
         parts = full.split() if full else []
         middle = ""
         if parts and first and parts[0].lower() == first.lower() and last:
@@ -1070,22 +1140,7 @@ def officer_apply_loan(request):
                 application = form.save(commit=False)
                 application.status = LoanApplication.Status.SUBMITTED
                 application.save()
-                reference_formset.instance = application
-                references = reference_formset.save(commit=False)
-                for index, reference in enumerate(references, start=1):
-                    if not reference.name:
-                        continue
-                    reference.application = application
-                    if not reference.sort_order:
-                        reference.sort_order = index
-                    reference.save()
-                for doc_form in document_forms:
-                    if not request.FILES.get(f"{doc_form.prefix}-file"):
-                        continue
-                    if doc_form.is_valid() and doc_form.cleaned_data.get("file"):
-                        doc = doc_form.save(commit=False)
-                        doc.application = application
-                        doc.save()
+                _persist_application_related(application, reference_formset, document_forms, request)
                 messages.success(request, f"Application {application.reference} created for {application.borrower_name}.")
                 return redirect("application_review", application_id=application.pk)
     else:
@@ -1104,6 +1159,91 @@ def officer_apply_loan(request):
         "reference_formset": reference_formset,
         "document_forms": document_forms,
         "products": products,
+        "is_edit": False,
+    })
+
+
+def _persist_application_related(application, reference_formset, document_forms, request):
+    reference_formset.instance = application
+    references = reference_formset.save(commit=False)
+    for index, reference in enumerate(references, start=1):
+        if not reference.name:
+            continue
+        reference.application = application
+        if not reference.sort_order:
+            reference.sort_order = index
+        reference.save()
+    for doc_form in document_forms:
+        if not request.FILES.get(f"{doc_form.prefix}-file"):
+            continue
+        if doc_form.is_valid() and doc_form.cleaned_data.get("file"):
+            doc = doc_form.save(commit=False)
+            doc.application = application
+            doc.save()
+
+
+@login_required
+@role_required("officer")
+def officer_edit_application(request, application_id):
+    application = get_object_or_404(
+        LoanApplication.objects.select_related("borrower", "loan_product").prefetch_related(
+            "character_references", "documents"
+        ),
+        pk=application_id,
+    )
+    if not application.is_editable:
+        messages.error(
+            request,
+            "This application can no longer be edited because a loan has already been released.",
+        )
+        return redirect("application_review", application_id=application.pk)
+
+    document_specs = [
+        ("valid_id", Document.DocType.VALID_ID),
+        ("proof_of_income", Document.DocType.PROOF_OF_INCOME),
+        ("other", Document.DocType.OTHER),
+    ]
+    if request.method == "POST":
+        form = OfficerLoanApplicationForm(request.POST, request.FILES, instance=application)
+        reference_formset = CharacterReferenceFormSet(
+            request.POST, prefix="refs", instance=application
+        )
+        document_forms = [
+            DocumentForm(request.POST, request.FILES, prefix=prefix, initial={"doc_type": doc_type})
+            for prefix, doc_type in document_specs
+        ]
+        if "create_application" not in request.POST:
+            messages.error(request, "Complete the form and confirm to save your changes.")
+        else:
+            document_errors = any(
+                request.FILES.get(f"{prefix}-file") and not doc_form.is_valid()
+                for prefix, doc_form in zip((item[0] for item in document_specs), document_forms)
+            )
+            if form.is_valid() and reference_formset.is_valid() and not document_errors:
+                application = form.save()
+                _persist_application_related(application, reference_formset, document_forms, request)
+                messages.success(request, f"Application {application.reference} was updated.")
+                return redirect("application_review", application_id=application.pk)
+    else:
+        form = OfficerLoanApplicationForm(instance=application)
+        reference_formset = CharacterReferenceFormSet(prefix="refs", instance=application)
+        for index, ref_form in enumerate(reference_formset.forms, start=1):
+            if not ref_form.fields["sort_order"].initial:
+                ref_form.fields["sort_order"].initial = index
+        document_forms = [
+            DocumentForm(prefix=prefix, initial={"doc_type": doc_type})
+            for prefix, doc_type in document_specs
+        ]
+
+    products = form.fields["loan_product"].queryset.order_by("name")
+    return render(request, "officer/apply_loan.html", {
+        "form": form,
+        "reference_formset": reference_formset,
+        "document_forms": document_forms,
+        "products": products,
+        "is_edit": True,
+        "application": application,
+        "existing_documents": application.documents.all(),
     })
 
 
@@ -1549,6 +1689,7 @@ def borrower_detail(request, borrower_id):
             {"label": "Borrower ID", "value": borrower.reference},
             {"label": "Username", "value": borrower.username},
             {"label": "Full name", "value": borrower.full_name or "Not provided"},
+            {"label": "Middle initial", "value": borrower.middle_initial or "Not provided"},
             {"label": "Email", "value": borrower.email or "Not provided"},
             {"label": "Phone", "value": borrower.phone or "Not provided"},
             {"label": "Address", "value": borrower.address or "Not provided"},
@@ -1792,16 +1933,26 @@ def officer_make_payment(request, loan_id):
 
 
 def _disbursement_day_context():
+    now = timezone.localtime()
     today = timezone.localdate()
-    allowed = is_disbursement_weekday(today)
-    next_friday = next_disbursement_weekday(today)
+    condition_on = is_disbursement_condition_enabled()
+    day_label = disbursement_weekday_label()
+    start_label = disbursement_start_time_label()
+    next_day = next_disbursement_weekday(today)
+    is_release_day = is_disbursement_weekday(today)
+    allowed = (not condition_on) or (is_release_day and is_disbursement_time_open(now=now))
     return {
         "disbursement_allowed_today": allowed,
-        "disbursement_day_label": "Friday",
-        "next_disbursement_date": next_friday,
-        "next_disbursement_date_label": next_friday.strftime("%A, %b %d, %Y"),
-        "disbursement_day_message": disbursement_day_error_message(today=today) if not allowed else "",
-        "default_disbursed_date": (today if allowed else next_friday).isoformat(),
+        "disbursement_condition_enabled": condition_on,
+        "disbursement_day_label": day_label,
+        "disbursement_weekday": get_disbursement_weekday(),
+        "disbursement_start_time": get_disbursement_start_time(),
+        "disbursement_start_time_label": start_label,
+        "disbursement_is_release_day": is_release_day,
+        "next_disbursement_date": next_day,
+        "next_disbursement_date_label": next_day.strftime("%A, %b %d, %Y"),
+        "disbursement_day_message": disbursement_day_error_message(today=today, now=now) if condition_on and not allowed else "",
+        "default_disbursed_date": (today if is_release_day else next_day).isoformat(),
     }
 
 

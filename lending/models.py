@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import timedelta
+from datetime import time, timedelta
 from uuid import uuid4
 
 from django.contrib.auth.models import AbstractUser, UserManager
@@ -17,6 +17,7 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
     full_name = models.CharField(max_length=160, blank=True)
+    middle_initial = models.CharField(max_length=10, blank=True, help_text="Optional middle initial, e.g. M or M.")
     phone = models.CharField(max_length=30, blank=True)
     address = models.TextField(blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
@@ -468,6 +469,19 @@ class LoanApplication(models.Model):
         return self.status == self.Status.APPROVED and not hasattr(self, "loan")
 
     @property
+    def is_editable(self):
+        """Officers can edit KAP details until a loan has been released."""
+        locked = {
+            self.Status.DISBURSED,
+            self.Status.ACTIVE,
+            self.Status.CLOSED,
+            self.Status.DEFAULTED,
+        }
+        if self.status in locked:
+            return False
+        return not hasattr(self, "loan")
+
+    @property
     def borrower_name(self):
         parts = [self.borrower_surname, self.borrower_first_name, self.borrower_middle_name]
         kap_name = " ".join(p for p in parts if p).strip()
@@ -867,6 +881,67 @@ class Disbursement(Loan):
         proxy = True
         verbose_name = "Disbursement"
         verbose_name_plural = "Disbursements"
+
+
+class DisbursementSetting(models.Model):
+    """Singleton — which weekday/time fund releases are allowed, and whether the rule is on."""
+
+    class Weekday(models.IntegerChoices):
+        MONDAY = 0, "Monday"
+        TUESDAY = 1, "Tuesday"
+        WEDNESDAY = 2, "Wednesday"
+        THURSDAY = 3, "Thursday"
+        FRIDAY = 4, "Friday"
+        SATURDAY = 5, "Saturday"
+        SUNDAY = 6, "Sunday"
+
+    disbursement_weekday = models.PositiveSmallIntegerField(
+        choices=Weekday.choices,
+        default=Weekday.FRIDAY,
+        help_text="Calendar day of the week when loan fund releases are allowed.",
+    )
+    disbursement_start_time = models.TimeField(
+        default=time(8, 0),
+        help_text="Local time when officers may start releasing funds on the selected weekday.",
+    )
+    condition_enabled = models.BooleanField(
+        default=True,
+        help_text="When enabled, officers can only disburse on the selected weekday after "
+        "the start time. When disabled, disbursement is allowed any day.",
+    )
+
+    class Meta:
+        verbose_name = "Disbursement setting"
+        verbose_name_plural = "Disbursement settings"
+
+    def __str__(self):
+        day = self.get_disbursement_weekday_display()
+        state = "enabled" if self.condition_enabled else "disabled"
+        return f"Disburse on {day} from {self.start_time_display()} ({state})"
+
+    def start_time_display(self):
+        value = self.disbursement_start_time or time(8, 0)
+        formatted = value.strftime("%I:%M %p")
+        return formatted.lstrip("0") if formatted.startswith("0") else formatted
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pass
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                "disbursement_weekday": cls.Weekday.FRIDAY,
+                "disbursement_start_time": time(8, 0),
+                "condition_enabled": True,
+            },
+        )
+        return obj
 
 
 class Installment(models.Model):

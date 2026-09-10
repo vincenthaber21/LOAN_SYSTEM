@@ -22,3 +22,6 @@ Web → Reload
 use the update in the github
 git checkout loan_system/settings.py
 git pull origin main
+
+
+python manage.py collectstatic --noinput

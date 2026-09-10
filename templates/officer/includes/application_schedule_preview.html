@@ -1,0 +1,145 @@
+{% load lending_tags %}
+{# Payment preview for application review — full-width, mirrors officer loan schedule. #}
+<div class="card-soft mb-4 w-100" id="payment-preview">
+  <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <h2 class="card-title mb-1">Payment schedule preview</h2>
+      <span class="text-muted small">
+        {% if schedule_preview_terms %}
+        If approved and released on {{ schedule_preview_terms.assumed_release_date|date:"M d, Y" }}
+        · {{ schedule_preview_terms.term_months }}-month term at {{ schedule_preview_terms.interest_rate }}%
+        · chosen pay {{ schedule_preview_terms.payment_frequency_label }}
+        · interest starts {{ schedule_preview_terms.interest_start_date|date:"M d, Y" }}.
+        {% else %}
+        Preview based on this application’s product, amount, term, and pay frequency.
+        {% endif %}
+      </span>
+    </div>
+    <span class="badge status-neutral align-self-start">Preview only</span>
+  </div>
+
+  {% if schedule_preview_ready %}
+  <div class="card-body border-bottom">
+    <form class="filter-bar schedule-filters mb-0" method="get" action="{% url 'application_review' application_id=application.id %}#payment-preview">
+      <div class="schedule-filters-row">
+        <div class="schedule-filter-field">
+          <label class="form-label" for="review_schedule_view">Display</label>
+          <select class="form-select" id="review_schedule_view" name="view" onchange="this.form.submit()">
+            <option value="day" {% if schedule_view_mode == "day" %}selected{% endif %}>Daily</option>
+            <option value="week" {% if schedule_view_mode == "week" %}selected{% endif %}>Weekly</option>
+            <option value="biweek" {% if schedule_view_mode == "biweek" %}selected{% endif %}>Biweekly</option>
+            <option value="month" {% if schedule_view_mode == "month" %}selected{% endif %}>Monthly</option>
+          </select>
+        </div>
+        <div class="schedule-filter-field">
+          <label class="form-label" for="review_schedule_month">Month</label>
+          <select class="form-select" id="review_schedule_month" name="month" onchange="this.form.submit()">
+            <option value="">All months</option>
+            {% for option in schedule_month_options %}
+            <option value="{{ option.value }}" {% if schedule_selected_month == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="schedule-filter-actions">
+          <label class="form-label schedule-filter-spacer" aria-hidden="true">&nbsp;</label>
+          <button class="btn btn-outline-primary" type="submit">Apply</button>
+        </div>
+        <div class="schedule-filter-meta">
+          <span class="schedule-filter-meta-label">Application pay</span>
+          <strong>{{ application.get_payment_frequency_display }}</strong>
+        </div>
+        <div class="schedule-filter-meta">
+          <span class="schedule-filter-meta-label">Product</span>
+          <strong>{{ application.product_name }}</strong>
+        </div>
+      </div>
+    </form>
+  </div>
+  <div class="row g-0">
+    <div class="col-xl-9 col-lg-8">
+      {% if schedule_preview %}
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>{% if schedule_view_mode == "day" %}Due date{% else %}Period{% endif %}</th>
+              <th>Collect</th>
+              <th>Loan exact</th>
+              <th>Mutual aid</th>
+              <th>Principal</th>
+              <th>Interest</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for payment in schedule_preview %}
+            <tr{% if payment.installment_number == 1 %} class="schedule-original-start"{% endif %}>
+              <td class="text-muted">{{ payment.installment_number }}</td>
+              <td>
+                {% if schedule_view_mode == "day" %}
+                <strong>{{ payment.due_date }}</strong>
+                {% if payment.installment_number == 1 %}<span class="badge status-neutral ms-2">Assumed start</span>{% endif %}
+                {% else %}
+                <strong>{{ payment.label }}</strong>
+                {% if payment.installment_number == 1 %}<span class="badge status-neutral ms-2">Assumed start</span>{% endif %}
+                <span class="person-sub d-block">{{ payment.start_date }} – {{ payment.end_date }} · {{ payment.day_count }} working day{{ payment.day_count|pluralize }}</span>
+                {% endif %}
+              </td>
+              <td class="fw-semibold">{{ payment.adjusted_amount|peso }}</td>
+              <td class="text-muted">{{ payment.amount|peso }}</td>
+              <td class="text-muted">{{ payment.mutual_aid|peso }}</td>
+              <td>{{ payment.principal|peso }}</td>
+              <td>{{ payment.interest|peso }}</td>
+              <td><span class="badge status-neutral">Preview</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="p-4">
+        {% include "includes/empty_state.html" with icon="bi-calendar3" title="No rows for this filter" description="Try All months or another Display option." %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="col-xl-3 col-lg-4 border-start">
+      <div class="p-3 p-lg-4">
+        <div class="eyebrow mb-3">If approved</div>
+        <div class="detail-label">Loan product</div>
+        <div class="detail-value mb-3">{{ schedule_preview_terms.product_name }}</div>
+        <div class="detail-label">Principal</div>
+        <div class="detail-value mb-3">{{ schedule_preview_terms.principal|peso }}</div>
+        <div class="detail-label">Flat interest ({{ schedule_preview_terms.interest_rate }}% × {{ schedule_preview_terms.term_months }} mo)</div>
+        <div class="detail-value mb-3">{{ schedule_preview_terms.total_interest|peso }}</div>
+        <div class="detail-label">Term</div>
+        <div class="detail-value mb-3">{{ schedule_preview_terms.term_months }} months · {{ schedule_preview_terms.periods }} working days</div>
+        <div class="detail-label">Chosen to pay</div>
+        <div class="detail-value mb-3">{{ schedule_preview_terms.payment_frequency_label }}</div>
+        <div class="detail-label">Assumed release</div>
+        <div class="detail-value mb-1">{{ schedule_preview_terms.assumed_release_date|date:"M d, Y" }}</div>
+        <div class="text-muted small mb-3">Next configured disbursement day · interest from {{ schedule_preview_terms.interest_start_date|date:"M d, Y" }}</div>
+        <div class="detail-label">Payment per day</div>
+        <div class="detail-value mb-1">{{ schedule_preview_terms.adjusted_per_day|peso }}</div>
+        <div class="text-muted small mb-3">Exact {{ schedule_preview_terms.per_day|peso }}</div>
+        <div class="detail-label">Mutual aid / day</div>
+        <div class="detail-value mb-1">{{ daily_mutual_aid_amount|peso }}</div>
+        <div class="text-muted small mb-3">Added to every working-day remittance</div>
+        <div class="detail-label">Payment per week</div>
+        <div class="detail-value mb-1">{{ schedule_preview_terms.adjusted_per_week|peso }}</div>
+        <div class="text-muted small mb-3">Exact {{ schedule_preview_terms.per_week|peso }}</div>
+        <div class="detail-label">Payment per month</div>
+        <div class="detail-value mb-1">{{ schedule_preview_terms.adjusted_per_month|peso }}</div>
+        <div class="text-muted small mb-3">Exact {{ schedule_preview_terms.per_month|peso }}</div>
+        <div class="detail-label">Total payable</div>
+        <div class="detail-value mb-1">{{ schedule_preview_terms.adjusted_total_payable|peso }}</div>
+        <div class="text-muted small mb-0">Exact {{ schedule_preview_terms.total_payable|peso }} · {{ schedule_payment_count }} row{{ schedule_payment_count|pluralize }} shown</div>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="p-4">
+    {% include "includes/empty_state.html" with icon="bi-calendar3" title="Preview not available" description=schedule_preview_error|default:"Add a loan product, amount, and term on the application to preview the repayment schedule." %}
+  </div>
+  {% endif %}
+</div>

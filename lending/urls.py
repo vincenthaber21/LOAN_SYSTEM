@@ -37,6 +37,7 @@ urlpatterns = [
     path("officer/products/new/", views.add_loan_product_page, name="add_loan_product_page"),
     path("officer/products/<int:product_id>/edit/", views.edit_loan_product, name="edit_loan_product"),
     path("officer/applications/<int:application_id>/review/", views.application_review, name="application_review"),
+    path("officer/applications/<int:application_id>/edit/", views.officer_edit_application, name="officer_edit_application"),
     path("officer/applications/<int:application_id>/pdf/", views.application_pdf, name="application_pdf"),
     path("officer/borrowers/", views.borrowers, name="borrowers"),
     path("officer/members/", views.all_members, name="all_members"),

@@ -83,8 +83,8 @@
       </div>
 
       <div class="d-flex gap-2 align-items-center">
-        <button type="submit" class="btn btn-primary px-4"><i class="bi bi-person-plus me-1"></i>Add loan officer</button>
-        <a href="{% url 'loan_officers' %}" class="btn btn-outline-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary px-4" id="addOfficerBtn"><i class="bi bi-person-plus me-1"></i>Add loan officer</button>
+        <a href="{% url 'loan_officers' %}" class="btn btn-outline-secondary" id="addOfficerCancelBtn">Cancel</a>
         <span class="text-muted ms-auto" style="font-size:.75rem;"><i class="bi bi-shield-lock me-1"></i>This account gets staff access to the officer workspace.</span>
       </div>
     </form>
@@ -99,6 +99,14 @@
         <div class="add-member-step"><span class="add-member-dot">2</span><div><strong>Share their credentials</strong><p>Give them the email and password you set here, securely.</p></div></div>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="creating-overlay" id="creatingOverlay" aria-live="polite" aria-busy="false" hidden>
+  <div class="creating-overlay-card">
+    <div class="spinner-border" role="status" aria-hidden="true"></div>
+    <h3>Creating loan officer…</h3>
+    <p>Saving staff account details. Please wait.</p>
   </div>
 </div>
 
@@ -119,6 +127,39 @@
 .add-member-dot { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%; background: var(--mint); color: var(--teal-deep); font-size: .76rem; font-weight: 700; display: grid; place-items: center; }
 .add-member-step strong { display: block; font-size: .84rem; margin-bottom: 2px; }
 .add-member-step p { margin: 0; font-size: .77rem; color: var(--ink-soft); line-height: 1.45; }
+.creating-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 15, .45);
+  backdrop-filter: blur(2px);
+}
+.creating-overlay.is-visible { display: flex; }
+.creating-overlay-card {
+  width: min(22rem, calc(100vw - 2rem));
+  padding: 1.75rem 1.5rem;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+}
+.creating-overlay-card .spinner-border {
+  width: 2.25rem;
+  height: 2.25rem;
+  color: var(--teal);
+}
+.creating-overlay-card h3 {
+  margin: 1rem 0 .35rem;
+  font-size: 1.1rem;
+}
+.creating-overlay-card p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: .92rem;
+}
 </style>
 
 <script>
@@ -162,6 +203,39 @@
       applySuggestion();
     });
   }
+})();
+
+(function () {
+  var form = document.querySelector("form[method='post']");
+  var submitBtn = document.getElementById("addOfficerBtn");
+  var cancelBtn = document.getElementById("addOfficerCancelBtn");
+  var overlay = document.getElementById("creatingOverlay");
+  if (!form || !submitBtn) return;
+
+  form.addEventListener("submit", function (e) {
+    if (form.dataset.submitting === "true") {
+      e.preventDefault();
+      return;
+    }
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+
+    form.dataset.submitting = "true";
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Creating…';
+    if (cancelBtn) {
+      cancelBtn.classList.add("disabled");
+      cancelBtn.setAttribute("aria-disabled", "true");
+      cancelBtn.addEventListener("click", function (ev) { ev.preventDefault(); }, { once: true });
+    }
+    if (overlay) {
+      overlay.hidden = false;
+      overlay.setAttribute("aria-busy", "true");
+      overlay.classList.add("is-visible");
+    }
+  });
 })();
 </script>
 {% endblock %}

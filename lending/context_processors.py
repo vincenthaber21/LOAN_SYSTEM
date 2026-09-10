@@ -15,6 +15,7 @@ def product_context(request):
         "borrower_dashboard": "dashboard",
         "applications_queue": "applications",
         "application_review": "applications",
+        "officer_edit_application": "applications",
         "borrowers": "borrowers",
         "all_members": "all_members",
         "borrower_detail": "all_members",

@@ -23,18 +23,97 @@
   .hl-badge { display: inline-block; border-radius: 999px; padding: 3px 10px; font-size: .72rem; font-weight: 700; }
   .hl-badge-ready { background: #fff3cd; color: #856404; }
   .hl-badge-released { background: #e0f6eb; color: #12480c; }
+  .hl-badge-on { background: #e0f6eb; color: #12480c; }
+  .hl-badge-off { background: #fde8e8; color: #8a1f1f; }
   .hl-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
   .hl-table th, .hl-table td { padding: 12px 16px; border-bottom: 1px solid var(--hairline-color, #e8e8e8); text-align: left; vertical-align: top; }
   .hl-table th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--body-quiet-color, #666); background: var(--darkened-bg, #fafafa); }
   .hl-table tr:last-child td { border-bottom: 0; }
   .hl-sub { display: block; font-size: .76rem; color: var(--body-quiet-color, #666); margin-top: 2px; }
   .hl-empty { padding: 28px 20px; text-align: center; color: var(--body-quiet-color, #666); font-size: .86rem; }
-  .hl-btn { display: inline-block; border-radius: 8px; padding: 6px 12px; font-size: .78rem; font-weight: 600; text-decoration: none; }
+  .hl-btn { display: inline-block; border-radius: 8px; padding: 6px 12px; font-size: .78rem; font-weight: 600; text-decoration: none; border: 0; cursor: pointer; }
   .hl-btn-primary { background: #186010; color: #fff !important; }
   .hl-btn-primary:hover { background: #12480c; color: #fff !important; }
   .hl-btn-light { background: var(--darkened-bg, #f3f3f3); color: var(--body-fg, #333) !important; border: 1px solid var(--hairline-color, #ddd); }
+  .hl-btn-danger { background: #8a1f1f; color: #fff !important; }
+  .hl-btn-danger:hover { background: #6e1818; color: #fff !important; }
+  .hl-btn-success { background: #186010; color: #fff !important; }
   .hl-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
   .hl-toolbar .actions, .hl-toolbar form { margin: 0; }
+  .hl-setting-body { padding: 18px 20px; display: grid; gap: 16px; }
+  .hl-setting-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .hl-setting-field { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
+  .hl-setting-field label { font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--body-quiet-color, #666); }
+  .hl-setting-field select,
+  .hl-setting-field input[type="time"] {
+    -webkit-appearance: none;
+    appearance: none;
+    border: 1px solid var(--border-color, #8a8a8a);
+    border-radius: 8px;
+    padding: 8px 36px 8px 12px;
+    background-color: #fff;
+    color: #111;
+    font-size: .9rem;
+    font-weight: 600;
+    line-height: 1.35;
+    min-height: 38px;
+    color-scheme: light;
+  }
+  .hl-setting-field select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23111111' d='M1.2 1.3 6 6.1l4.8-4.8 1.2 1.2L6 8.5 0 2.5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 12px;
+    cursor: pointer;
+  }
+  .hl-setting-field select option { background-color: #fff; color: #111; }
+  .hl-setting-field input[type="time"] { min-width: 160px; }
+  .hl-setting-field input[type="time"]::-webkit-calendar-picker-indicator { opacity: .7; cursor: pointer; }
+  html[data-theme="dark"] .hl-setting-field select,
+  html[data-theme="dark"] .hl-setting-field input[type="time"] {
+    background-color: #2b2b2b;
+    color: #f5f5f5;
+    border-color: #6e6e6e;
+    color-scheme: dark;
+  }
+  html[data-theme="dark"] .hl-setting-field select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23f5f5f5' d='M1.2 1.3 6 6.1l4.8-4.8 1.2 1.2L6 8.5 0 2.5z'/%3E%3C/svg%3E");
+  }
+  html[data-theme="dark"] .hl-setting-field select option { background-color: #2b2b2b; color: #f5f5f5; }
+  html[data-theme="dark"] .hl-setting-field input[type="time"]::-webkit-datetime-edit,
+  html[data-theme="dark"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-fields-wrapper,
+  html[data-theme="dark"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-hour-field,
+  html[data-theme="dark"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-minute-field,
+  html[data-theme="dark"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-ampm-field {
+    color: #f5f5f5;
+  }
+  html[data-theme="dark"] .hl-setting-field input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="auto"] .hl-setting-field select,
+    html[data-theme="auto"] .hl-setting-field input[type="time"] {
+      background-color: #2b2b2b;
+      color: #f5f5f5;
+      border-color: #6e6e6e;
+      color-scheme: dark;
+    }
+    html[data-theme="auto"] .hl-setting-field select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23f5f5f5' d='M1.2 1.3 6 6.1l4.8-4.8 1.2 1.2L6 8.5 0 2.5z'/%3E%3C/svg%3E");
+    }
+    html[data-theme="auto"] .hl-setting-field select option { background-color: #2b2b2b; color: #f5f5f5; }
+    html[data-theme="auto"] .hl-setting-field input[type="time"]::-webkit-datetime-edit,
+    html[data-theme="auto"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-fields-wrapper,
+    html[data-theme="auto"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-hour-field,
+    html[data-theme="auto"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-minute-field,
+    html[data-theme="auto"] .hl-setting-field input[type="time"]::-webkit-datetime-edit-ampm-field {
+      color: #f5f5f5;
+    }
+    html[data-theme="auto"] .hl-setting-field input[type="time"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+    }
+  }
+  .hl-setting-status { font-size: .86rem; color: var(--body-fg, #333); line-height: 1.45; margin: 0; }
   @media (max-width: 900px) { .hl-metrics { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -54,6 +133,57 @@
     <div class="hl-eyebrow">{{ app_name }} Lending</div>
     <h1>Disbursements</h1>
     <p>Review approved applications waiting for release and browse completed disbursements recorded in the portfolio.</p>
+  </div>
+
+  <div class="hl-card">
+    <div class="hl-card-head">
+      <div>
+        <h2>Disbursement day condition</h2>
+        <span class="hl-hint">Choose the weekday and start time officers may release funds, and turn the rule on or off.</span>
+      </div>
+      {% if disbursement_setting.condition_enabled %}
+        <span class="hl-badge hl-badge-on">Condition on</span>
+      {% else %}
+        <span class="hl-badge hl-badge-off">Condition off</span>
+      {% endif %}
+    </div>
+    <div class="hl-setting-body">
+      <p class="hl-setting-status">
+        {% if disbursement_setting.condition_enabled %}
+          Releases are limited to <strong>{{ disbursement_setting.get_disbursement_weekday_display }}s from {{ disbursement_setting.start_time_display }}</strong> (Asia/Manila).
+        {% else %}
+          Weekday restriction is off — officers can disburse on any day.
+        {% endif %}
+      </p>
+      <div class="hl-setting-row">
+        <form method="post" class="hl-setting-row" style="margin:0;">
+          {% csrf_token %}
+          <input type="hidden" name="disbursement_setting_action" value="save_schedule">
+          <div class="hl-setting-field">
+            <label for="id_disbursement_weekday">Disburse on</label>
+            <select id="id_disbursement_weekday" name="disbursement_weekday">
+              {% for value, label in disbursement_weekday_choices %}
+                <option value="{{ value }}" {% if disbursement_setting.disbursement_weekday == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="hl-setting-field">
+            <label for="id_disbursement_start_time">Start time</label>
+            <input id="id_disbursement_start_time" name="disbursement_start_time" type="time" value="{{ disbursement_setting.disbursement_start_time|time:'H:i' }}" required>
+          </div>
+          <button type="submit" class="hl-btn hl-btn-primary">Save schedule</button>
+        </form>
+        <form method="post" style="margin:0;">
+          {% csrf_token %}
+          <input type="hidden" name="disbursement_setting_action" value="toggle_condition">
+          {% if disbursement_setting.condition_enabled %}
+            <button type="submit" class="hl-btn hl-btn-danger">Disable condition</button>
+          {% else %}
+            <button type="submit" class="hl-btn hl-btn-success">Enable condition</button>
+          {% endif %}
+        </form>
+      </div>
+    </div>
   </div>
 
   <div class="hl-metrics">

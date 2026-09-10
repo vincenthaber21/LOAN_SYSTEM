@@ -65,25 +65,39 @@ def _blocking_active_product_ids(borrower):
     return blocked
 
 
-def unavailable_product_ids_for_borrower(borrower):
+def unavailable_product_ids_for_borrower(borrower, exclude_application_pk=None):
     """Product IDs the borrower cannot apply for (underpaid active loan or open application)."""
     if not borrower:
         return set()
-    pending_product_ids = LoanApplication.objects.filter(
+    pending_qs = LoanApplication.objects.filter(
         borrower=borrower,
         status__in=PENDING_APPLICATION_STATUSES,
-    ).values_list("loan_product_id", flat=True)
+    )
+    if exclude_application_pk:
+        pending_qs = pending_qs.exclude(pk=exclude_application_pk)
+    pending_product_ids = pending_qs.values_list("loan_product_id", flat=True)
     return _blocking_active_product_ids(borrower) | {pk for pk in pending_product_ids if pk}
 
 
-def available_loan_products_for_borrower(borrower):
+def available_loan_products_for_borrower(
+    borrower,
+    exclude_application_pk=None,
+    include_product=None,
+    ignore_credit_block=False,
+):
     """Active products a borrower may apply for."""
-    if credit_score_blocks_loans(borrower):
+    if credit_score_blocks_loans(borrower) and not ignore_credit_block:
+        if include_product and include_product.pk:
+            return LoanProduct.objects.filter(pk=include_product.pk)
         return LoanProduct.objects.none()
     products = LoanProduct.objects.filter(is_active=True)
-    blocked = unavailable_product_ids_for_borrower(borrower)
+    blocked = unavailable_product_ids_for_borrower(
+        borrower, exclude_application_pk=exclude_application_pk
+    )
     if blocked:
         products = products.exclude(pk__in=blocked)
+    if include_product and include_product.pk:
+        products = (products | LoanProduct.objects.filter(pk=include_product.pk)).distinct()
     return products
 
 
@@ -198,6 +212,7 @@ class BaseAccountCreationForm(UserCreationForm):
     )
     email = forms.EmailField()
     first_name = forms.CharField(max_length=80, label="First name")
+    middle_initial = forms.CharField(max_length=10, required=False, label="Middle initial")
     last_name = forms.CharField(max_length=80, label="Last name")
     phone = forms.CharField(max_length=30, required=False)
 
@@ -215,13 +230,25 @@ class BaseAccountCreationForm(UserCreationForm):
             raise forms.ValidationError("An account with this email already exists.")
         return email
 
+    def clean_middle_initial(self):
+        value = (self.cleaned_data.get("middle_initial") or "").strip()
+        if not value:
+            return ""
+        # Normalize to a short initial (letter + optional period).
+        letter = value.replace(".", "").strip()
+        if letter:
+            return f"{letter[0].upper()}."
+        return ""
+
     def save(self, commit=True):
         user = super().save(commit=False)
         user.username = self.cleaned_data["username"]
         user.email = self.cleaned_data["email"]
         user.first_name = self.cleaned_data["first_name"]
+        user.middle_initial = self.cleaned_data.get("middle_initial", "")
         user.last_name = self.cleaned_data["last_name"]
-        user.full_name = f"{user.first_name} {user.last_name}".strip()
+        name_parts = [user.first_name, user.middle_initial, user.last_name]
+        user.full_name = " ".join(part for part in name_parts if part).strip()
         user.phone = self.cleaned_data.get("phone", "")
         if self.ROLE:
             user.role = self.ROLE
@@ -233,6 +260,7 @@ class BaseAccountCreationForm(UserCreationForm):
 class OfficerMemberForm(BaseAccountCreationForm):
     ROLE = User.Role.MEMBER
 
+    email = forms.EmailField(required=False)
     date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
     address = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
     employment_status = forms.CharField(max_length=40, required=False)
@@ -240,10 +268,19 @@ class OfficerMemberForm(BaseAccountCreationForm):
 
     class Meta:
         model = User
-        fields = ("username", "first_name", "last_name", "email", "phone", "date_of_birth", "address", "employment_status", "monthly_income", "password1", "password2")
+        fields = ("username", "first_name", "middle_initial", "last_name", "email", "phone", "date_of_birth", "address", "employment_status", "monthly_income", "password1", "password2")
+
+    def clean_email(self):
+        email = (self.cleaned_data.get("email") or "").strip().lower()
+        if not email:
+            return ""
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError("An account with this email already exists.")
+        return email
 
     def save(self, commit=True):
         user = super().save(commit=False)
+        user.email = self.cleaned_data.get("email") or ""
         user.date_of_birth = self.cleaned_data.get("date_of_birth")
         user.address = self.cleaned_data.get("address", "")
         user.employment_status = self.cleaned_data.get("employment_status", "")
@@ -259,6 +296,7 @@ class OfficerMemberEditForm(forms.ModelForm):
     username = forms.CharField(max_length=150, help_text="Used to sign in — must stay unique.")
     email = forms.EmailField()
     full_name = forms.CharField(max_length=160, label="Full name")
+    middle_initial = forms.CharField(max_length=10, required=False, label="Middle initial")
     phone = forms.CharField(max_length=30, required=False)
     date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
     address = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
@@ -268,7 +306,7 @@ class OfficerMemberEditForm(forms.ModelForm):
 
     class Meta:
         model = User
-        fields = ("username", "full_name", "email", "phone", "date_of_birth", "address", "employment_status", "monthly_income", "is_active")
+        fields = ("username", "full_name", "middle_initial", "email", "phone", "date_of_birth", "address", "employment_status", "monthly_income", "is_active")
 
     def clean_username(self):
         username = self.cleaned_data["username"].strip().lower()
@@ -284,6 +322,15 @@ class OfficerMemberEditForm(forms.ModelForm):
         if User.objects.filter(email__iexact=email).exclude(pk=self.instance.pk).exists():
             raise forms.ValidationError("An account with this email already exists.")
         return email
+
+    def clean_middle_initial(self):
+        value = (self.cleaned_data.get("middle_initial") or "").strip()
+        if not value:
+            return ""
+        letter = value.replace(".", "").strip()
+        if letter:
+            return f"{letter[0].upper()}."
+        return ""
 
     def clean(self):
         cleaned = super().clean()
@@ -667,7 +714,12 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             if data.get("amount_requested"):
                 data["amount_requested"] = str(data["amount_requested"]).replace(",", "")
             self.data = data
-        self.fields["borrower"].queryset = User.member_accounts().filter(is_active=True).order_by("full_name", "email")
+        members = User.member_accounts().filter(is_active=True)
+        if self.instance.pk and self.instance.borrower_id:
+            members = (
+                members | User.member_accounts().filter(pk=self.instance.borrower_id)
+            ).distinct()
+        self.fields["borrower"].queryset = members.order_by("full_name", "email")
         self.fields["loan_product"].required = True
         self.fields["loan_purpose"].required = True
         self.fields["application_type"].required = True
@@ -675,16 +727,22 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         self.fields["borrower_first_name"].required = True
         self.fields["borrower_present_address"].required = True
         self.fields["borrower_tel_mobile"].required = True
-        borrower = None
+        exclude_pk = self.instance.pk or None
+        borrower = self.instance.borrower if exclude_pk else None
         if self.is_bound:
             borrower_id = self.data.get(self.add_prefix("borrower") if self.prefix else "borrower")
             if borrower_id:
                 borrower = User.objects.filter(pk=borrower_id).first()
-        self.fields["loan_product"].queryset = available_loan_products_for_borrower(borrower)
+        self.fields["loan_product"].queryset = available_loan_products_for_borrower(
+            borrower,
+            exclude_application_pk=exclude_pk,
+            include_product=self.instance.loan_product if exclude_pk else None,
+            ignore_credit_block=bool(exclude_pk),
+        )
         if borrower:
-            computed_type = application_type_for_member(borrower)
+            computed_type = application_type_for_member(borrower, exclude_pk=exclude_pk)
             self.fields["application_type"].initial = computed_type
-            if self.data is not None:
+            if self.is_bound:
                 data = self.data.copy()
                 data["application_type"] = computed_type
                 self.data = data
@@ -752,7 +810,8 @@ class OfficerLoanApplicationForm(forms.ModelForm):
     def clean(self):
         cleaned = super().clean()
         borrower = cleaned.get("borrower")
-        if borrower and credit_score_blocks_loans(borrower):
+        is_edit = bool(self.instance.pk)
+        if borrower and credit_score_blocks_loans(borrower) and not is_edit:
             self.add_error("borrower", credit_score_loan_block_message(borrower))
             return cleaned
         product = cleaned.get("loan_product")
@@ -761,6 +820,7 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         loan_purpose = cleaned.get("loan_purpose")
         purpose = (cleaned.get("purpose") or "").strip()
         borrower_id = self.data.get("borrower")
+        switching_borrower = is_edit and borrower and borrower.pk != self.instance.borrower_id
         if borrower_id and not borrower:
             inactive_member = User.member_accounts().filter(pk=borrower_id, is_active=False).first()
             if inactive_member:
@@ -768,7 +828,7 @@ class OfficerLoanApplicationForm(forms.ModelForm):
                     "borrower",
                     f"{inactive_member.display_name()}'s account is inactive and cannot receive a new loan application.",
                 )
-        elif borrower and not borrower.is_active:
+        elif borrower and not borrower.is_active and (not is_edit or switching_borrower):
             self.add_error(
                 "borrower",
                 f"{borrower.display_name()}'s account is inactive and cannot receive a new loan application.",
@@ -793,11 +853,14 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         coborrower_sig = decode_signature_data_url(cleaned.get("coborrower_signature_data"), "coborrower-sig")
         cleaned["_borrower_signature_file"] = borrower_sig
         cleaned["_coborrower_signature_file"] = coborrower_sig
-        if not borrower_sig:
+        if not borrower_sig and not (is_edit and self.instance.borrower_signature):
             self.add_error("borrower_signature_data", "Borrower signature is required.")
         if cleaned.get("coborrower_surname") or cleaned.get("coborrower_first_name"):
-            if not coborrower_sig:
-                self.add_error("coborrower_signature_data", "Co-borrower signature is required when co-borrower details are provided.")
+            if not coborrower_sig and not (is_edit and self.instance.coborrower_signature):
+                self.add_error(
+                    "coborrower_signature_data",
+                    "Co-borrower signature is required when co-borrower details are provided.",
+                )
         if not cleaned.get("borrower_signed_name"):
             cleaned["borrower_signed_name"] = " ".join(
                 p for p in [cleaned.get("borrower_first_name"), cleaned.get("borrower_middle_name"), cleaned.get("borrower_surname")] if p
@@ -805,7 +868,9 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         if not cleaned.get("borrower_signed_date"):
             cleaned["borrower_signed_date"] = timezone.localdate()
         if borrower:
-            cleaned["application_type"] = application_type_for_member(borrower)
+            cleaned["application_type"] = application_type_for_member(
+                borrower, exclude_pk=self.instance.pk
+            )
         error = duplicate_application_error(borrower, product, exclude_pk=self.instance.pk)
         if error:
             self.add_error("loan_product", error)
@@ -974,20 +1039,71 @@ class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
         return instance
 
 
+class CharacterReferenceForm(forms.ModelForm):
+    class Meta:
+        model = CharacterReference
+        fields = ("name", "address", "relationship", "contact_number", "sort_order")
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Full name"}),
+            "address": forms.TextInput(attrs={"class": "form-control"}),
+            "relationship": forms.TextInput(attrs={"class": "form-control"}),
+            "contact_number": forms.TextInput(attrs={"class": "form-control"}),
+            "sort_order": forms.HiddenInput(),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # One completed reference is enough; blank extra rows must not fail validation.
+        self.fields["name"].required = False
+        self.empty_permitted = True
+
+    def has_changed(self):
+        # Ignore hidden sort_order so an untouched extra row stays "empty".
+        return any(name != "sort_order" for name in self.changed_data)
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get("name") or "").strip()
+        address = (cleaned.get("address") or "").strip()
+        relationship = (cleaned.get("relationship") or "").strip()
+        contact_number = (cleaned.get("contact_number") or "").strip()
+        filled_other = any([address, relationship, contact_number])
+        if filled_other and not name:
+            self.add_error("name", "Enter the reference name, or clear the other fields in this row.")
+        cleaned["name"] = name
+        cleaned["address"] = address
+        cleaned["relationship"] = relationship
+        cleaned["contact_number"] = contact_number
+        return cleaned
+
+
+class BaseCharacterReferenceFormSet(forms.BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        named = 0
+        for form in self.forms:
+            if self.can_delete and self._should_delete_form(form):
+                continue
+            name = (form.cleaned_data or {}).get("name") or ""
+            if str(name).strip():
+                named += 1
+        if named < 1:
+            raise forms.ValidationError("Add at least one character reference.")
+
+
 CharacterReferenceFormSet = forms.inlineformset_factory(
     LoanApplication,
     CharacterReference,
+    form=CharacterReferenceForm,
+    formset=BaseCharacterReferenceFormSet,
     fields=("name", "address", "relationship", "contact_number", "sort_order"),
     extra=2,
     max_num=2,
+    min_num=0,
+    validate_min=False,
     can_delete=False,
-    widgets={
-        "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Full name"}),
-        "address": forms.TextInput(attrs={"class": "form-control"}),
-        "relationship": forms.TextInput(attrs={"class": "form-control"}),
-        "contact_number": forms.TextInput(attrs={"class": "form-control"}),
-        "sort_order": forms.HiddenInput(),
-    },
 )
 
 

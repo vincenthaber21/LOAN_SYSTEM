@@ -29,10 +29,15 @@
         </div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-md-6">
+            <div class="col-md-8">
               <label class="form-label" for="{{ form.full_name.id_for_label }}">Full name<span class="req">*</span></label>
               <input type="text" id="{{ form.full_name.id_for_label }}" name="{{ form.full_name.html_name }}" value="{{ form.full_name.value|default:'' }}" class="form-control {% if form.full_name.errors %}is-invalid{% endif %}" placeholder="Maria Dela Cruz" autocomplete="off">
               {% if form.full_name.errors %}<div class="invalid-feedback">{{ form.full_name.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.middle_initial.id_for_label }}">Middle initial</label>
+              <input type="text" id="{{ form.middle_initial.id_for_label }}" name="{{ form.middle_initial.html_name }}" value="{{ form.middle_initial.value|default:'' }}" class="form-control text-uppercase {% if form.middle_initial.errors %}is-invalid{% endif %}" placeholder="M" maxlength="10" autocomplete="off">
+              {% if form.middle_initial.errors %}<div class="invalid-feedback">{{ form.middle_initial.errors|join:", " }}</div>{% endif %}
             </div>
             <div class="col-md-6">
               <label class="form-label" for="{{ form.date_of_birth.id_for_label }}">Date of birth</label>

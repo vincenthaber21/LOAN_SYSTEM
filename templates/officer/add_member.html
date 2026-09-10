@@ -29,12 +29,17 @@
         </div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-md-6">
+            <div class="col-md-5">
               <label class="form-label" for="{{ form.first_name.id_for_label }}">First name<span class="req">*</span></label>
               <input type="text" id="{{ form.first_name.id_for_label }}" name="{{ form.first_name.html_name }}" value="{{ form.first_name.value|default:'' }}" class="form-control {% if form.first_name.errors %}is-invalid{% endif %}" placeholder="Maria">
               {% if form.first_name.errors %}<div class="invalid-feedback">{{ form.first_name.errors|join:", " }}</div>{% endif %}
             </div>
-            <div class="col-md-6">
+            <div class="col-md-2">
+              <label class="form-label" for="{{ form.middle_initial.id_for_label }}">M.I.</label>
+              <input type="text" id="{{ form.middle_initial.id_for_label }}" name="{{ form.middle_initial.html_name }}" value="{{ form.middle_initial.value|default:'' }}" class="form-control text-uppercase {% if form.middle_initial.errors %}is-invalid{% endif %}" placeholder="M" maxlength="10" autocomplete="off">
+              {% if form.middle_initial.errors %}<div class="invalid-feedback">{{ form.middle_initial.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-5">
               <label class="form-label" for="{{ form.last_name.id_for_label }}">Last name<span class="req">*</span></label>
               <input type="text" id="{{ form.last_name.id_for_label }}" name="{{ form.last_name.html_name }}" value="{{ form.last_name.value|default:'' }}" class="form-control {% if form.last_name.errors %}is-invalid{% endif %}" placeholder="Dela Cruz">
               {% if form.last_name.errors %}<div class="invalid-feedback">{{ form.last_name.errors|join:", " }}</div>{% endif %}
@@ -74,19 +79,25 @@
               {% if form.username.errors %}<div class="invalid-feedback">{{ form.username.errors|join:", " }}</div>{% else %}<span class="helptext" id="username-hint">Auto-filled from the first and last name — edit if you'd like something different.</span>{% endif %}
             </div>
             <div class="col-md-6">
-              <label class="form-label" for="{{ form.email.id_for_label }}">Email address<span class="req">*</span></label>
+              <label class="form-label" for="{{ form.email.id_for_label }}">Email address</label>
               <input type="email" id="{{ form.email.id_for_label }}" name="{{ form.email.html_name }}" value="{{ form.email.value|default:'' }}" class="form-control {% if form.email.errors %}is-invalid{% endif %}" placeholder="maria@example.com">
-              {% if form.email.errors %}<div class="invalid-feedback">{{ form.email.errors|join:", " }}</div>{% else %}<span class="helptext">Used to sign in too — must be unique.</span>{% endif %}
+              {% if form.email.errors %}<div class="invalid-feedback">{{ form.email.errors|join:", " }}</div>{% else %}<span class="helptext">Optional — if provided, must be unique.</span>{% endif %}
             </div>
             <div class="col-md-6">
               <label class="form-label" for="{{ form.password1.id_for_label }}">Password<span class="req">*</span></label>
-              <input type="password" id="{{ form.password1.id_for_label }}" name="{{ form.password1.html_name }}" class="form-control {% if form.password1.errors %}is-invalid{% endif %}">
-              {% if form.password1.errors %}<div class="invalid-feedback">{{ form.password1.errors|join:", " }}</div>{% else %}<span class="helptext">At least 8 characters, not too common.</span>{% endif %}
+              <div class="input-group">
+                <input type="password" id="{{ form.password1.id_for_label }}" name="{{ form.password1.html_name }}" class="form-control {% if form.password1.errors %}is-invalid{% endif %}" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" data-password-toggle data-target="{{ form.password1.id_for_label }}" aria-label="Show password"><i class="bi bi-eye"></i></button>
+              </div>
+              {% if form.password1.errors %}<div class="invalid-feedback d-block">{{ form.password1.errors|join:", " }}</div>{% else %}<span class="helptext">At least 8 characters, not too common.</span>{% endif %}
             </div>
             <div class="col-md-6">
               <label class="form-label" for="{{ form.password2.id_for_label }}">Confirm password<span class="req">*</span></label>
-              <input type="password" id="{{ form.password2.id_for_label }}" name="{{ form.password2.html_name }}" class="form-control {% if form.password2.errors %}is-invalid{% endif %}">
-              {% if form.password2.errors %}<div class="invalid-feedback">{{ form.password2.errors|join:", " }}</div>{% endif %}
+              <div class="input-group">
+                <input type="password" id="{{ form.password2.id_for_label }}" name="{{ form.password2.html_name }}" class="form-control {% if form.password2.errors %}is-invalid{% endif %}" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" data-password-toggle data-target="{{ form.password2.id_for_label }}" aria-label="Show password"><i class="bi bi-eye"></i></button>
+              </div>
+              {% if form.password2.errors %}<div class="invalid-feedback d-block">{{ form.password2.errors|join:", " }}</div>{% endif %}
             </div>
           </div>
         </div>
@@ -120,8 +131,8 @@
       </div>
 
       <div class="d-flex gap-2 align-items-center">
-        <button type="submit" class="btn btn-primary px-4"><i class="bi bi-person-plus me-1"></i>Add member</button>
-        <a href="{% url 'all_members' %}" class="btn btn-outline-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary px-4" id="addMemberBtn"><i class="bi bi-person-plus me-1"></i>Add member</button>
+        <a href="{% url 'all_members' %}" class="btn btn-outline-secondary" id="addMemberCancelBtn">Cancel</a>
         <span class="text-muted ms-auto" style="font-size:.75rem;"><i class="bi bi-shield-check me-1"></i>They can update these details from their own profile later.</span>
       </div>
     </form>
@@ -139,6 +150,14 @@
   </div>
 </div>
 
+<div class="creating-overlay" id="creatingOverlay" aria-live="polite" aria-busy="false" hidden>
+  <div class="creating-overlay-card">
+    <div class="spinner-border" role="status" aria-hidden="true"></div>
+    <h3>Creating member…</h3>
+    <p>Saving account details. Please wait.</p>
+  </div>
+</div>
+
 <style>
 .form-label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; margin-bottom: .35rem; display: flex; align-items: center; gap: 8px; }
 .regen-link { margin-left: auto; background: none; border: 0; padding: 0; font-size: .72rem; font-weight: 600; color: var(--teal); cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
@@ -146,8 +165,10 @@
 .req { color: var(--danger); margin-left: 2px; }
 .form-control, .input-group-text { border-color: var(--line); border-radius: 9px; font-size: .9rem; }
 .form-control:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(24, 96, 16, .12); }
-.input-group .form-control { border-radius: 0 9px 9px 0; }
+.input-group .form-control { border-radius: 9px 0 0 9px; }
 .input-group .input-group-text { background: var(--canvas); border-color: var(--line); color: var(--ink-soft); border-radius: 9px 0 0 9px; }
+.input-group .btn-outline-secondary { border-color: var(--line); color: var(--ink-soft); border-radius: 0 9px 9px 0; }
+.input-group .btn-outline-secondary:hover { background: var(--canvas); border-color: var(--ink-soft); color: var(--ink); }
 .helptext { display: block; font-size: .74rem; color: var(--ink-soft); margin-top: 4px; }
 .invalid-feedback { display: block; font-size: .76rem; }
 .btn-outline-secondary { border-color: var(--line); color: var(--ink-soft); }
@@ -158,6 +179,39 @@
 .add-member-dot { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%; background: var(--mint); color: var(--teal-deep); font-size: .76rem; font-weight: 700; display: grid; place-items: center; }
 .add-member-step strong { display: block; font-size: .84rem; margin-bottom: 2px; }
 .add-member-step p { margin: 0; font-size: .77rem; color: var(--ink-soft); line-height: 1.45; }
+.creating-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 15, .45);
+  backdrop-filter: blur(2px);
+}
+.creating-overlay.is-visible { display: flex; }
+.creating-overlay-card {
+  width: min(22rem, calc(100vw - 2rem));
+  padding: 1.75rem 1.5rem;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+}
+.creating-overlay-card .spinner-border {
+  width: 2.25rem;
+  height: 2.25rem;
+  color: var(--teal);
+}
+.creating-overlay-card h3 {
+  margin: 1rem 0 .35rem;
+  font-size: 1.1rem;
+}
+.creating-overlay-card p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: .92rem;
+}
 </style>
 
 <script>
@@ -201,6 +255,39 @@
       applySuggestion();
     });
   }
+})();
+
+(function () {
+  var form = document.querySelector("form[method='post']");
+  var submitBtn = document.getElementById("addMemberBtn");
+  var cancelBtn = document.getElementById("addMemberCancelBtn");
+  var overlay = document.getElementById("creatingOverlay");
+  if (!form || !submitBtn) return;
+
+  form.addEventListener("submit", function (e) {
+    if (form.dataset.submitting === "true") {
+      e.preventDefault();
+      return;
+    }
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+
+    form.dataset.submitting = "true";
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Creating…';
+    if (cancelBtn) {
+      cancelBtn.classList.add("disabled");
+      cancelBtn.setAttribute("aria-disabled", "true");
+      cancelBtn.addEventListener("click", function (ev) { ev.preventDefault(); }, { once: true });
+    }
+    if (overlay) {
+      overlay.hidden = false;
+      overlay.setAttribute("aria-busy", "true");
+      overlay.classList.add("is-visible");
+    }
+  });
 })();
 </script>
 {% endblock %}

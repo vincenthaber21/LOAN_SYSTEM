@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 from django import forms
@@ -14,11 +15,12 @@ except ImportError:  # pragma: no cover - older Django
     from django.contrib.auth.forms import UserCreationForm as BaseUserCreationForm
 
 from .forms import DisbursementAdminForm
-from .services import normalize_credit_score
+from .services import disbursement_start_time_label, normalize_credit_score
 from .models import (
     Administrator,
     CharacterReference,
     Disbursement,
+    DisbursementSetting,
     Document,
     Features,
     Installment,
@@ -84,7 +86,7 @@ class RoleScopedUserAdmin(UserAdmin):
     fieldsets = (
         (None, {"fields": ("username", "password")}),
         ("Profile", {"fields": PROFILE_FIELDS}),
-        ("Contact", {"fields": ("email", "first_name", "last_name")}),
+        ("Contact", {"fields": ("email", "first_name", "middle_initial", "last_name")}),
         ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
         ("Important dates", {"fields": ("last_login", "date_joined")}),
     )
@@ -134,7 +136,7 @@ class MemberAdmin(RoleScopedUserAdmin):
             "description": "Starts at 100. Deducts 0.1 for each late loan month.",
             "fields": ("credit_score",),
         }),
-        ("Contact", {"fields": ("email", "first_name", "last_name")}),
+        ("Contact", {"fields": ("email", "first_name", "middle_initial", "last_name")}),
         ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
         ("Important dates", {"fields": ("last_login", "date_joined")}),
     )
@@ -145,7 +147,7 @@ class MemberAdmin(RoleScopedUserAdmin):
         }),
         ("Personal information", {
             "description": "The member can update these later from their profile page.",
-            "fields": ("full_name", "phone", "date_of_birth", "address"),
+            "fields": ("full_name", "middle_initial", "phone", "date_of_birth", "address"),
         }),
         ("Financial profile", {
             "description": "Optional, but it speeds up their first loan application.",
@@ -592,8 +594,75 @@ class DisbursementAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
             "disbursed_by",
         )
 
+    def _parse_disbursement_start_time(self, raw, fallback):
+        if not raw:
+            return fallback
+        raw = str(raw).strip()
+        for fmt in ("%H:%M", "%H:%M:%S"):
+            try:
+                return datetime.strptime(raw, fmt).time()
+            except ValueError:
+                continue
+        return None
+
+    def _handle_disbursement_setting_post(self, request):
+        """Save weekday/start time / enable-disable condition from the changelist card."""
+        action = request.POST.get("disbursement_setting_action")
+        if action not in {"save_schedule", "save_weekday", "toggle_condition"}:
+            return False
+        if not self.has_change_permission(request):
+            messages.error(request, "You do not have permission to change disbursement settings.")
+            return True
+
+        setting = DisbursementSetting.load()
+        if action in {"save_schedule", "save_weekday"}:
+            try:
+                weekday = int(request.POST.get("disbursement_weekday", setting.disbursement_weekday))
+            except (TypeError, ValueError):
+                messages.error(request, "Choose a valid disbursement weekday.")
+                return True
+            valid = {choice.value for choice in DisbursementSetting.Weekday}
+            if weekday not in valid:
+                messages.error(request, "Choose a valid disbursement weekday.")
+                return True
+            start_time = self._parse_disbursement_start_time(
+                request.POST.get("disbursement_start_time"),
+                setting.disbursement_start_time,
+            )
+            if start_time is None:
+                messages.error(request, "Choose a valid disbursement start time.")
+                return True
+            setting.disbursement_weekday = weekday
+            setting.disbursement_start_time = start_time
+            setting.save(update_fields=["disbursement_weekday", "disbursement_start_time"])
+            messages.success(
+                request,
+                f"Disbursement window set to {setting.get_disbursement_weekday_display()}s "
+                f"from {disbursement_start_time_label(setting.disbursement_start_time)}.",
+            )
+        else:
+            setting.condition_enabled = not setting.condition_enabled
+            setting.save(update_fields=["condition_enabled"])
+            if setting.condition_enabled:
+                messages.success(
+                    request,
+                    f"Disbursement condition enabled — releases only on "
+                    f"{setting.get_disbursement_weekday_display()}s from "
+                    f"{disbursement_start_time_label(setting.disbursement_start_time)}.",
+                )
+            else:
+                messages.warning(
+                    request,
+                    "Disbursement condition disabled — officers can release funds any day.",
+                )
+        return True
+
     def changelist_view(self, request, extra_context=None):
+        if request.method == "POST" and self._handle_disbursement_setting_post(request):
+            return HttpResponseRedirect(request.path)
+
         extra_context = extra_context or {}
+        setting = DisbursementSetting.load()
         ready = LoanApplication.objects.filter(
             status=LoanApplication.Status.APPROVED,
         ).select_related("borrower", "loan_product")
@@ -611,6 +680,8 @@ class DisbursementAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
             "ready_total": ready_total,
             "released_total": released_total,
             "month_total": month_total,
+            "disbursement_setting": setting,
+            "disbursement_weekday_choices": DisbursementSetting.Weekday.choices,
             "disbursement_metrics": [
                 {"label": "Ready to release", "value": f"₱{ready_total:,.0f}", "note": "Approved principal"},
                 {"label": "Awaiting release", "value": ready.count(), "note": "Approved applications"},

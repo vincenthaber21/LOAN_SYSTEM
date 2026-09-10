@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load lending_tags %}
-{% block title %}KAP loan application{% endblock %}
-{% block topbar_title %}New KAP application{% endblock %}
-{% block topbar_context %}Create a valid microfinance loan application on behalf of a member.{% endblock %}
+{% block title %}{% if is_edit %}Edit {{ application.reference }}{% else %}KAP loan application{% endif %}{% endblock %}
+{% block topbar_title %}{% if is_edit %}Edit KAP application{% else %}New KAP application{% endif %}{% endblock %}
+{% block topbar_context %}{% if is_edit %}Update this application before it is approved or released.{% else %}Create a valid microfinance loan application on behalf of a member.{% endif %}{% endblock %}
 {% block head %}
 <link href="https://cdn.jsdelivr.net/npm/tom-select@2.4.3/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
 <style>
@@ -63,6 +63,46 @@
     background: #fafcfb;
     height: 100%;
   }
+  .kap-photo-preview {
+    position: relative;
+    width: 148px;
+    height: 148px;
+    margin: .35rem auto .75rem;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .kap-photo-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .kap-photo-placeholder {
+    color: var(--muted);
+    font-size: .78rem;
+    text-align: center;
+    padding: .5rem;
+    line-height: 1.35;
+  }
+  .kap-photo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    justify-content: center;
+  }
+  .kap-camera-video,
+  .kap-camera-canvas {
+    width: 100%;
+    max-height: 360px;
+    background: #0f2e0c;
+    border-radius: 12px;
+    object-fit: cover;
+  }
+  .kap-camera-canvas { display: none; }
   .kap-sig-pad {
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -95,6 +135,9 @@
   .field-required:not(.is-filled) .form-select,
   .field-required:not(.is-filled) .kap-sig-pad,
   .field-required:not(.is-filled) .kap-choice-list,
+  .field-required:not(.is-filled) .kap-photo-box,
+  .field-required:not(.is-filled) .input-group .form-control,
+  .field-required:not(.is-filled) .input-group .input-group-text,
   .field-required:not(.is-filled) .ts-wrapper .ts-control {
     border-color: #e57373 !important;
   }
@@ -108,6 +151,9 @@
   .field-required.is-filled .form-select,
   .field-required.is-filled .kap-sig-pad,
   .field-required.is-filled .kap-choice-list,
+  .field-required.is-filled .kap-photo-box,
+  .field-required.is-filled .input-group .form-control,
+  .field-required.is-filled .input-group .input-group-text,
   .field-required.is-filled .ts-wrapper .ts-control {
     border-color: var(--line);
   }
@@ -126,20 +172,60 @@
     border-radius: 2px;
     background: #c62828;
   }
+  .creating-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 15, .45);
+    backdrop-filter: blur(2px);
+  }
+  .creating-overlay.is-visible {
+    display: flex;
+  }
+  .creating-overlay-card {
+    width: min(22rem, calc(100vw - 2rem));
+    padding: 1.75rem 1.5rem;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: var(--shadow-sm);
+    text-align: center;
+  }
+  .creating-overlay-card .spinner-border {
+    width: 2.25rem;
+    height: 2.25rem;
+    color: var(--teal);
+  }
+  .creating-overlay-card h3 {
+    margin: 1rem 0 .35rem;
+    font-size: 1.1rem;
+  }
+  .creating-overlay-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: .92rem;
+  }
+  #confirmApplicationModal.is-creating .btn-close,
+  #confirmApplicationModal.is-creating [data-bs-dismiss="modal"] {
+    pointer-events: none;
+    opacity: .45;
+  }
 </style>
 {% endblock %}
 {% block content %}
 <div class="page-heading">
   <div>
-    <a class="small" href="{% url 'applications_queue' %}"><i class="bi bi-arrow-left me-1"></i>Back to applications</a>
-    <h1 class="mt-3 mb-2">KAP microfinance loan application</h1>
-    <p>Complete the form below to create a valid application for a member.</p>
+    <a class="small" href="{% if is_edit %}{% url 'application_review' application_id=application.id %}{% else %}{% url 'applications_queue' %}{% endif %}"><i class="bi bi-arrow-left me-1"></i>{% if is_edit %}Back to review{% else %}Back to applications{% endif %}</a>
+    <h1 class="mt-3 mb-2">{% if is_edit %}Edit KAP application{% else %}KAP microfinance loan application{% endif %}</h1>
+    <p>{% if is_edit %}Update the details for {{ application.borrower_name }} ({{ application.reference }}).{% else %}Complete the form below to create a valid application for a member.{% endif %}</p>
   </div>
 </div>
 
 <div class="row g-4">
   <div class="col-xl-9">
-    <form method="post" action="{% url 'officer_apply_loan' %}" enctype="multipart/form-data" novalidate>
+    <form method="post" action="{% if is_edit %}{% url 'officer_edit_application' application_id=application.id %}{% else %}{% url 'officer_apply_loan' %}{% endif %}" enctype="multipart/form-data" novalidate>
       {% csrf_token %}
       {{ reference_formset.management_form }}
 
@@ -240,16 +326,52 @@
               {% for error in form.application_type.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
             <div class="col-md-6">
-              <div class="kap-photo-box">
+              <div class="kap-photo-box" data-photo-field data-photo-label="Borrower 2×2 photo">
                 <label class="form-label" for="{{ form.borrower_photo.id_for_label }}">Borrower 2×2 photo</label>
-                <input class="form-control {% if form.borrower_photo.errors %}is-invalid{% endif %}" type="file" accept="image/*" id="{{ form.borrower_photo.id_for_label }}" name="{{ form.borrower_photo.html_name }}">
+                <div class="kap-photo-preview">
+                  {% if form.instance.borrower_photo %}
+                  <img alt="Borrower photo preview" src="{{ form.instance.borrower_photo.url }}" data-photo-preview data-existing-src="{{ form.instance.borrower_photo.url }}">
+                  <div class="kap-photo-placeholder d-none" data-photo-placeholder>No photo yet<br>Capture or choose a file</div>
+                  {% else %}
+                  <img alt="Borrower photo preview" class="d-none" data-photo-preview>
+                  <div class="kap-photo-placeholder" data-photo-placeholder>No photo yet<br>Capture or choose a file</div>
+                  {% endif %}
+                </div>
+                <input class="d-none {% if form.borrower_photo.errors %}is-invalid{% endif %}" type="file" accept="image/*" id="{{ form.borrower_photo.id_for_label }}" name="{{ form.borrower_photo.html_name }}" data-photo-input>
+                <div class="kap-photo-actions">
+                  <button type="button" class="btn btn-sm btn-outline-primary" data-photo-choose>
+                    <i class="bi bi-folder2-open me-1"></i>Choose file
+                  </button>
+                  <button type="button" class="btn btn-sm btn-primary" data-photo-capture>
+                    <i class="bi bi-camera me-1"></i>Capture
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary{% if not form.instance.borrower_photo %} d-none{% endif %}" data-photo-clear>Clear</button>
+                </div>
                 {% for error in form.borrower_photo.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
               </div>
             </div>
             <div class="col-md-6">
-              <div class="kap-photo-box">
+              <div class="kap-photo-box" data-photo-field data-photo-label="Co-borrower 2×2 photo">
                 <label class="form-label" for="{{ form.coborrower_photo.id_for_label }}">Co-borrower 2×2 photo</label>
-                <input class="form-control {% if form.coborrower_photo.errors %}is-invalid{% endif %}" type="file" accept="image/*" id="{{ form.coborrower_photo.id_for_label }}" name="{{ form.coborrower_photo.html_name }}">
+                <div class="kap-photo-preview">
+                  {% if form.instance.coborrower_photo %}
+                  <img alt="Co-borrower photo preview" src="{{ form.instance.coborrower_photo.url }}" data-photo-preview data-existing-src="{{ form.instance.coborrower_photo.url }}">
+                  <div class="kap-photo-placeholder d-none" data-photo-placeholder>No photo yet<br>Capture or choose a file</div>
+                  {% else %}
+                  <img alt="Co-borrower photo preview" class="d-none" data-photo-preview>
+                  <div class="kap-photo-placeholder" data-photo-placeholder>No photo yet<br>Capture or choose a file</div>
+                  {% endif %}
+                </div>
+                <input class="d-none {% if form.coborrower_photo.errors %}is-invalid{% endif %}" type="file" accept="image/*" id="{{ form.coborrower_photo.id_for_label }}" name="{{ form.coborrower_photo.html_name }}" data-photo-input>
+                <div class="kap-photo-actions">
+                  <button type="button" class="btn btn-sm btn-outline-primary" data-photo-choose>
+                    <i class="bi bi-folder2-open me-1"></i>Choose file
+                  </button>
+                  <button type="button" class="btn btn-sm btn-primary" data-photo-capture>
+                    <i class="bi bi-camera me-1"></i>Capture
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary{% if not form.instance.coborrower_photo %} d-none{% endif %}" data-photo-clear>Clear</button>
+                </div>
                 {% for error in form.coborrower_photo.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
               </div>
             </div>
@@ -635,6 +757,7 @@
         <div class="card-header">
           <div class="kap-section-title">Character reference</div>
           <h2 class="card-title mt-1">References</h2>
+          <p class="text-muted small mb-0 mt-1">At least one reference is required. The second row is optional.</p>
         </div>
         <div class="card-body">
           <div class="table-responsive">
@@ -735,7 +858,17 @@
       <div class="card-soft mb-4">
         <div class="card-header"><h2 class="card-title">Supporting documents</h2></div>
         <div class="card-body">
-          <p class="text-muted small mb-3">Optional attachments (JPG, PNG, GIF, WEBP, PDF, DOC, DOCX). You can also add these later from the review page.</p>
+          <p class="text-muted small mb-3">{% if is_edit %}Optional new attachments. Existing files stay unless you upload a replacement of the same type.{% else %}Optional attachments (JPG, PNG, GIF, WEBP, PDF, DOC, DOCX). You can also add these later from the review page.{% endif %}</p>
+          {% if is_edit and existing_documents %}
+          <div class="mb-3">
+            <div class="fw-semibold small mb-2">Current documents</div>
+            <ul class="mb-0 ps-3 small">
+              {% for document in existing_documents %}
+              <li class="mb-1"><a href="{{ document.download_url }}" target="_blank">{{ document.name }}</a> · {{ document.file_size }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
           <div class="row g-3">
             <div class="col-md-4">
               <label class="form-label" for="{{ document_forms.0.file.id_for_label }}"><i class="bi bi-card-image me-1"></i>Valid ID</label>
@@ -760,8 +893,8 @@
       </div>
 
       <div class="d-flex gap-2 mb-5">
-        <button class="btn btn-primary px-4" type="submit" name="create_application" value="1" id="createApplicationBtn"><i class="bi bi-check2 me-1"></i>Create application</button>
-        <a class="btn btn-outline-secondary" href="{% url 'applications_queue' %}">Cancel</a>
+        <button class="btn btn-primary px-4" type="submit" name="create_application" value="1" id="createApplicationBtn"><i class="bi bi-check2 me-1"></i>{% if is_edit %}Save changes{% else %}Create application{% endif %}</button>
+        <a class="btn btn-outline-secondary" href="{% if is_edit %}{% url 'application_review' application_id=application.id %}{% else %}{% url 'applications_queue' %}{% endif %}">Cancel</a>
       </div>
     </form>
   </div>
@@ -850,16 +983,40 @@
 </div>
 {% endif %}
 
+<!-- Photo Capture Modal -->
+<div class="modal fade" id="photoCaptureModal" tabindex="-1" aria-labelledby="photoCaptureModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="photoCaptureModalLabel"><i class="bi bi-camera me-2"></i>Capture photo</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3" id="photoCaptureHint">Position the face in frame, then take the photo.</p>
+        <video class="kap-camera-video" id="photoCaptureVideo" playsinline autoplay muted></video>
+        <canvas class="kap-camera-canvas" id="photoCaptureCanvas"></canvas>
+        <div class="text-danger small mt-2 d-none" id="photoCaptureError"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="photoCaptureShotBtn">
+          <i class="bi bi-camera-fill me-1"></i>Take photo
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm Application Modal -->
 <div class="modal fade" id="confirmApplicationModal" tabindex="-1" aria-labelledby="confirmApplicationModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="confirmApplicationModalLabel"><i class="bi bi-shield-check me-2"></i>Confirm KAP application</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <h5 class="modal-title" id="confirmApplicationModalLabel"><i class="bi bi-shield-check me-2"></i>{% if is_edit %}Confirm changes{% else %}Confirm KAP application{% endif %}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" id="confirmCloseBtn"></button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small mb-3">Review these details before creating the application.</p>
+        <p class="text-muted small mb-3">{% if is_edit %}Review these details before saving your changes.{% else %}Review these details before creating the application.{% endif %}</p>
         <dl class="row mb-0 confirm-summary">
           <dt class="col-5">Borrower</dt><dd class="col-7" id="confirmBorrower">—</dd>
           <dt class="col-5">Loan product</dt><dd class="col-7" id="confirmProduct">—</dd>
@@ -871,10 +1028,18 @@
         </dl>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
-        <button type="button" class="btn btn-primary" id="confirmApplicationBtn"><i class="bi bi-check2 me-1"></i>Confirm & create</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="confirmGoBackBtn">Go back</button>
+        <button type="button" class="btn btn-primary" id="confirmApplicationBtn"><i class="bi bi-check2 me-1"></i>{% if is_edit %}Confirm & save{% else %}Confirm & create{% endif %}</button>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="creating-overlay" id="creatingOverlay" aria-live="polite" aria-busy="false" hidden>
+  <div class="creating-overlay-card">
+    <div class="spinner-border" role="status" aria-hidden="true"></div>
+    <h3>{% if is_edit %}Saving changes…{% else %}Creating application…{% endif %}</h3>
+    <p>{% if is_edit %}Updating borrower details, signatures, and schedule. Please wait.{% else %}Saving borrower details, signatures, and schedule. Please wait.{% endif %}</p>
   </div>
 </div>
 
@@ -882,6 +1047,10 @@
 <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.2.0/dist/signature_pad.umd.min.js"></script>
 <script>
 (function () {
+  var isEdit = {% if is_edit %}true{% else %}false{% endif %};
+  var excludeApplicationId = {% if is_edit %}{{ application.id }}{% else %}null{% endif %};
+  var existingBorrowerSig = "{% if form.instance.borrower_signature %}{{ form.instance.borrower_signature.url|escapejs }}{% endif %}";
+  var existingCoborrowerSig = "{% if form.instance.coborrower_signature %}{{ form.instance.coborrower_signature.url|escapejs }}{% endif %}";
   var amountInput = document.getElementById('{{ form.amount_requested.id_for_label }}');
   var amountForm = amountInput.closest('form');
   var signaturePads = {};
@@ -916,6 +1085,164 @@
 
   setupSignaturePad('borrowerSignaturePad', '{{ form.borrower_signature_data.id_for_label }}');
   setupSignaturePad('coborrowerSignaturePad', '{{ form.coborrower_signature_data.id_for_label }}');
+
+  function loadExistingSignature(canvasId, url) {
+    var pad = signaturePads[canvasId];
+    if (!pad || !url || !pad.fromDataURL) return;
+    pad.fromDataURL(url).then(function () {
+      updateAllRequiredFields();
+    }).catch(function () {});
+  }
+  loadExistingSignature('borrowerSignaturePad', existingBorrowerSig);
+  loadExistingSignature('coborrowerSignaturePad', existingCoborrowerSig);
+
+  (function setupPhotoFields() {
+    var activeField = null;
+    var cameraStream = null;
+    var modalEl = document.getElementById('photoCaptureModal');
+    var videoEl = document.getElementById('photoCaptureVideo');
+    var canvasEl = document.getElementById('photoCaptureCanvas');
+    var errorEl = document.getElementById('photoCaptureError');
+    var shotBtn = document.getElementById('photoCaptureShotBtn');
+    var titleEl = document.getElementById('photoCaptureModalLabel');
+    var modal = modalEl && window.bootstrap ? new bootstrap.Modal(modalEl) : null;
+
+    function stopCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(function (track) { track.stop(); });
+        cameraStream = null;
+      }
+      if (videoEl) videoEl.srcObject = null;
+    }
+
+    function showPreview(field, file) {
+      var preview = field.querySelector('[data-photo-preview]');
+      var placeholder = field.querySelector('[data-photo-placeholder]');
+      var clearBtn = field.querySelector('[data-photo-clear]');
+      if (!preview || !placeholder) return;
+      if (preview.dataset.objectUrl) {
+        URL.revokeObjectURL(preview.dataset.objectUrl);
+        delete preview.dataset.objectUrl;
+      }
+      if (!file) {
+        var existingSrc = preview.getAttribute('data-existing-src') || '';
+        if (existingSrc) {
+          preview.src = existingSrc;
+          preview.classList.remove('d-none');
+          placeholder.classList.add('d-none');
+          if (clearBtn) clearBtn.classList.remove('d-none');
+          return;
+        }
+        preview.src = '';
+        preview.classList.add('d-none');
+        placeholder.classList.remove('d-none');
+        if (clearBtn) clearBtn.classList.add('d-none');
+        return;
+      }
+      var url = URL.createObjectURL(file);
+      preview.dataset.objectUrl = url;
+      preview.src = url;
+      preview.classList.remove('d-none');
+      placeholder.classList.add('d-none');
+      if (clearBtn) clearBtn.classList.remove('d-none');
+    }
+
+    function assignFile(input, file) {
+      var transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function openCamera(field) {
+      activeField = field;
+      if (!modal || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Camera capture is not available in this browser. Please choose a file instead.');
+        return;
+      }
+      if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+      }
+      if (titleEl) {
+        titleEl.innerHTML = '<i class="bi bi-camera me-2"></i>Capture ' + (field.getAttribute('data-photo-label') || 'photo');
+      }
+      modal.show();
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
+        audio: false
+      }).then(function (stream) {
+        cameraStream = stream;
+        videoEl.srcObject = stream;
+        return videoEl.play();
+      }).catch(function () {
+        if (errorEl) {
+          errorEl.textContent = 'Could not access the camera. Check browser permissions, or choose a file instead.';
+          errorEl.classList.remove('d-none');
+        }
+      });
+    }
+
+    document.querySelectorAll('[data-photo-field]').forEach(function (field) {
+      var input = field.querySelector('[data-photo-input]');
+      var chooseBtn = field.querySelector('[data-photo-choose]');
+      var captureBtn = field.querySelector('[data-photo-capture]');
+      var clearBtn = field.querySelector('[data-photo-clear]');
+      if (!input) return;
+
+      if (chooseBtn) {
+        chooseBtn.addEventListener('click', function () { input.click(); });
+      }
+      if (captureBtn) {
+        captureBtn.addEventListener('click', function () { openCamera(field); });
+      }
+      if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+          input.value = '';
+          showPreview(field, null);
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
+      input.addEventListener('change', function () {
+        showPreview(field, input.files && input.files[0] ? input.files[0] : null);
+      });
+    });
+
+    if (shotBtn) {
+      shotBtn.addEventListener('click', function () {
+        if (!activeField || !videoEl || !canvasEl || !videoEl.videoWidth) {
+          if (errorEl) {
+            errorEl.textContent = 'Camera is not ready yet. Wait a moment, then try again.';
+            errorEl.classList.remove('d-none');
+          }
+          return;
+        }
+        var size = Math.min(videoEl.videoWidth, videoEl.videoHeight);
+        var sx = (videoEl.videoWidth - size) / 2;
+        var sy = (videoEl.videoHeight - size) / 2;
+        canvasEl.width = 600;
+        canvasEl.height = 600;
+        var ctx = canvasEl.getContext('2d');
+        ctx.drawImage(videoEl, sx, sy, size, size, 0, 0, 600, 600);
+        canvasEl.toBlob(function (blob) {
+          if (!blob) return;
+          var input = activeField.querySelector('[data-photo-input]');
+          var label = (activeField.getAttribute('data-photo-label') || 'photo').toLowerCase().replace(/\s+/g, '-');
+          var file = new File([blob], label + '-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+          assignFile(input, file);
+          showPreview(activeField, file);
+          if (modal) modal.hide();
+        }, 'image/jpeg', 0.92);
+      });
+    }
+
+    if (modalEl) {
+      modalEl.addEventListener('hidden.bs.modal', function () {
+        stopCamera();
+        activeField = null;
+      });
+    }
+  })();
 
   function fieldHasValue(container) {
     if (container.querySelector('#borrowerSignaturePad')) {
@@ -1099,7 +1426,11 @@
   function refreshAvailableProducts(selectedId) {
     var token = ++availableProductsToken;
     var borrowerId = borrowerSelect.value;
-    var url = '{% url "officer_available_products" %}' + (borrowerId ? ('?borrower=' + encodeURIComponent(borrowerId)) : '');
+    var url = '{% url "officer_available_products" %}';
+    var params = [];
+    if (borrowerId) params.push('borrower=' + encodeURIComponent(borrowerId));
+    if (excludeApplicationId) params.push('exclude_application=' + encodeURIComponent(excludeApplicationId));
+    if (params.length) url += '?' + params.join('&');
     fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -1208,10 +1539,18 @@
   }
 
   function onBorrowerChanged() {
+    if (skipNextBorrowerChange) {
+      skipNextBorrowerChange = false;
+      refreshAvailableProducts(productSelect.value);
+      updateAllRequiredFields();
+      return;
+    }
     refreshAvailableProducts(null);
     refreshMemberProfile();
     updateAllRequiredFields();
   }
+
+  var skipNextBorrowerChange = isEdit;
 
   if (borrowerSelect && window.TomSelect) {
     new TomSelect(borrowerSelect, {
@@ -1232,7 +1571,7 @@
     updateAllRequiredFields();
   });
   refreshAvailableProducts(productSelect.value);
-  if (borrowerSelect && borrowerSelect.value) {
+  if (borrowerSelect && borrowerSelect.value && !isEdit) {
     refreshMemberProfile();
   }
   updateAllRequiredFields();
@@ -1328,10 +1667,35 @@
   var appForm = document.getElementById('createApplicationBtn').closest('form');
   var confirmModalEl = document.getElementById('confirmApplicationModal');
   var confirmBtn = document.getElementById('confirmApplicationBtn');
+  var confirmGoBackBtn = document.getElementById('confirmGoBackBtn');
+  var confirmCloseBtn = document.getElementById('confirmCloseBtn');
+  var creatingOverlay = document.getElementById('creatingOverlay');
+  var createPageBtn = document.getElementById('createApplicationBtn');
 
   function selectedText(select) {
     var opt = select.options[select.selectedIndex];
     return opt ? opt.text.trim() : '';
+  }
+
+  function showCreatingState() {
+    confirmModalEl.classList.add('is-creating');
+    confirmBtn.disabled = true;
+    if (confirmGoBackBtn) confirmGoBackBtn.disabled = true;
+    if (confirmCloseBtn) confirmCloseBtn.disabled = true;
+    confirmBtn.innerHTML = isEdit
+      ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving…'
+      : '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Creating…';
+    if (createPageBtn) {
+      createPageBtn.disabled = true;
+      createPageBtn.innerHTML = isEdit
+        ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving…'
+        : '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Creating…';
+    }
+    if (creatingOverlay) {
+      creatingOverlay.hidden = false;
+      creatingOverlay.setAttribute('aria-busy', 'true');
+      creatingOverlay.classList.add('is-visible');
+    }
   }
 
   appForm.addEventListener('submit', function (e) {
@@ -1346,8 +1710,8 @@
       return;
     }
     var borrowerPad = signaturePads.borrowerSignaturePad;
-    if (borrowerPad && borrowerPad.isEmpty()) {
-      alert('Please capture the borrower signature before creating the application.');
+    if (borrowerPad && borrowerPad.isEmpty() && !(isEdit && existingBorrowerSig)) {
+      alert('Please capture the borrower signature before ' + (isEdit ? 'saving your changes.' : 'creating the application.'));
       return;
     }
 
@@ -1366,8 +1730,6 @@
 
   confirmBtn.addEventListener('click', function () {
     if (confirmBtn.disabled || appForm.dataset.submitting === 'true') return;
-    confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Creating…';
 
     var flag = appForm.querySelector('input[name="create_application"][type="hidden"]');
     if (!flag) {
@@ -1382,8 +1744,12 @@
     syncSignatures();
     appForm.dataset.confirmed = 'true';
     appForm.dataset.submitting = 'true';
-    bootstrap.Modal.getOrCreateInstance(confirmModalEl).hide();
-    appForm.submit();
+    showCreatingState();
+
+    // Brief delay so the loading overlay paints before the browser navigates.
+    window.setTimeout(function () {
+      appForm.submit();
+    }, 150);
   });
 })();
 </script>

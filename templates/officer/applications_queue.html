@@ -90,6 +90,9 @@
           <td class="table-actions">
             <div class="table-row-actions">
               <a class="btn btn-sm btn-light" href="{% url 'application_review' application_id=application.id %}"><i class="bi bi-arrow-up-right"></i><span class="visually-hidden">Open {{ application.reference }}</span></a>
+              {% if application.is_editable %}
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_edit_application' application_id=application.id %}"><i class="bi bi-pencil"></i><span class="visually-hidden">Edit {{ application.reference }}</span></a>
+              {% endif %}
               {% if request.user.is_admin %}
               <form method="post" action="{% url 'application_delete' application_id=application.id %}" onsubmit="return confirm('Delete application {{ application.reference }} for {{ application.borrower_name }}? This cannot be undone.');">
                 {% csrf_token %}
