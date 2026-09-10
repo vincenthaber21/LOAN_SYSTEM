@@ -581,8 +581,40 @@ body.auth-body .app-footer { background: var(--paper); }
   color: var(--teal-deep);
 }
 .form-label { color: var(--ink); font-size: .77rem; font-weight: 700; margin-bottom: 6px; }
-.form-control, .form-select { background: var(--paper); border: 1px solid #c5d9c8; border-radius: 8px; color: var(--ink); font-size: .84rem; padding: .63rem .75rem; }
-.form-control:focus, .form-select:focus { border-color: var(--teal); box-shadow: 0 0 0 .2rem rgba(24, 96, 16, .13); background: var(--paper); }
+.form-control, .form-select {
+  background-color: var(--paper);
+  border: 1px solid #c5d9c8;
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: .84rem;
+  padding: .63rem .75rem;
+}
+/* Keep Bootstrap chevron + readable selected value (hosting/Windows often loses both
+   when `background` shorthand wipes background-image / text fill). */
+.form-select {
+  background-image: var(--bs-form-select-bg-img);
+  background-repeat: no-repeat;
+  background-position: right .75rem center;
+  background-size: 16px 12px;
+  padding-right: 2.25rem;
+  color: #163a14;
+  -webkit-text-fill-color: #163a14;
+}
+.form-select option {
+  color: #163a14;
+  background-color: #ffffff;
+  -webkit-text-fill-color: #163a14;
+}
+.form-control:focus, .form-select:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 .2rem rgba(24, 96, 16, .13);
+  background-color: var(--paper);
+}
+.form-select:focus {
+  background-image: var(--bs-form-select-bg-img);
+  color: #163a14;
+  -webkit-text-fill-color: #163a14;
+}
 .form-text { color: var(--ink-soft); font-size: .72rem; }
 .estimate-box { background: var(--mint); border: 1px solid #c0e8d4; border-radius: 10px; padding: .75rem .9rem; min-height: calc(1.5em + 1.5rem + 2px); display: flex; flex-direction: column; justify-content: center; }
 .estimate-box strong { color: var(--teal-deep); font-family: 'Space Grotesk'; font-size: 1.15rem; line-height: 1.2; }
