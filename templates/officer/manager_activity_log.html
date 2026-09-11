@@ -2,7 +2,7 @@
 {% load lending_tags %}
 {% block title %}Activity log · {{ manager.display_name }}{% endblock %}
 {% block topbar_title %}Manager activity log{% endblock %}
-{% block topbar_context %}Monitor members, application forms, payments, and other actions by this manager.{% endblock %}
+{% block topbar_context %}Monitor logins, logouts, members, application forms, payments, and other actions by this manager.{% endblock %}
 {% block content %}
 
 <div class="page-heading fade-up">
@@ -25,6 +25,8 @@
     <a class="btn btn-outline-secondary" href="{% url 'edit_manager' manager_id=manager.id %}"><i class="bi bi-pencil me-1"></i>Edit profile</a>
   </div>
 </div>
+
+{% include "includes/activity_security_audit.html" %}
 
 <div class="row g-3 mb-4 fade-up-2">
   {% for metric in activity_summary %}
@@ -97,7 +99,7 @@
           <td>
             <div class="fw-semibold">{{ event.title }}</div>
             <div class="person-sub">{{ event.description }}</div>
-            {% if event.ip_address %}<div class="person-sub">IP {{ event.ip_address }}</div>{% endif %}
+            {% if event.ip_address or event.device %}<div class="person-sub">{% if event.ip_address %}IP {{ event.ip_address }}{% endif %}{% if event.ip_address and event.device %} · {% endif %}{{ event.device }}</div>{% endif %}
           </td>
           <td>
             {% if event.borrower_id %}
@@ -152,7 +154,7 @@
     {% if filters.period != "all" %}
     {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity in this period" description="Try a different day, week, month, or custom date range." %}
     {% else %}
-    {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity recorded yet" description="Creating members, saving application forms, payments, and other staff actions will appear here." %}
+    {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity recorded yet" description="Logins, logouts, members, application forms, payments, and other staff actions will appear here." %}
     {% endif %}
   </div>
   {% endif %}

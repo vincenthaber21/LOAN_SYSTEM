@@ -5,7 +5,7 @@ from datetime import datetime, time
 from django.db import IntegrityError
 from django.utils import timezone
 
-from .models import ActivityLog, Loan, LoanApplication, Payment, User
+from .models import ActivityLog, Loan, LoanApplication, LoginLogoutLog, Payment, User
 
 KIND_BY_FILTER = {
     "application": ActivityLog.Kind.APPLICATION,
@@ -37,10 +37,108 @@ def _user_agent(request):
     return (request.META.get("HTTP_USER_AGENT") or "")[:255]
 
 
+def browser_label(user_agent):
+    """Short device label for security audit rows."""
+    if not user_agent:
+        return ""
+    ua = user_agent.lower()
+    if "edg/" in ua or "edge/" in ua:
+        browser = "Edge"
+    elif "chrome/" in ua and "chromium" not in ua:
+        browser = "Chrome"
+    elif "firefox/" in ua:
+        browser = "Firefox"
+    elif "safari/" in ua:
+        browser = "Safari"
+    else:
+        browser = "Browser"
+    if "windows" in ua:
+        system = "Windows"
+    elif "mac os" in ua or "macintosh" in ua:
+        system = "macOS"
+    elif "android" in ua:
+        system = "Android"
+    elif "iphone" in ua or "ipad" in ua:
+        system = "iOS"
+    elif "linux" in ua:
+        system = "Linux"
+    else:
+        system = ""
+    return f"{browser} on {system}" if system else browser
+
+
 def _member_name(member):
     if member is None:
         return ""
     return member.display_name()
+
+
+def _is_staff_actor(actor):
+    if actor is None or getattr(actor, "is_anonymous", False):
+        return False
+    if not getattr(actor, "pk", None):
+        return False
+    return bool(getattr(actor, "is_officer", False))
+
+
+def _session_key(request):
+    if request is None:
+        return ""
+    session = getattr(request, "session", None)
+    if session is None:
+        return ""
+    return (getattr(session, "session_key", None) or "")[:40]
+
+
+def record_staff_auth_event(actor, event, request=None):
+    """Save a LoginLogoutLog row, then copy it into Activity history."""
+    if not _is_staff_actor(actor):
+        return None
+    if event == LoginLogoutLog.Event.LOGIN:
+        action, title, status, status_label, description = (
+            ActivityLog.Action.SIGNED_IN,
+            "Logged in",
+            "online",
+            "Login",
+            "Staff session started.",
+        )
+    elif event == LoginLogoutLog.Event.LOGOUT:
+        action, title, status, status_label, description = (
+            ActivityLog.Action.SIGNED_OUT,
+            "Logged out",
+            "neutral",
+            "Logout",
+            "Staff session ended.",
+        )
+    else:
+        event = LoginLogoutLog.Event.LOGIN_FAILED
+        action, title, status, status_label, description = (
+            ActivityLog.Action.SIGN_IN_FAILED,
+            "Failed login",
+            "rejected",
+            "Failed",
+            "Incorrect password for this account.",
+        )
+
+    log = LoginLogoutLog.objects.create(
+        user=actor,
+        event=event,
+        ip_address=client_ip(request),
+        user_agent=_user_agent(request),
+        session_key=_session_key(request),
+    )
+    return record_activity(
+        actor,
+        action=action,
+        kind=ActivityLog.Kind.SECURITY,
+        title=title,
+        description=description,
+        reference=getattr(actor, "username", "") or "",
+        status=status,
+        status_label=status_label,
+        request=request,
+        source_key=f"login_logout:{log.pk}",
+    )
 
 
 def record_activity(
@@ -63,9 +161,7 @@ def record_activity(
     created_at=None,
 ):
     """Persist one staff action. Non-staff actors are ignored so member self-service stays off officer logs."""
-    if actor is None or not getattr(actor, "is_authenticated", False) or not getattr(actor, "is_officer", False):
-        return None
-    if not actor.pk:
+    if not _is_staff_actor(actor):
         return None
 
     payload = {

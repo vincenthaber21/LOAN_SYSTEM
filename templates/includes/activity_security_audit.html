@@ -1,0 +1,14 @@
+<div class="mb-4 fade-up-2">
+  <div class="dashboard-section-label">Security audit trail</div>
+  <div class="row g-3">
+    {% for metric in security_audit %}
+    <div class="col-6 col-xl-3">
+      <div class="card-soft metric-card">
+        <div class="metric-label">{{ metric.label }}</div>
+        <div class="metric-value">{{ metric.value }}</div>
+        <div class="metric-note {% if metric.positive %}positive{% endif %}">{{ metric.note }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>

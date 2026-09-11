@@ -41,6 +41,7 @@ from .models import (
     LoanApplication,
     LoanOfficer,
     LoanProduct,
+    LoginLogoutLog,
     Manager,
     Member,
     Notification,
@@ -867,6 +868,24 @@ class ActivityLogAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
     search_fields = ("title", "description", "member_name", "reference", "actor__username", "actor__full_name", "ip_address")
     date_hierarchy = "created_at"
     readonly_fields = [field.name for field in ActivityLog._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(LoginLogoutLog)
+class LoginLogoutLogAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    list_display = ("created_at", "user", "event", "ip_address", "session_key")
+    list_filter = ("event", "created_at")
+    search_fields = ("user__username", "user__full_name", "user__email", "ip_address", "session_key")
+    date_hierarchy = "created_at"
+    readonly_fields = [field.name for field in LoginLogoutLog._meta.fields]
 
     def has_add_permission(self, request):
         return False

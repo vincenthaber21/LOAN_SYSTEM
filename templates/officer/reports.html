@@ -8,12 +8,12 @@
   <div>
     <div class="eyebrow">Insights</div>
     <h1>Portfolio reports.</h1>
-    <p>Collection, mutual aid, and savings for {{ date_from|date:"M d, Y" }} – {{ date_to|date:"M d, Y" }}, grouped {{ granularity_label|lower }} · {{ staff_label }}.</p>
+    <p>Collection, mutual aid, and savings for {{ date_from|date:"M d, Y" }} – {{ date_to|date:"M d, Y" }}, grouped {{ granularity_label|lower }} · {{ staff_label }}. Excel download uses a professional workbook with a tab for collections, applications, disbursements, savings, and mutual aid.</p>
   </div>
-  <a class="btn btn-primary csv-link" href="{{ cashflow_export_url }}"><i class="bi bi-download"></i>Download CSV</a>
+  <a class="btn btn-primary csv-link" href="{{ cashflow_export_url }}"><i class="bi bi-file-earmark-excel"></i>Download Excel</a>
 </div>
 
-<form method="get" action="{% url 'reports' %}" class="filter-bar mb-4">
+<form method="get" action="{% url 'reports' %}" class="filter-bar mb-4" id="reports-filter-form">
   <div class="row g-2 align-items-end">
     <div class="col-sm-6 col-lg-2">
       <label class="form-label" for="period">Reporting period</label>
@@ -22,6 +22,14 @@
         <option value="{{ option.value }}" {% if selected_period == option.value %}selected{% endif %}>{{ option.label }}</option>
         {% endfor %}
       </select>
+    </div>
+    <div class="col-sm-6 col-lg-2 report-custom-range {% if selected_period != 'custom' %}d-none{% endif %}">
+      <label class="form-label" for="report_from">From</label>
+      <input class="form-control" type="date" id="report_from" name="from" value="{{ custom_from }}" {% if selected_period != 'custom' %}disabled{% endif %}>
+    </div>
+    <div class="col-sm-6 col-lg-2 report-custom-range {% if selected_period != 'custom' %}d-none{% endif %}">
+      <label class="form-label" for="report_to">To</label>
+      <input class="form-control" type="date" id="report_to" name="to" value="{{ custom_to }}" {% if selected_period != 'custom' %}disabled{% endif %}>
     </div>
     <div class="col-sm-6 col-lg-2">
       <label class="form-label" for="grain">Group by</label>
@@ -55,7 +63,7 @@
   </div>
   <div class="row g-2 mt-2">
     <div class="col-auto ms-auto">
-      <a href="{{ cashflow_export_url }}" class="btn btn-outline-secondary csv-link"><i class="bi bi-filetype-csv"></i>Download current view</a>
+      <a href="{{ cashflow_export_url }}" class="btn btn-outline-secondary csv-link"><i class="bi bi-file-earmark-excel"></i>Download current view</a>
     </div>
   </div>
 </form>
@@ -296,4 +304,30 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var form = document.getElementById("reports-filter-form");
+  var period = document.getElementById("period");
+  if (!form || !period) return;
+
+  function syncCustomRange() {
+    var isCustom = period.value === "custom";
+    form.querySelectorAll(".report-custom-range").forEach(function (el) {
+      el.classList.toggle("d-none", !isCustom);
+    });
+    form.querySelectorAll(".report-custom-range input").forEach(function (input) {
+      input.disabled = !isCustom;
+    });
+  }
+
+  period.addEventListener("change", function () {
+    syncCustomRange();
+    if (period.value !== "custom") form.submit();
+  });
+  syncCustomRange();
+})();
+</script>
 {% endblock %}

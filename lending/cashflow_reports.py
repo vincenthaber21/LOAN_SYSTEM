@@ -1,12 +1,12 @@
 from collections import OrderedDict
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
-from .models import Payment, User
+from .models import Loan, LoanApplication, LoanProduct, Payment, User
 
 GRANULARITIES = [
     {"value": "day", "label": "Per day"},
@@ -18,6 +18,7 @@ LOOKBACKS = [
     {"value": "30", "label": "Last 30 days", "days": 30},
     {"value": "90", "label": "Last 90 days", "days": 90},
     {"value": "365", "label": "Last 12 months", "days": 365},
+    {"value": "custom", "label": "Custom range"},
 ]
 
 STAFF_ROLES = (User.Role.OFFICER, User.Role.MANAGER, User.Role.ADMIN)
@@ -54,6 +55,38 @@ def period_bounds(lookback_days):
     end = timezone.localdate()
     start = end - timedelta(days=lookback_days - 1)
     return start, end
+
+
+def _parse_date(value):
+    if value is None or value == "":
+        return None
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        return value
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_report_period(lookback_key="30", date_from=None, date_to=None):
+    """Resolve preset or custom reporting dates. Returns (key, start, end, label)."""
+    lookback_map = {item["value"]: item for item in LOOKBACKS}
+    if lookback_key not in lookback_map:
+        lookback_key = "30"
+
+    if lookback_key == "custom":
+        start = _parse_date(date_from)
+        end = _parse_date(date_to)
+        if start and end and start > end:
+            start, end = end, start
+        if not start or not end:
+            start, end = period_bounds(30)
+        label = f"{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}"
+        return lookback_key, start, end, label
+
+    lookback = lookback_map[lookback_key]
+    start, end = period_bounds(lookback["days"])
+    return lookback_key, start, end, lookback["label"]
 
 
 def _biweekly_start(day, anchor):
@@ -273,18 +306,24 @@ def savings_report(start, end, granularity, staff_user=None):
     }
 
 
-def cashflow_report_context(lookback_key="30", granularity="day", staff_user_id=None):
-    lookback_map = {item["value"]: item for item in LOOKBACKS}
+def cashflow_report_context(
+    lookback_key="30",
+    granularity="day",
+    staff_user_id=None,
+    date_from=None,
+    date_to=None,
+):
     granularity_map = {item["value"]: item for item in GRANULARITIES}
 
-    if lookback_key not in lookback_map:
-        lookback_key = "30"
     if granularity not in granularity_map:
         granularity = "day"
 
     staff_user = resolve_staff_user(staff_user_id)
-    lookback = lookback_map[lookback_key]
-    start, end = period_bounds(lookback["days"])
+    lookback_key, start, end, lookback_label = resolve_report_period(
+        lookback_key,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
     collection = collection_report(start, end, granularity, staff_user=staff_user)
     mutual_aid = mutual_aid_report(start, end, granularity, staff_user=staff_user)
@@ -303,11 +342,642 @@ def cashflow_report_context(lookback_key="30", granularity="day", staff_user_id=
             if staff_user
             else "All staff"
         ),
-        "lookback_label": lookback["label"],
+        "lookback_label": lookback_label,
         "granularity_label": granularity_map[granularity]["label"],
         "date_from": start,
         "date_to": end,
+        "custom_from": start.isoformat(),
+        "custom_to": end.isoformat(),
         "collection": collection,
         "mutual_aid": mutual_aid,
         "savings": savings,
     }
+
+
+def resolve_loan_product(product_id):
+    if not product_id:
+        return None
+    try:
+        return LoanProduct.objects.get(pk=int(product_id))
+    except (TypeError, ValueError, LoanProduct.DoesNotExist):
+        return None
+
+
+def _staff_name(user):
+    return user.display_name() if user else ""
+
+
+def _datetime_parts(value):
+    """Return iso date, month label, display date, and local time for audit rows."""
+    if value is None:
+        return "", "", "", ""
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            value = timezone.localtime(value)
+        return (
+            value.strftime("%Y-%m-%d"),
+            value.strftime("%B %Y"),
+            value.strftime("%b %d, %Y"),
+            value.strftime("%I:%M:%S %p"),
+        )
+    return (
+        value.strftime("%Y-%m-%d"),
+        value.strftime("%B %Y"),
+        value.strftime("%b %d, %Y"),
+        "",
+    )
+
+
+def _sort_datetime(value):
+    if value is None:
+        return datetime.min
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            return timezone.localtime(value).replace(tzinfo=None)
+        return value
+    return datetime.combine(value, time.min)
+
+
+def _ledger_item(category, when, *, reference, member, detail, type_label, amount, method_or_status, recorded_by, notes=""):
+    iso_date, month, display_date, time_label = _datetime_parts(when)
+    return {
+        "category": category,
+        "iso_date": iso_date,
+        "month": month,
+        "display_date": display_date,
+        "time": time_label,
+        "reference": reference,
+        "member": member,
+        "detail": detail,
+        "type": type_label,
+        "amount": amount,
+        "method_or_status": method_or_status,
+        "recorded_by": recorded_by,
+        "notes": notes,
+        "sort_key": _sort_datetime(when),
+    }
+
+
+def audit_detail_context(start, end, staff_user=None, product=None):
+    """Line-level collections, applications, disbursements, and transactions."""
+    payments = Payment.objects.filter(
+        payment_date__gte=start,
+        payment_date__lte=end,
+    ).select_related(
+        "loan",
+        "loan__application",
+        "loan__application__borrower",
+        "loan__application__loan_product",
+        "recorded_by",
+        "installment",
+    ).order_by("payment_date", "pk")
+    if staff_user is not None:
+        payments = payments.filter(recorded_by=staff_user)
+    if product is not None:
+        payments = payments.filter(loan__application__loan_product=product)
+
+    collections = []
+    for payment in payments:
+        application = payment.loan.application
+        collections.append({
+            "when": payment.payment_date,
+            "reference": payment.reference_number or f"PAY-{payment.pk:05d}",
+            "loan": payment.loan.reference,
+            "application": application.reference,
+            "member": application.borrower_name,
+            "product": application.product_name,
+            "amount": payment.amount,
+            "loan_applied": payment.loan_amount_applied,
+            "savings_adjustment": payment.savings_adjustment or Decimal("0.00"),
+            "mutual_aid": payment.mutual_aid_contribution or Decimal("0.00"),
+            "method": payment.get_method_display(),
+            "installment": (
+                payment.installment.installment_number if payment.installment_id else ""
+            ),
+            "recorded_by": _staff_name(payment.recorded_by),
+            **dict(zip(
+                ("iso_date", "month", "display_date", "time"),
+                _datetime_parts(payment.payment_date),
+            )),
+        })
+
+    loans = Loan.objects.filter(
+        disbursed_date__gte=start,
+        disbursed_date__lte=end,
+    ).select_related(
+        "application",
+        "application__borrower",
+        "application__loan_product",
+        "disbursed_by",
+    ).order_by("disbursed_date", "pk")
+    if staff_user is not None:
+        loans = loans.filter(disbursed_by=staff_user)
+    if product is not None:
+        loans = loans.filter(application__loan_product=product)
+
+    disbursements = []
+    for loan in loans:
+        application = loan.application
+        disbursements.append({
+            "when": loan.disbursed_date,
+            "reference": loan.reference,
+            "receipt": loan.disbursement_receipt_number,
+            "application": application.reference,
+            "member": application.borrower_name,
+            "product": application.product_name,
+            "principal": loan.principal,
+            "net_release": loan.net_release_amount,
+            "outstanding": loan.outstanding_balance,
+            "status": loan.get_status_display(),
+            "method": loan.disbursement_method,
+            "disbursement_reference": loan.disbursement_reference,
+            "disbursed_by": _staff_name(loan.disbursed_by),
+            **dict(zip(
+                ("iso_date", "month", "display_date", "time"),
+                _datetime_parts(loan.disbursed_date),
+            )),
+        })
+
+    applications = LoanApplication.objects.filter(
+        Q(applied_on__gte=start, applied_on__lte=end)
+        | Q(created_at__date__gte=start, created_at__date__lte=end)
+    ).select_related(
+        "borrower",
+        "loan_product",
+        "created_by",
+        "reviewed_by",
+    ).order_by("created_at", "pk")
+    if staff_user is not None:
+        applications = applications.filter(
+            Q(created_by=staff_user) | Q(reviewed_by=staff_user)
+        )
+    if product is not None:
+        applications = applications.filter(loan_product=product)
+
+    application_rows = []
+    for application in applications:
+        when = application.created_at
+        if application.applied_on:
+            local_created = (
+                timezone.localtime(application.created_at)
+                if timezone.is_aware(application.created_at)
+                else application.created_at
+            )
+            when = datetime.combine(application.applied_on, local_created.time())
+        application_rows.append({
+            "when": when,
+            "reference": application.reference,
+            "member": application.borrower_name,
+            "email": application.email,
+            "product": application.product_name,
+            "amount": application.amount_requested,
+            "term_months": application.term_months,
+            "status": application.status_label,
+            "created_by": _staff_name(application.created_by),
+            "reviewed_by": _staff_name(application.reviewed_by),
+            **dict(zip(
+                ("iso_date", "month", "display_date", "time"),
+                _datetime_parts(when),
+            )),
+        })
+
+    from savings.models import SavingsTransaction
+
+    savings_qs = SavingsTransaction.objects.filter(
+        created_at__date__gte=start,
+        created_at__date__lte=end,
+    ).select_related(
+        "account",
+        "account__member",
+        "account__product",
+        "created_by",
+    ).order_by("created_at", "pk")
+    if staff_user is not None:
+        savings_qs = savings_qs.filter(created_by=staff_user)
+
+    savings_rows = []
+    for tx in savings_qs:
+        savings_rows.append({
+            "when": tx.created_at,
+            "reference": tx.reference_number or f"SVT-{tx.pk:05d}",
+            "account": tx.account.reference,
+            "member": tx.account.member.display_name(),
+            "product": tx.account.product_name,
+            "type": tx.get_transaction_type_display(),
+            "amount": tx.amount,
+            "method": tx.get_method_display(),
+            "balance_after": tx.balance_after,
+            "recorded_by": _staff_name(tx.created_by),
+            "notes": tx.notes,
+            **dict(zip(
+                ("iso_date", "month", "display_date", "time"),
+                _datetime_parts(tx.created_at),
+            )),
+        })
+
+    from mutual_aid.models import MutualAidContribution
+
+    aid_qs = MutualAidContribution.objects.filter(
+        created_at__date__gte=start,
+        created_at__date__lte=end,
+    ).select_related(
+        "membership",
+        "membership__member",
+        "membership__plan",
+        "recorded_by",
+        "period",
+    ).order_by("created_at", "pk")
+    if staff_user is not None:
+        aid_qs = aid_qs.filter(recorded_by=staff_user)
+
+    mutual_aid_rows = []
+    for contribution in aid_qs:
+        membership = contribution.membership
+        mutual_aid_rows.append({
+            "when": contribution.created_at,
+            "reference": contribution.reference_number or f"MAC-{contribution.pk:05d}",
+            "membership": membership.reference,
+            "member": membership.member.display_name(),
+            "plan": membership.plan_name,
+            "period": contribution.period.display_label if contribution.period_id else "",
+            "amount": contribution.amount,
+            "method": contribution.get_method_display(),
+            "recorded_by": _staff_name(contribution.recorded_by),
+            "notes": contribution.notes,
+            **dict(zip(
+                ("iso_date", "month", "display_date", "time"),
+                _datetime_parts(contribution.created_at),
+            )),
+        })
+
+    ledger = []
+    for row in collections:
+        ledger.append(_ledger_item(
+            "Collection",
+            row["when"],
+            reference=row["reference"],
+            member=row["member"],
+            detail=f"{row['loan']} · {row['product']}",
+            type_label="Loan payment",
+            amount=row["amount"],
+            method_or_status=row["method"],
+            recorded_by=row["recorded_by"],
+            notes=f"Applied {row['loan_applied']}; savings {row['savings_adjustment']}; mutual aid {row['mutual_aid']}",
+        ))
+    for row in disbursements:
+        ledger.append(_ledger_item(
+            "Disbursement",
+            row["when"],
+            reference=row["reference"],
+            member=row["member"],
+            detail=f"{row['application']} · {row['product']}",
+            type_label="Loan release",
+            amount=row["principal"],
+            method_or_status=row["status"],
+            recorded_by=row["disbursed_by"],
+            notes=row["disbursement_reference"] or row["method"],
+        ))
+    for row in application_rows:
+        ledger.append(_ledger_item(
+            "Application",
+            row["when"],
+            reference=row["reference"],
+            member=row["member"],
+            detail=row["product"],
+            type_label=row["status"],
+            amount=row["amount"],
+            method_or_status=row["status"],
+            recorded_by=row["created_by"] or row["reviewed_by"],
+            notes=f"Term {row['term_months']} months",
+        ))
+    for row in savings_rows:
+        ledger.append(_ledger_item(
+            "Savings",
+            row["when"],
+            reference=row["reference"],
+            member=row["member"],
+            detail=f"{row['account']} · {row['product']}",
+            type_label=row["type"],
+            amount=row["amount"],
+            method_or_status=row["method"],
+            recorded_by=row["recorded_by"],
+            notes=row["notes"],
+        ))
+    for row in mutual_aid_rows:
+        ledger.append(_ledger_item(
+            "Mutual aid",
+            row["when"],
+            reference=row["reference"],
+            member=row["member"],
+            detail=row["plan"],
+            type_label="Contribution",
+            amount=row["amount"],
+            method_or_status=row["method"],
+            recorded_by=row["recorded_by"],
+            notes=row["notes"],
+        ))
+    ledger.sort(key=lambda item: (item["sort_key"], item["category"], item["reference"]))
+
+    return {
+        "collections": collections,
+        "disbursements": disbursements,
+        "applications": application_rows,
+        "savings_transactions": savings_rows,
+        "mutual_aid_contributions": mutual_aid_rows,
+        "ledger": ledger,
+        "product_label": product.name if product else "All products",
+    }
+
+
+def write_audit_csv(writer, cashflow, *, generated_at, generated_by, product=None):
+    details = audit_detail_context(
+        cashflow["date_from"],
+        cashflow["date_to"],
+        staff_user=cashflow["selected_staff"],
+        product=product,
+    )
+    generated_local = timezone.localtime(generated_at) if timezone.is_aware(generated_at) else generated_at
+
+    writer.writerow(["Detailed audit report"])
+    writer.writerow(["Generated month", generated_local.strftime("%B %Y")])
+    writer.writerow(["Generated date", generated_local.strftime("%Y-%m-%d")])
+    writer.writerow(["Generated time", generated_local.strftime("%I:%M:%S %p")])
+    writer.writerow(["Generated at", generated_local.strftime("%B %d, %Y %I:%M:%S %p")])
+    writer.writerow(["Generated by", generated_by.display_name() if generated_by else ""])
+    writer.writerow(["Period", cashflow["lookback_label"]])
+    writer.writerow(["Date from", cashflow["date_from"].isoformat()])
+    writer.writerow(["Date to", cashflow["date_to"].isoformat()])
+    writer.writerow(["Granularity", cashflow["granularity_label"]])
+    writer.writerow(["Staff", cashflow["staff_label"]])
+    writer.writerow(["Product", details["product_label"]])
+    writer.writerow([])
+
+    writer.writerow(["Summary totals"])
+    writer.writerow(["Category", "Count", "Amount"])
+    writer.writerow([
+        "Collection (loan payments)",
+        cashflow["collection"]["total_count"],
+        cashflow["collection"]["total_amount"],
+    ])
+    writer.writerow([
+        "Mutual aid contributions",
+        cashflow["mutual_aid"]["total_count"],
+        cashflow["mutual_aid"]["total_amount"],
+    ])
+    writer.writerow([
+        "Savings deposits",
+        cashflow["savings"]["total_count"],
+        cashflow["savings"]["total_amount"],
+    ])
+    writer.writerow(["Applications", len(details["applications"]), ""])
+    writer.writerow(["Disbursements", len(details["disbursements"]), ""])
+    writer.writerow(["Savings transactions", len(details["savings_transactions"]), ""])
+    writer.writerow([])
+
+    writer.writerow(["All activity (chronological)"])
+    writer.writerow([
+        "Category",
+        "Date",
+        "Month",
+        "Time",
+        "Reference",
+        "Member",
+        "Detail",
+        "Type",
+        "Amount",
+        "Method / status",
+        "Recorded by",
+        "Notes",
+    ])
+    for row in details["ledger"]:
+        writer.writerow([
+            row["category"],
+            row["iso_date"],
+            row["month"],
+            row["time"],
+            row["reference"],
+            row["member"],
+            row["detail"],
+            row["type"],
+            row["amount"],
+            row["method_or_status"],
+            row["recorded_by"],
+            row["notes"],
+        ])
+    writer.writerow([])
+
+    writer.writerow(["Detailed collections"])
+    writer.writerow([
+        "Date",
+        "Month",
+        "Time",
+        "Payment reference",
+        "Loan",
+        "Application",
+        "Member",
+        "Product",
+        "Amount",
+        "Applied to loan",
+        "Savings adjustment",
+        "Mutual aid",
+        "Method",
+        "Installment",
+        "Recorded by",
+    ])
+    for row in details["collections"]:
+        writer.writerow([
+            row["iso_date"],
+            row["month"],
+            row["time"],
+            row["reference"],
+            row["loan"],
+            row["application"],
+            row["member"],
+            row["product"],
+            row["amount"],
+            row["loan_applied"],
+            row["savings_adjustment"],
+            row["mutual_aid"],
+            row["method"],
+            row["installment"],
+            row["recorded_by"],
+        ])
+    writer.writerow([])
+
+    writer.writerow(["Detailed applications"])
+    writer.writerow([
+        "Date",
+        "Month",
+        "Time",
+        "Reference",
+        "Member",
+        "Email",
+        "Product",
+        "Amount requested",
+        "Term (months)",
+        "Status",
+        "Created by",
+        "Reviewed by",
+    ])
+    for row in details["applications"]:
+        writer.writerow([
+            row["iso_date"],
+            row["month"],
+            row["time"],
+            row["reference"],
+            row["member"],
+            row["email"],
+            row["product"],
+            row["amount"],
+            row["term_months"],
+            row["status"],
+            row["created_by"],
+            row["reviewed_by"],
+        ])
+    writer.writerow([])
+
+    writer.writerow(["Detailed disbursements"])
+    writer.writerow([
+        "Date",
+        "Month",
+        "Time",
+        "Loan",
+        "Receipt",
+        "Application",
+        "Member",
+        "Product",
+        "Principal",
+        "Net release",
+        "Outstanding",
+        "Status",
+        "Method",
+        "Disbursement reference",
+        "Disbursed by",
+    ])
+    for row in details["disbursements"]:
+        writer.writerow([
+            row["iso_date"],
+            row["month"],
+            row["time"],
+            row["reference"],
+            row["receipt"],
+            row["application"],
+            row["member"],
+            row["product"],
+            row["principal"],
+            row["net_release"],
+            row["outstanding"],
+            row["status"],
+            row["method"],
+            row["disbursement_reference"],
+            row["disbursed_by"],
+        ])
+    writer.writerow([])
+
+    writer.writerow(["Detailed savings transactions"])
+    writer.writerow([
+        "Date",
+        "Month",
+        "Time",
+        "Reference",
+        "Account",
+        "Member",
+        "Product",
+        "Type",
+        "Amount",
+        "Method",
+        "Balance after",
+        "Recorded by",
+        "Notes",
+    ])
+    for row in details["savings_transactions"]:
+        writer.writerow([
+            row["iso_date"],
+            row["month"],
+            row["time"],
+            row["reference"],
+            row["account"],
+            row["member"],
+            row["product"],
+            row["type"],
+            row["amount"],
+            row["method"],
+            row["balance_after"],
+            row["recorded_by"],
+            row["notes"],
+        ])
+    writer.writerow([])
+
+    writer.writerow(["Detailed mutual aid contributions"])
+    writer.writerow([
+        "Date",
+        "Month",
+        "Time",
+        "Reference",
+        "Membership",
+        "Member",
+        "Plan",
+        "Period",
+        "Amount",
+        "Method",
+        "Recorded by",
+        "Notes",
+    ])
+    for row in details["mutual_aid_contributions"]:
+        writer.writerow([
+            row["iso_date"],
+            row["month"],
+            row["time"],
+            row["reference"],
+            row["membership"],
+            row["member"],
+            row["plan"],
+            row["period"],
+            row["amount"],
+            row["method"],
+            row["recorded_by"],
+            row["notes"],
+        ])
+    writer.writerow([])
+
+    writer.writerow(["Collection totals by period"])
+    writer.writerow(["Period", "Payments", "Amount"])
+    for row in cashflow["collection"]["rows"]:
+        writer.writerow([row["label"], row["count"], row["amount"]])
+    writer.writerow([
+        "Total",
+        cashflow["collection"]["total_count"],
+        cashflow["collection"]["total_amount"],
+    ])
+    writer.writerow([])
+
+    writer.writerow(["Mutual aid totals by period"])
+    writer.writerow(["Period", "Contributions", "Amount"])
+    for row in cashflow["mutual_aid"]["rows"]:
+        writer.writerow([row["label"], row["count"], row["amount"]])
+    writer.writerow([
+        "Total",
+        cashflow["mutual_aid"]["total_count"],
+        cashflow["mutual_aid"]["total_amount"],
+    ])
+    writer.writerow([])
+
+    writer.writerow(["Savings totals by period"])
+    writer.writerow(["Period", "Deposits count", "Deposits", "Interest", "Withdrawals", "Net"])
+    for row in cashflow["savings"]["rows"]:
+        writer.writerow([
+            row["label"],
+            row["count"],
+            row["amount"],
+            row["interest"],
+            row["withdrawals"],
+            row["net"],
+        ])
+    writer.writerow([
+        "Total",
+        cashflow["savings"]["total_count"],
+        cashflow["savings"]["total_amount"],
+        cashflow["savings"]["total_interest"],
+        cashflow["savings"]["total_withdrawals"],
+        cashflow["savings"]["total_net"],
+    ])

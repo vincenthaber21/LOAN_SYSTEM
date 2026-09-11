@@ -1428,4 +1428,46 @@ class ActivityLog(models.Model):
             "url_name": self.url_name,
             "url_kwargs": self.url_kwargs or {},
             "ip_address": self.ip_address,
+            "user_agent": self.user_agent,
+            "device": self._device_label(),
         }
+
+    def _device_label(self):
+        from .audit import browser_label
+
+        return browser_label(self.user_agent)
+
+
+class LoginLogoutLog(models.Model):
+    """Append-only login and logout records, copied into Activity history for staff monitoring."""
+
+    class Event(models.TextChoices):
+        LOGIN = "login", "Login"
+        LOGOUT = "logout", "Logout"
+        LOGIN_FAILED = "login_failed", "Failed login"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="login_logout_logs",
+    )
+    event = models.CharField(max_length=20, choices=Event.choices, db_index=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True)
+    session_key = models.CharField(max_length=40, blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Login / logout log"
+        verbose_name_plural = "Login / logout logs"
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["user", "event", "created_at"]),
+        ]
+
+    def __str__(self):
+        who = self.user.display_name() if self.user_id else "Unknown"
+        return f"{who} · {self.get_event_display()}"

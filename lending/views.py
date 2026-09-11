@@ -13,11 +13,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from .cashflow_reports import cashflow_report_context, resolve_staff_user
+from .audit_export import build_audit_workbook
+from .cashflow_reports import cashflow_report_context, resolve_loan_product, resolve_report_period, resolve_staff_user, write_audit_csv
 from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
-from .audit import application_decision_log, record_activity
-from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, Manager, Notification, Payment, User
+from .audit import application_decision_log, browser_label, record_activity, record_staff_auth_event
+from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, LoginLogoutLog, Manager, Notification, Payment, User
 from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
 
 
@@ -125,7 +126,10 @@ def dashboard(request):
 
 
 def logout_view(request):
-    if request.user.is_authenticated:
+    user = request.user
+    if user.is_authenticated:
+        record_staff_auth_event(user, LoginLogoutLog.Event.LOGOUT, request)
+        setattr(request, "_staff_auth_event_logged", True)
         logout(request)
         messages.success(request, "You have been signed out.")
     return redirect("login")
@@ -1790,6 +1794,11 @@ def _build_activity_log_context(request, staff):
     disbursed_total = loans.aggregate(total=Sum("principal"))["total"] or Decimal("0.00")
     members_created = staff_logs.filter(action=ActivityLog.Action.MEMBER_CREATED).count()
     applications_created = staff_logs.filter(action=ActivityLog.Action.APPLICATION_CREATED).count()
+    sign_ins = staff_logs.filter(action=ActivityLog.Action.SIGNED_IN).count()
+    sign_outs = staff_logs.filter(action=ActivityLog.Action.SIGNED_OUT).count()
+    failed_sign_ins = staff_logs.filter(action=ActivityLog.Action.SIGN_IN_FAILED).count()
+    last_sign_in = staff_logs.filter(action=ActivityLog.Action.SIGNED_IN).order_by("-created_at").first()
+    last_sign_out = staff_logs.filter(action=ActivityLog.Action.SIGNED_OUT).order_by("-created_at").first()
 
     custom_from = ""
     custom_to = ""
@@ -1807,7 +1816,7 @@ def _build_activity_log_context(request, staff):
                 collection_query_parts.append(f"to={date_to.isoformat()}")
     collection_filter_query = "&".join(collection_query_parts)
     activity_copy = {
-        "all": ("Activity history", "Members, application forms, payments, disbursements, and other staff actions."),
+        "all": ("Activity history", "Members, application forms, payments, disbursements, logins, logouts, and other staff actions."),
         "member": ("Members", "Member accounts created or updated by this staff member."),
         "application": ("Applications", "Application forms created, saved, reviewed, or deleted."),
         "payment": ("Pay collection", "Loan payments recorded by this staff member."),
@@ -1815,7 +1824,7 @@ def _build_activity_log_context(request, staff):
         "savings": ("Savings", "Savings accounts and transactions handled by this staff member."),
         "mutual_aid": ("Mutual aid", "Enrollments, contributions, and claims handled by this staff member."),
         "account": ("Accounts", "Officer, manager, and product changes."),
-        "security": ("Security", "Sign-ins, sign-outs, and data exports."),
+        "security": ("Login & logout", "Logins, logouts, failed sign-ins, and data exports."),
     }
     activity_heading, activity_blurb = activity_copy.get(activity_type, activity_copy["all"])
 
@@ -1839,7 +1848,7 @@ def _build_activity_log_context(request, staff):
             {"value": "savings", "label": "Savings"},
             {"value": "mutual_aid", "label": "Mutual aid"},
             {"value": "account", "label": "Accounts"},
-            {"value": "security", "label": "Security"},
+            {"value": "security", "label": "Login & logout"},
         ],
         "activity_period_filters": ACTIVITY_PERIOD_FILTERS,
         "date_range_label": activity_range_label(period, date_from, date_to),
@@ -1873,6 +1882,29 @@ def _build_activity_log_context(request, staff):
                 "value": f"₱{disbursed_total:,.0f}",
                 "note": f"{disbursement_count} loan{'s' if disbursement_count != 1 else ''} · principal",
                 "positive": disbursed_total > 0,
+            },
+        ],
+        "security_audit": [
+            {
+                "label": "Logins",
+                "value": sign_ins,
+                "note": format_activity_timestamp(last_sign_in.created_at) if last_sign_in else "No login recorded",
+                "positive": sign_ins > 0,
+            },
+            {
+                "label": "Logouts",
+                "value": sign_outs,
+                "note": format_activity_timestamp(last_sign_out.created_at) if last_sign_out else "No logout recorded",
+            },
+            {
+                "label": "Failed logins",
+                "value": failed_sign_ins,
+                "note": "Incorrect password attempts",
+            },
+            {
+                "label": "Last login IP",
+                "value": (last_sign_in.ip_address if last_sign_in and last_sign_in.ip_address else "—"),
+                "note": (browser_label(last_sign_in.user_agent) if last_sign_in else "") or "Captured at sign-in",
             },
         ],
     }
@@ -2418,6 +2450,8 @@ def reports(request):
         lookback_key=request.GET.get("period", "30"),
         granularity=request.GET.get("grain", "day"),
         staff_user_id=staff_user_id,
+        date_from=request.GET.get("from"),
+        date_to=request.GET.get("to"),
     )
     staff_user = cashflow["selected_staff"]
 
@@ -2520,6 +2554,11 @@ def reports(request):
         f"&grain={cashflow['selected_granularity']}"
         f"&staff={cashflow['selected_staff_id']}"
     )
+    if cashflow["selected_lookback"] == "custom":
+        export_query += (
+            f"&from={cashflow['date_from'].isoformat()}"
+            f"&to={cashflow['date_to'].isoformat()}"
+        )
     if product_id:
         export_query += f"&product={product_id}"
 
@@ -2543,12 +2582,17 @@ def reports(request):
         "origination_chart_period_label": origination_chart_period_label,
         "chart_period_label": cashflow["lookback_label"],
         "portfolio_mix": portfolio_mix,
-        "cashflow_export_url": reverse("export_cashflow_csv") + export_query,
+        "cashflow_export_url": reverse("export_audit_xlsx") + export_query,
         "available_exports": [
             {
-                "label": "Cashflow CSV",
-                "description": "Collection, mutual aid & savings",
-                "url": reverse("export_cashflow_csv") + export_query,
+                "label": "Audit Excel",
+                "description": "Workbook with a tab for each feature",
+                "url": reverse("export_audit_xlsx") + export_query,
+            },
+            {
+                "label": "Audit CSV",
+                "description": "Same audit data in a single CSV file",
+                "url": reverse("export_cashflow_csv") + export_query + "&format=csv",
             },
             {"label": "Portfolio CSV", "description": "All disbursed loans", "url": reverse("export_portfolio_csv") + export_query},
             {"label": "Application CSV", "description": "Application queue", "url": reverse("export_applications_csv")},
@@ -2560,74 +2604,47 @@ def reports(request):
 @login_required
 @role_required("manager")
 def export_cashflow_csv(request):
-    _log_export(request, "Cashflow CSV exported", "Cashflow report downloaded.")
     cashflow = cashflow_report_context(
         lookback_key=request.GET.get("period", "30"),
         granularity=request.GET.get("grain", "day"),
         staff_user_id=request.GET.get("staff", ""),
+        date_from=request.GET.get("from"),
+        date_to=request.GET.get("to"),
     )
-    response = HttpResponse(content_type="text/csv")
+    product = resolve_loan_product(request.GET.get("product", ""))
+    generated_at = timezone.localtime()
     staff_slug = cashflow["selected_staff_id"] or "all-staff"
-    filename = (
-        f"cashflow-{cashflow['selected_granularity']}-"
+    stem = (
+        f"audit-report-{cashflow['selected_granularity']}-"
         f"{staff_slug}-"
-        f"{cashflow['date_from']}-to-{cashflow['date_to']}.csv"
+        f"{cashflow['date_from']}-to-{cashflow['date_to']}"
     )
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-    writer = csv.writer(response)
-    writer.writerow(["Cashflow report"])
-    writer.writerow(["Period", cashflow["lookback_label"]])
-    writer.writerow(["Granularity", cashflow["granularity_label"]])
-    writer.writerow(["Staff", cashflow["staff_label"]])
-    writer.writerow([
-        "Date from",
-        cashflow["date_from"].isoformat(),
-        "Date to",
-        cashflow["date_to"].isoformat(),
-    ])
-    writer.writerow([])
+    if request.GET.get("format") == "csv":
+        _log_export(request, "Audit CSV exported", "Detailed cashflow audit report downloaded.")
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{stem}.csv"'
+        writer = csv.writer(response)
+        write_audit_csv(
+            writer,
+            cashflow,
+            generated_at=generated_at,
+            generated_by=request.user,
+            product=product,
+        )
+        return response
 
-    writer.writerow(["Collection (loan payments)"])
-    writer.writerow(["Period", "Payments", "Amount"])
-    for row in cashflow["collection"]["rows"]:
-        writer.writerow([row["label"], row["count"], row["amount"]])
-    writer.writerow([
-        "Total",
-        cashflow["collection"]["total_count"],
-        cashflow["collection"]["total_amount"],
-    ])
-    writer.writerow([])
-
-    writer.writerow(["Mutual aid contributions"])
-    writer.writerow(["Period", "Contributions", "Amount"])
-    for row in cashflow["mutual_aid"]["rows"]:
-        writer.writerow([row["label"], row["count"], row["amount"]])
-    writer.writerow([
-        "Total",
-        cashflow["mutual_aid"]["total_count"],
-        cashflow["mutual_aid"]["total_amount"],
-    ])
-    writer.writerow([])
-
-    writer.writerow(["Savings"])
-    writer.writerow(["Period", "Deposits count", "Deposits", "Interest", "Withdrawals", "Net"])
-    for row in cashflow["savings"]["rows"]:
-        writer.writerow([
-            row["label"],
-            row["count"],
-            row["amount"],
-            row["interest"],
-            row["withdrawals"],
-            row["net"],
-        ])
-    writer.writerow([
-        "Total",
-        cashflow["savings"]["total_count"],
-        cashflow["savings"]["total_amount"],
-        cashflow["savings"]["total_interest"],
-        cashflow["savings"]["total_withdrawals"],
-        cashflow["savings"]["total_net"],
-    ])
+    _log_export(request, "Audit Excel exported", "Detailed cashflow audit workbook downloaded.")
+    workbook = build_audit_workbook(
+        cashflow,
+        generated_at=generated_at,
+        generated_by=request.user,
+        product=product,
+    )
+    response = HttpResponse(
+        workbook.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{stem}.xlsx"'
     return response
 
 
@@ -2646,11 +2663,14 @@ def export_portfolio_csv(request):
     staff_user = resolve_staff_user(request.GET.get("staff", ""))
     if staff_user is not None:
         loans = loans.filter(disbursed_by=staff_user)
-    period_days = {"30": 30, "90": 90, "365": 365}
     period = request.GET.get("period", "")
-    if period in period_days:
-        cutoff = timezone.localdate() - timedelta(days=period_days[period] - 1)
-        loans = loans.filter(disbursed_date__gte=cutoff)
+    if period in {"30", "90", "365", "custom"}:
+        _, date_from, date_to, _ = resolve_report_period(
+            period,
+            date_from=request.GET.get("from"),
+            date_to=request.GET.get("to"),
+        )
+        loans = loans.filter(disbursed_date__gte=date_from, disbursed_date__lte=date_to)
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="lumen-loan-portfolio.csv"'
     writer = csv.writer(response)
