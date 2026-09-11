@@ -1364,6 +1364,7 @@ class ActivityLog(models.Model):
         MEMBERSHIP_STATUS = "membership_status", "Membership status changed"
         PROFILE_UPDATED = "profile_updated", "Profile updated"
         DATA_EXPORTED = "data_exported", "Data exported"
+        DATA_IMPORTED = "data_imported", "Data imported"
         SIGNED_IN = "signed_in", "Signed in"
         SIGNED_OUT = "signed_out", "Signed out"
         SIGN_IN_FAILED = "sign_in_failed", "Failed sign-in"

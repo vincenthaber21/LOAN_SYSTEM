@@ -1,12 +1,15 @@
+import io
 from datetime import datetime
 from decimal import Decimal
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin
+from django.core.exceptions import PermissionDenied
 from django.db.models import Sum
-from django.http import HttpResponseRedirect
-from django.urls import reverse
+from django.http import FileResponse, HttpResponseRedirect
+from django.urls import path, reverse
 from django.utils import timezone
 
 try:  # Django 5.1+ splits the admin-facing creation form out
@@ -14,6 +17,15 @@ try:  # Django 5.1+ splits the admin-facing creation form out
 except ImportError:  # pragma: no cover - older Django
     from django.contrib.auth.forms import UserCreationForm as BaseUserCreationForm
 
+from .audit import record_activity
+from .backup import (
+    BackupError,
+    backup_summary_lines,
+    build_backup_zip,
+    media_file_count,
+    record_counts,
+    restore_backup_file,
+)
 from .forms import DisbursementAdminForm
 from .services import disbursement_start_time_label, normalize_credit_score
 from .models import (
@@ -696,6 +708,7 @@ class DisbursementAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
 class FeaturesAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
     list_display = ("store_name", "tagline", "daily_mutual_aid_amount")
     fields = ("store_name", "tagline", "logo", "daily_mutual_aid_amount")
+    change_form_template = "admin/lending/features/change_form.html"
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
@@ -715,6 +728,103 @@ class FeaturesAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         return HttpResponseRedirect(
             reverse("admin:lending_features_change", args=(Features.load().pk,))
         )
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        extra_context = extra_context or {}
+        counts = record_counts()
+        extra_context.update({
+            "backup_counts": counts,
+            "backup_summary": backup_summary_lines(counts),
+            "backup_record_total": sum(counts.values()),
+            "backup_media_count": media_file_count(),
+            "backup_max_upload_mb": max(1, int(getattr(settings, "DATA_UPLOAD_MAX_MEMORY_SIZE", 0) / (1024 * 1024))),
+        })
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def get_urls(self):
+        custom = [
+            path(
+                "export-backup/",
+                self.admin_site.admin_view(self.export_backup_view),
+                name="lending_features_export_backup",
+            ),
+            path(
+                "import-backup/",
+                self.admin_site.admin_view(self.import_backup_view),
+                name="lending_features_import_backup",
+            ),
+        ]
+        return custom + super().get_urls()
+
+    def _features_change_url(self):
+        return reverse("admin:lending_features_change", args=(Features.load().pk,))
+
+    def export_backup_view(self, request):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        filename, payload, manifest = build_backup_zip()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.DATA_EXPORTED,
+            kind=ActivityLog.Kind.SECURITY,
+            title="Database backup exported",
+            description=(
+                f"{manifest['record_total']} records and {manifest['media_files']} media files downloaded."
+            ),
+            status="neutral",
+            status_label="Backup",
+            request=request,
+        )
+        buffer = io.BytesIO(payload)
+        buffer.seek(0)
+        response = FileResponse(buffer, as_attachment=True, filename=filename, content_type="application/zip")
+        return response
+
+    def import_backup_view(self, request):
+        if request.method != "POST":
+            return HttpResponseRedirect(self._features_change_url())
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        if request.POST.get("confirm_restore") != "1":
+            messages.error(request, "Confirm that you want to replace the current database before restoring.")
+            return HttpResponseRedirect(self._features_change_url())
+        uploaded = request.FILES.get("backup_file")
+        try:
+            result = restore_backup_file(uploaded)
+        except BackupError as exc:
+            messages.error(request, str(exc))
+            return HttpResponseRedirect(self._features_change_url())
+        except Exception:
+            messages.error(request, "Restore failed. The current database was not changed.")
+            return HttpResponseRedirect(self._features_change_url())
+        actor = User.objects.filter(pk=getattr(request.user, "pk", None)).first()
+        if actor is not None:
+            record_activity(
+                actor,
+                action=ActivityLog.Action.DATA_IMPORTED,
+                kind=ActivityLog.Kind.SECURITY,
+                title="Database backup restored",
+                description=(
+                    f"{result['record_total']} records loaded"
+                    + (f" and {result['media_files']} media files restored." if result["media_files"] else ".")
+                ),
+                status="neutral",
+                status_label="Restore",
+                request=request,
+            )
+        if result.get("media_error"):
+            messages.warning(
+                request,
+                f"Records restored ({result['record_total']}), but media files could not be fully restored: "
+                f"{result['media_error']}",
+            )
+        else:
+            messages.success(
+                request,
+                f"Backup restored: {result['record_total']} records"
+                + (f" and {result['media_files']} media files." if result["media_files"] else "."),
+            )
+        return HttpResponseRedirect(self._features_change_url())
 
 
 @admin.register(Installment)

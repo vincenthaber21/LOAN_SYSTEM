@@ -163,5 +163,11 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Allow restoring a full-database backup through Django admin (Features).
+# Override with DJANGO_DATA_UPLOAD_MAX_MEMORY_SIZE (bytes) if backups are larger.
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(
+    os.environ.get("DJANGO_DATA_UPLOAD_MAX_MEMORY_SIZE", str(100 * 1024 * 1024))
+)
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MESSAGE_TAGS = {"error": "danger"}

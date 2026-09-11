@@ -1,0 +1,124 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .hl-backup { max-width: 100%; margin-top: 28px; }
+  .hl-backup-hero {
+    background: linear-gradient(135deg, #0f2e0c 0%, #186010 65%, #40c080 100%);
+    border-radius: 14px; padding: 22px 24px; color: #f5faf7; margin-bottom: 18px;
+  }
+  .hl-backup-hero .hl-eyebrow {
+    font-size: .68rem; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: rgba(223,241,235,.75);
+  }
+  .hl-backup-hero h2 { margin: 6px 0 8px; font-size: 1.35rem; color: #fff; font-weight: 700; }
+  .hl-backup-hero p { margin: 0; max-width: 72ch; color: rgba(245,250,247,.88); font-size: .9rem; line-height: 1.5; }
+  .hl-backup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .hl-backup-card {
+    background: var(--body-bg, #fff);
+    border: 1px solid var(--hairline-color, #e0e0e0);
+    border-radius: 12px; overflow: hidden;
+  }
+  .hl-backup-card-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--hairline-color, #e0e0e0);
+    background: var(--darkened-bg, #f8f8f8);
+  }
+  .hl-backup-card-head h3 { margin: 0; font-size: .98rem; font-weight: 650; }
+  .hl-backup-card-body { padding: 18px; }
+  .hl-backup-card-body p { margin: 0 0 14px; font-size: .86rem; color: var(--body-quiet-color, #666); line-height: 1.45; }
+  .hl-backup-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .hl-backup-counts li { display: flex; justify-content: space-between; gap: 12px; font-size: .82rem; }
+  .hl-backup-counts span { color: var(--body-quiet-color, #666); }
+  .hl-backup-counts strong { font-variant-numeric: tabular-nums; }
+  .hl-backup-btn {
+    display: inline-block; border-radius: 8px; padding: 9px 16px; font-size: .87rem;
+    font-weight: 600; text-decoration: none; border: 0; cursor: pointer;
+  }
+  .hl-backup-btn-primary { background: #186010; color: #fff !important; }
+  .hl-backup-btn-primary:hover { background: #12480c; color: #fff !important; }
+  .hl-backup-btn-danger { background: #8a1f1f; color: #fff !important; }
+  .hl-backup-btn-danger:hover { background: #6e1818; color: #fff !important; }
+  .hl-backup-warn {
+    background: #fde8e8; color: #6e1818; border-radius: 8px; padding: 10px 12px;
+    font-size: .8rem; line-height: 1.4; margin-bottom: 14px;
+  }
+  .hl-backup-file { width: 100%; margin-bottom: 12px; }
+  .hl-backup-confirm { display: flex; align-items: flex-start; gap: 8px; font-size: .82rem; margin: 0 0 14px; }
+  .hl-backup-confirm input { margin-top: 3px; }
+  @media (max-width: 767px) {
+    .hl-backup-grid, .hl-backup-counts { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if has_view_permission %}
+    <li>
+      <a href="{% url 'admin:lending_features_export_backup' %}" class="historylink">Download backup</a>
+    </li>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+
+<div class="hl-backup">
+  <div class="hl-backup-hero">
+    <div class="hl-eyebrow">Database backup</div>
+    <h2>Export and restore all records</h2>
+    <p>
+      Download a snapshot of every account, loan, payment, savings, mutual aid record, and uploaded file.
+      Restore replaces the current database with that snapshot. Keep copies somewhere safe — this is the
+      backup for disaster recovery, not a per-table spreadsheet export.
+    </p>
+  </div>
+
+  <div class="hl-backup-grid">
+    <div class="hl-backup-card">
+      <div class="hl-backup-card-head"><h3>Export current database</h3></div>
+      <div class="hl-backup-card-body">
+        <p>
+          {{ backup_record_total }} records
+          {% if backup_media_count %} · {{ backup_media_count }} uploaded file{{ backup_media_count|pluralize }}{% endif %}.
+          The ZIP includes a Django fixture plus media files (photos, signatures, documents, logo).
+        </p>
+        {% if backup_summary %}
+        <ul class="hl-backup-counts">
+          {% for label, count in backup_summary %}
+            <li><span>{{ label }}</span><strong>{{ count }}</strong></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if has_view_permission %}
+          <a class="hl-backup-btn hl-backup-btn-primary" href="{% url 'admin:lending_features_export_backup' %}">Download backup ZIP</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="hl-backup-card">
+      <div class="hl-backup-card-head"><h3>Restore from backup</h3></div>
+      <div class="hl-backup-card-body">
+        <div class="hl-backup-warn">
+          Restore deletes current members, loans, savings, mutual aid, and related records, then loads the backup.
+          Use an account that exists in the file, or you will be signed out. Maximum upload size is {{ backup_max_upload_mb }} MB.
+        </div>
+        {% if has_change_permission %}
+        <form method="post" action="{% url 'admin:lending_features_import_backup' %}" enctype="multipart/form-data">
+          {% csrf_token %}
+          <input class="hl-backup-file" type="file" name="backup_file" accept=".zip,.json,application/zip,application/json" required>
+          <label class="hl-backup-confirm">
+            <input type="checkbox" name="confirm_restore" value="1" required>
+            <span>I understand this replaces all current database records with the selected backup.</span>
+          </label>
+          <button type="submit" class="hl-backup-btn hl-backup-btn-danger">Restore backup</button>
+        </form>
+        {% else %}
+          <p>You need change permission to restore a backup.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
