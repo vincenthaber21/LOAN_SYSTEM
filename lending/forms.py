@@ -212,7 +212,7 @@ class BaseAccountCreationForm(UserCreationForm):
     )
     email = forms.EmailField()
     first_name = forms.CharField(max_length=80, label="First name")
-    middle_initial = forms.CharField(max_length=10, required=False, label="Middle initial")
+    middle_initial = forms.CharField(max_length=80, required=False, label="Middle name")
     last_name = forms.CharField(max_length=80, label="Last name")
     phone = forms.CharField(max_length=30, required=False)
 
@@ -231,14 +231,7 @@ class BaseAccountCreationForm(UserCreationForm):
         return email
 
     def clean_middle_initial(self):
-        value = (self.cleaned_data.get("middle_initial") or "").strip()
-        if not value:
-            return ""
-        # Normalize to a short initial (letter + optional period).
-        letter = value.replace(".", "").strip()
-        if letter:
-            return f"{letter[0].upper()}."
-        return ""
+        return " ".join((self.cleaned_data.get("middle_initial") or "").split())
 
     def save(self, commit=True):
         user = super().save(commit=False)
@@ -296,7 +289,7 @@ class OfficerMemberEditForm(forms.ModelForm):
     username = forms.CharField(max_length=150, help_text="Used to sign in — must stay unique.")
     email = forms.EmailField()
     full_name = forms.CharField(max_length=160, label="Full name")
-    middle_initial = forms.CharField(max_length=10, required=False, label="Middle initial")
+    middle_initial = forms.CharField(max_length=80, required=False, label="Middle name")
     phone = forms.CharField(max_length=30, required=False)
     date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
     address = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
@@ -324,13 +317,7 @@ class OfficerMemberEditForm(forms.ModelForm):
         return email
 
     def clean_middle_initial(self):
-        value = (self.cleaned_data.get("middle_initial") or "").strip()
-        if not value:
-            return ""
-        letter = value.replace(".", "").strip()
-        if letter:
-            return f"{letter[0].upper()}."
-        return ""
+        return " ".join((self.cleaned_data.get("middle_initial") or "").split())
 
     def clean(self):
         cleaned = super().clean()

@@ -35,8 +35,8 @@
               {% if form.full_name.errors %}<div class="invalid-feedback">{{ form.full_name.errors|join:", " }}</div>{% endif %}
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.middle_initial.id_for_label }}">Middle initial</label>
-              <input type="text" id="{{ form.middle_initial.id_for_label }}" name="{{ form.middle_initial.html_name }}" value="{{ form.middle_initial.value|default:'' }}" class="form-control text-uppercase {% if form.middle_initial.errors %}is-invalid{% endif %}" placeholder="M" maxlength="10" autocomplete="off">
+              <label class="form-label" for="{{ form.middle_initial.id_for_label }}">Middle name</label>
+              <input type="text" id="{{ form.middle_initial.id_for_label }}" name="{{ form.middle_initial.html_name }}" value="{{ form.middle_initial.value|default:'' }}" class="form-control {% if form.middle_initial.errors %}is-invalid{% endif %}" placeholder="Santos" maxlength="80" autocomplete="off">
               {% if form.middle_initial.errors %}<div class="invalid-feedback">{{ form.middle_initial.errors|join:", " }}</div>{% endif %}
             </div>
             <div class="col-md-6">

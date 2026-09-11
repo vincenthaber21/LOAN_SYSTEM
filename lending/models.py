@@ -17,7 +17,12 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
     full_name = models.CharField(max_length=160, blank=True)
-    middle_initial = models.CharField(max_length=10, blank=True, help_text="Optional middle initial, e.g. M or M.")
+    middle_initial = models.CharField(
+        "middle name",
+        max_length=80,
+        blank=True,
+        help_text="Optional middle name.",
+    )
     phone = models.CharField(max_length=30, blank=True)
     address = models.TextField(blank=True)
     date_of_birth = models.DateField(null=True, blank=True)

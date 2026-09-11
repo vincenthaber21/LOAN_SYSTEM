@@ -1689,7 +1689,7 @@ def borrower_detail(request, borrower_id):
             {"label": "Borrower ID", "value": borrower.reference},
             {"label": "Username", "value": borrower.username},
             {"label": "Full name", "value": borrower.full_name or "Not provided"},
-            {"label": "Middle initial", "value": borrower.middle_initial or "Not provided"},
+            {"label": "Middle name", "value": borrower.middle_initial or "Not provided"},
             {"label": "Email", "value": borrower.email or "Not provided"},
             {"label": "Phone", "value": borrower.phone or "Not provided"},
             {"label": "Address", "value": borrower.address or "Not provided"},

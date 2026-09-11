@@ -29,17 +29,17 @@
         </div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-md-5">
+            <div class="col-md-4">
               <label class="form-label" for="{{ form.first_name.id_for_label }}">First name<span class="req">*</span></label>
               <input type="text" id="{{ form.first_name.id_for_label }}" name="{{ form.first_name.html_name }}" value="{{ form.first_name.value|default:'' }}" class="form-control {% if form.first_name.errors %}is-invalid{% endif %}" placeholder="Maria">
               {% if form.first_name.errors %}<div class="invalid-feedback">{{ form.first_name.errors|join:", " }}</div>{% endif %}
             </div>
-            <div class="col-md-2">
-              <label class="form-label" for="{{ form.middle_initial.id_for_label }}">M.I.</label>
-              <input type="text" id="{{ form.middle_initial.id_for_label }}" name="{{ form.middle_initial.html_name }}" value="{{ form.middle_initial.value|default:'' }}" class="form-control text-uppercase {% if form.middle_initial.errors %}is-invalid{% endif %}" placeholder="M" maxlength="10" autocomplete="off">
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.middle_initial.id_for_label }}">Middle name</label>
+              <input type="text" id="{{ form.middle_initial.id_for_label }}" name="{{ form.middle_initial.html_name }}" value="{{ form.middle_initial.value|default:'' }}" class="form-control {% if form.middle_initial.errors %}is-invalid{% endif %}" placeholder="Santos" maxlength="80" autocomplete="off">
               {% if form.middle_initial.errors %}<div class="invalid-feedback">{{ form.middle_initial.errors|join:", " }}</div>{% endif %}
             </div>
-            <div class="col-md-5">
+            <div class="col-md-4">
               <label class="form-label" for="{{ form.last_name.id_for_label }}">Last name<span class="req">*</span></label>
               <input type="text" id="{{ form.last_name.id_for_label }}" name="{{ form.last_name.html_name }}" value="{{ form.last_name.value|default:'' }}" class="form-control {% if form.last_name.errors %}is-invalid{% endif %}" placeholder="Dela Cruz">
               {% if form.last_name.errors %}<div class="invalid-feedback">{{ form.last_name.errors|join:", " }}</div>{% endif %}
