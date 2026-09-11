@@ -1139,6 +1139,7 @@ def officer_apply_loan(request):
             if form.is_valid() and reference_formset.is_valid() and not document_errors:
                 application = form.save(commit=False)
                 application.status = LoanApplication.Status.SUBMITTED
+                application.created_by = request.user
                 application.save()
                 _persist_application_related(application, reference_formset, document_forms, request)
                 messages.success(request, f"Application {application.reference} created for {application.borrower_name}.")

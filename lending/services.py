@@ -1799,7 +1799,13 @@ def get_officer_activity_log(officer, activity_type="all", date_from=None, date_
     events = []
 
     if activity_type in ("all", "application"):
-        applications = officer.reviewed_applications.select_related("borrower", "loan_product")
+        applications = list(officer.reviewed_applications.select_related("borrower", "loan_product"))
+        reviewed_ids = {application.pk for application in applications}
+        applications += [
+            application
+            for application in officer.created_applications.select_related("borrower", "loan_product")
+            if application.pk not in reviewed_ids
+        ]
         for application in applications:
             if application.decision_date:
                 events.append({

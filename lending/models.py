@@ -300,6 +300,9 @@ class LoanApplication(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     applied_on = models.DateField(null=True, blank=True, help_text="Date the borrower applied for this loan.")
     created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_applications"
+    )
     reviewed_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_applications"
     )
