@@ -1508,9 +1508,7 @@ def _build_activity_log_context(request, staff):
                 event["detail_url"] = reverse(event["url_name"], kwargs=event["url_kwargs"])
     collection_total = sum((event.get("amount") or Decimal("0.00")) for event in collection_events)
     collection_preview = collection_events[:20]
-    show_collection_section = activity_type != "payment"
-    if show_collection_section and activity_type == "all":
-        events = [event for event in events if event.get("kind") != "payment"]
+    show_collection_section = activity_type not in ("payment", "all")
     paginator = Paginator(events, 20)
     page_obj = paginator.get_page(request.GET.get("page"))
 

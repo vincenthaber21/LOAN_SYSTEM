@@ -72,7 +72,7 @@
   <div class="card-header d-flex justify-content-between align-items-center">
     <div>
       <h2 class="card-title">{% if filters.type == "payment" %}Pay collection{% elif filters.type == "disbursement" %}Disbursements{% elif filters.type == "application" %}Applications{% else %}Activity history{% endif %}</h2>
-      <span class="text-muted small">{{ date_range_label }} · {% if filters.type == "payment" %}loan payments recorded by this officer.{% elif filters.type == "disbursement" %}loans released by this officer.{% else %}applications and disbursements linked to this officer.{% endif %}</span>
+      <span class="text-muted small">{{ date_range_label }} · {% if filters.type == "payment" %}loan payments recorded by this officer.{% elif filters.type == "disbursement" %}loans released by this officer.{% elif filters.type == "application" %}applications reviewed by this officer.{% else %}applications, pay collection, and disbursements linked to this officer.{% endif %}</span>
     </div>
     <span class="badge {% if filters.type == 'payment' %}status-paid{% else %}status-neutral{% endif %}">{% if filters.type == "payment" %}{{ collection_total|peso }} · {% endif %}{{ page_obj.paginator.count }} event{{ page_obj.paginator.count|pluralize }}</span>
   </div>
