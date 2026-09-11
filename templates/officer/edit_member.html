@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load lending_tags %}
 {% block title %}Edit {{ borrower.display_name }}{% endblock %}
 {% block topbar_title %}Edit member{% endblock %}
 {% block topbar_context %}Update this member's profile and account status.{% endblock %}
@@ -41,7 +42,7 @@
             </div>
             <div class="col-md-6">
               <label class="form-label" for="{{ form.date_of_birth.id_for_label }}">Date of birth</label>
-              <input type="date" id="{{ form.date_of_birth.id_for_label }}" name="{{ form.date_of_birth.html_name }}" value="{{ form.date_of_birth.value|default:'' }}" class="form-control {% if form.date_of_birth.errors %}is-invalid{% endif %}">
+              <input type="date" id="{{ form.date_of_birth.id_for_label }}" name="{{ form.date_of_birth.html_name }}" value="{{ form.date_of_birth.value|iso_date }}" class="form-control {% if form.date_of_birth.errors %}is-invalid{% endif %}">
               {% if form.date_of_birth.errors %}<div class="invalid-feedback">{{ form.date_of_birth.errors|join:", " }}</div>{% endif %}
             </div>
             <div class="col-md-6">

@@ -103,6 +103,52 @@
     border-radius: 2px;
     background: #c62828;
   }
+  .field-required {
+    scroll-margin-top: 5.5rem;
+  }
+  .empty-required-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+  }
+  .empty-required-chip {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #e57373;
+    background: #fff5f5;
+    color: #c62828;
+    border-radius: 999px;
+    padding: .2rem .7rem;
+    font-size: .78rem;
+    font-weight: 700;
+    line-height: 1.35;
+    cursor: pointer;
+  }
+  .empty-required-chip:hover,
+  .empty-required-chip:focus {
+    background: #ffecec;
+    color: #b71c1c;
+  }
+  .empty-required-ok {
+    color: #2e7d32;
+    font-size: .86rem;
+    font-weight: 700;
+  }
+  .field-required.is-pinpoint .form-control,
+  .field-required.is-pinpoint .form-select,
+  .field-required.is-pinpoint [data-ref-name],
+  .field-required.is-pinpoint .kap-sig-pad,
+  .field-required.is-pinpoint .kap-choice-list {
+    animation: kap-pinpoint 1.2s ease;
+  }
+  @keyframes kap-pinpoint {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0); }
+    35% { box-shadow: 0 0 0 .28rem rgba(198, 40, 40, .35); }
+  }
+  #characterReferenceSection.is-missing-name .ref-name-heading,
+  #characterReferenceSection.is-missing-name .ref-name-heading::after {
+    color: #c62828 !important;
+  }
 </style>
 {% endblock %}
 {% block content %}
@@ -134,7 +180,9 @@
 
       <div class="kap-reminder mb-4">
         Reminder: use capital letters where applicable. Tick the appropriate boxes. Put <strong>N/A</strong> in fields that do not apply.
-        <div class="required-legend mt-2">Red labels with * are still empty required fields — they turn normal once filled</div>
+        <div class="required-legend mt-2" id="emptyRequiredLegend">Still empty — click a field name to jump there:</div>
+        <div class="empty-required-list mt-2" id="emptyRequiredList"></div>
+        <div class="empty-required-ok mt-2 d-none" id="emptyRequiredOk"><i class="bi bi-check-circle me-1"></i>All required fields are filled</div>
         {% if profile_source == "previous_application" %}
         <div class="text-muted small mt-2">Personal details were filled from your previous application. Please review and update anything that changed.</div>
         {% else %}
@@ -142,10 +190,7 @@
         {% endif %}
       </div>
 
-      {% include "includes/form_errors.html" %}
-      {% if reference_formset.non_form_errors %}
-      <div class="alert alert-danger">{{ reference_formset.non_form_errors }}</div>
-      {% endif %}
+      {% include "includes/kap_field_error_list.html" %}
 
       <div class="card-soft mb-4">
         <div class="card-header">
@@ -168,7 +213,8 @@
             </div>
             <div class="col-md-4 field-required">
               <label class="form-label label-required" for="{{ form.term_months.id_for_label }}">Loan term (months)</label>
-              <input class="form-control {% if form.term_months.errors %}is-invalid{% endif %}" type="number" min="1" max="60" id="{{ form.term_months.id_for_label }}" name="{{ form.term_months.html_name }}" value="{{ form.term_months.value|default:'' }}" required>
+              <input class="form-control {% if form.term_months.errors %}is-invalid{% endif %}" type="number" min="1" max="60" id="{{ form.term_months.id_for_label }}" name="{{ form.term_months.html_name }}" value="{{ form.term_months.value|default:'' }}" required data-term-months>
+              <div class="form-text" data-term-weeks-hint>{% if form.term_months.value %}{{ form.term_months.value|term_weeks }}{% else %}Enter months to see weeks (months × 4).{% endif %}</div>
               {% for error in form.term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
           </div>
@@ -244,7 +290,7 @@
         </div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-12 field-required">
+            <div class="col-12 field-required" data-required-label="Payment frequency">
               <label class="form-label d-block label-required">Pay</label>
               <div class="kap-choice-list">
                 {% for radio in form.payment_frequency %}
@@ -611,11 +657,11 @@
         </div>
       </div>
 
-      <div class="card-soft mb-4">
+      <div class="card-soft mb-4" id="characterReferenceSection">
         <div class="card-header">
           <div class="kap-section-title">Character reference</div>
           <h2 class="card-title mt-1">References</h2>
-          <p class="text-muted small mb-0 mt-1">At least one reference is required. The second row is optional.</p>
+          <p class="text-muted small mb-0 mt-1">At least one <strong>name</strong> is required. Address, relationship, and contact are optional. The second row is optional.</p>
         </div>
         <div class="card-body">
           <div class="table-responsive">
@@ -623,7 +669,7 @@
               <thead>
                 <tr>
                   <th style="width:4%">#</th>
-                  <th>Name</th>
+                  <th><span class="label-required ref-name-heading">Name</span></th>
                   <th>Address</th>
                   <th>Relationship</th>
                   <th>Contact #</th>
@@ -637,7 +683,7 @@
                     {% if ref_form.id %}{{ ref_form.id }}{% endif %}
                     <span class="text-muted">{{ forloop.counter }}</span>
                   </td>
-                  <td>{{ ref_form.name }}{% for error in ref_form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</td>
+                  <td class="field-required" data-required-group="character-reference" data-required-label="Character reference — Name">{{ ref_form.name }}{% for error in ref_form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</td>
                   <td>{{ ref_form.address }}</td>
                   <td>{{ ref_form.relationship }}</td>
                   <td>{{ ref_form.contact_number }}</td>
@@ -663,7 +709,7 @@
           {% for error in form.borrower_signature_data.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
           {% for error in form.coborrower_signature_data.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
           <div class="row g-4">
-            <div class="col-md-6 field-required">
+            <div class="col-md-6 field-required" data-required-label="Borrower signature">
               <div class="kap-sig-pad">
                 <canvas id="borrowerSignaturePad" width="480" height="160"></canvas>
               </div>
@@ -716,27 +762,7 @@
       <div class="card-soft mb-4">
         <div class="card-header"><h2 class="card-title">Supporting documents</h2></div>
         <div class="card-body">
-          <p class="text-muted small mb-3">Optional attachments (JPG, PNG, GIF, WEBP, PDF, DOC, DOCX). You can also add these later from the review page.</p>
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label" for="{{ document_forms.0.file.id_for_label }}"><i class="bi bi-card-image me-1"></i>Valid ID</label>
-              <input type="hidden" name="{{ document_forms.0.prefix }}-doc_type" value="valid_id">
-              <input class="form-control {% if document_forms.0.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.0.file.id_for_label }}" name="{{ document_forms.0.file.html_name }}">
-              {% for error in document_forms.0.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ document_forms.1.file.id_for_label }}"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Proof of income</label>
-              <input type="hidden" name="{{ document_forms.1.prefix }}-doc_type" value="proof_of_income">
-              <input class="form-control {% if document_forms.1.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.1.file.id_for_label }}" name="{{ document_forms.1.file.html_name }}">
-              {% for error in document_forms.1.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ document_forms.2.file.id_for_label }}"><i class="bi bi-file-earmark me-1"></i>Other document</label>
-              <input type="hidden" name="{{ document_forms.2.prefix }}-doc_type" value="other">
-              <input class="form-control {% if document_forms.2.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.2.file.id_for_label }}" name="{{ document_forms.2.file.html_name }}">
-              {% for error in document_forms.2.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-          </div>
+          {% include "includes/supporting_documents.html" %}
         </div>
       </div>
 
@@ -749,6 +775,11 @@
 
   <div class="col-xl-3">
     <div class="card-soft mb-4 sticky-below-topbar">
+      <div class="px-4 pt-3 pb-2 border-bottom" id="emptyRequiredSidebarWrap">
+        <div class="kap-section-title">Still empty</div>
+        <p class="small text-muted mb-0 mt-1">Click a name to jump to that field.</p>
+        <div class="empty-required-list mt-2" id="emptyRequiredSidebar"></div>
+      </div>
       <div class="card-header">
         <h2 class="card-title mb-0">Available products</h2>
       </div>
@@ -806,6 +837,26 @@
   var productSelect = document.getElementById('{{ form.loan_product.id_for_label }}');
   var signaturePads = {};
 
+  function termWeeksLabel(months) {
+    var m = parseInt(months, 10);
+    if (!m || m < 1) return 'Enter months to see weeks (months × 4).';
+    return (m * 4) + ' weeks';
+  }
+
+  function syncTermWeeksHint() {
+    var input = document.querySelector('[data-term-months]');
+    var hint = document.querySelector('[data-term-weeks-hint]');
+    if (!input || !hint) return;
+    hint.textContent = termWeeksLabel(input.value);
+  }
+
+  var termMonthsInput = document.querySelector('[data-term-months]');
+  if (termMonthsInput) {
+    termMonthsInput.addEventListener('input', syncTermWeeksHint);
+    termMonthsInput.addEventListener('change', syncTermWeeksHint);
+    syncTermWeeksHint();
+  }
+
   function setupSignaturePad(canvasId, hiddenId) {
     var canvas = document.getElementById(canvasId);
     var hidden = document.getElementById(hiddenId);
@@ -837,7 +888,18 @@
   setupSignaturePad('borrowerSignaturePad', '{{ form.borrower_signature_data.id_for_label }}');
   setupSignaturePad('coborrowerSignaturePad', '{{ form.coborrower_signature_data.id_for_label }}');
 
+  function characterReferenceHasValue() {
+    var names = document.querySelectorAll('[data-ref-name]');
+    for (var i = 0; i < names.length; i++) {
+      if (String(names[i].value || '').trim() !== '') return true;
+    }
+    return false;
+  }
+
   function fieldHasValue(container) {
+    if (container.getAttribute('data-required-group') === 'character-reference') {
+      return characterReferenceHasValue();
+    }
     if (container.querySelector('#borrowerSignaturePad')) {
       var pad = signaturePads.borrowerSignaturePad;
       return !!(pad && !pad.isEmpty());
@@ -851,6 +913,94 @@
     return String(input.value || '').trim() !== '';
   }
 
+  function requiredFieldLabel(container) {
+    var explicit = container.getAttribute('data-required-label');
+    if (explicit) return explicit;
+    var label = container.querySelector('.label-required, label.form-label');
+    if (label) {
+      return label.textContent.replace(/\s+/g, ' ').replace(/\s+\*$/, '').trim();
+    }
+    return 'Required field';
+  }
+
+  function collectEmptyRequired() {
+    var seen = {};
+    var items = [];
+    document.querySelectorAll('.field-required').forEach(function (container) {
+      if (fieldHasValue(container)) return;
+      var group = container.getAttribute('data-required-group') || '';
+      var label = requiredFieldLabel(container);
+      var key = group || label;
+      if (seen[key]) return;
+      seen[key] = true;
+      items.push({ container: container, label: label });
+    });
+    return items;
+  }
+
+  function focusRequiredField(container) {
+    if (!container) return;
+    container.classList.add('is-pinpoint');
+    window.setTimeout(function () { container.classList.remove('is-pinpoint'); }, 1600);
+    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    var target = container.querySelector('[data-ref-name], input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]), select, textarea');
+    if (target && target.focus) {
+      try { target.focus({ preventScroll: true }); } catch (err) { target.focus(); }
+    }
+  }
+
+  function renderEmptyChip(item) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'empty-required-chip';
+    btn.textContent = item.label;
+    btn.addEventListener('click', function () { focusRequiredField(item.container); });
+    return btn;
+  }
+
+  function renderEmptyRequiredList() {
+    var empty = collectEmptyRequired();
+    var topList = document.getElementById('emptyRequiredList');
+    var legend = document.getElementById('emptyRequiredLegend');
+    var ok = document.getElementById('emptyRequiredOk');
+    var sideList = document.getElementById('emptyRequiredSidebar');
+    var sideWrap = document.getElementById('emptyRequiredSidebarWrap');
+
+    function fill(list) {
+      if (!list) return;
+      list.innerHTML = '';
+      empty.forEach(function (item) { list.appendChild(renderEmptyChip(item)); });
+    }
+
+    fill(topList);
+    fill(sideList);
+
+    var refSection = document.getElementById('characterReferenceSection');
+    if (refSection) refSection.classList.toggle('is-missing-name', !characterReferenceHasValue());
+
+    if (legend) legend.classList.toggle('d-none', empty.length === 0);
+    if (ok) ok.classList.toggle('d-none', empty.length !== 0);
+    if (topList) topList.classList.toggle('d-none', empty.length === 0);
+    if (sideWrap) {
+      var hint = sideWrap.querySelector('.text-muted');
+      var title = sideWrap.querySelector('.kap-section-title');
+      if (empty.length === 0) {
+        if (title) title.textContent = 'Required fields';
+        if (hint) hint.textContent = 'All required fields are filled.';
+        if (sideList) {
+          sideList.innerHTML = '';
+          var done = document.createElement('div');
+          done.className = 'empty-required-ok';
+          done.innerHTML = '<i class="bi bi-check-circle me-1"></i>All required fields are filled';
+          sideList.appendChild(done);
+        }
+      } else {
+        if (title) title.textContent = 'Still empty (' + empty.length + ')';
+        if (hint) hint.textContent = 'Click a name to jump to that field.';
+      }
+    }
+  }
+
   function updateRequiredFieldState(container) {
     if (!container) return;
     container.classList.toggle('is-filled', fieldHasValue(container));
@@ -858,11 +1008,17 @@
 
   function updateAllRequiredFields() {
     document.querySelectorAll('.field-required').forEach(updateRequiredFieldState);
+    renderEmptyRequiredList();
   }
 
   document.querySelectorAll('.field-required').forEach(function (container) {
-    container.addEventListener('input', function () { updateRequiredFieldState(container); });
-    container.addEventListener('change', function () { updateRequiredFieldState(container); });
+    container.addEventListener('input', function () { updateRequiredFieldState(container); renderEmptyRequiredList(); });
+    container.addEventListener('change', function () { updateRequiredFieldState(container); renderEmptyRequiredList(); });
+  });
+
+  document.querySelectorAll('[data-ref-name]').forEach(function (input) {
+    input.addEventListener('input', updateAllRequiredFields);
+    input.addEventListener('change', updateAllRequiredFields);
   });
 
   document.querySelectorAll('[data-clear-sig]').forEach(function (btn) {
@@ -996,6 +1152,12 @@
     }
     e.preventDefault();
 
+    updateAllRequiredFields();
+    var emptyRequired = collectEmptyRequired();
+    if (emptyRequired.length) {
+      focusRequiredField(emptyRequired[0].container);
+      return;
+    }
     if (!appForm.checkValidity()) {
       appForm.reportValidity();
       return;
@@ -1009,7 +1171,9 @@
     document.getElementById('confirmProduct').textContent = selectedText(productSelect) || '—';
     document.getElementById('confirmAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
     var termVal = document.getElementById('{{ form.term_months.id_for_label }}').value;
-    document.getElementById('confirmTerm').textContent = termVal ? termVal + ' month(s)' : '—';
+    document.getElementById('confirmTerm').textContent = termVal
+      ? termVal + ' month(s) · ' + termWeeksLabel(termVal)
+      : '—';
     var appliedOnVal = document.getElementById('{{ form.applied_on.id_for_label }}').value;
     document.getElementById('confirmAppliedOn').textContent = appliedOnVal || '—';
     document.getElementById('confirmFrequency').textContent = selectedRadioLabel('{{ form.payment_frequency.html_name }}') || '—';

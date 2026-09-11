@@ -23,8 +23,10 @@
       <a class="nav-link {% if active_nav == 'disbursements' %}active{% endif %}" href="{% url 'disbursements' %}"><i class="bi bi-arrow-down-left-circle"></i><span>Disbursements</span></a>
       <a class="nav-link {% if active_nav == 'savings' %}active{% endif %}" href="{% url 'officer_savings_accounts' %}"><i class="bi bi-piggy-bank"></i><span>Savings accounts</span></a>
       <a class="nav-link {% if active_nav == 'mutual_aid' %}active{% endif %}" href="{% url 'officer_mutual_aid_memberships' %}"><i class="bi bi-heart-pulse"></i><span>Mutual aid</span>{% if pending_mutual_aid_claim_count %}<span class="badge rounded-pill bg-light text-dark ms-auto">{{ pending_mutual_aid_claim_count }}</span>{% endif %}</a>
+      {% if is_manager %}
       <div class="nav-section-label mt-3">Insights</div>
       <a class="nav-link {% if active_nav == 'reports' %}active{% endif %}" href="{% url 'reports' %}"><i class="bi bi-bar-chart-line"></i><span>Reports</span></a>
+      {% endif %}
       {% if is_admin %}
       <div class="nav-section-label mt-3">Settings</div>
       <a class="nav-link {% if active_nav == 'products' %}active{% endif %}" href="{% url 'loan_products' %}"><i class="bi bi-tags"></i><span>Loan products</span></a>

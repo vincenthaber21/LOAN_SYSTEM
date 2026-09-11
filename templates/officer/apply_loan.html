@@ -172,6 +172,53 @@
     border-radius: 2px;
     background: #c62828;
   }
+  .field-required {
+    scroll-margin-top: 5.5rem;
+  }
+  .empty-required-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+  }
+  .empty-required-chip {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #e57373;
+    background: #fff5f5;
+    color: #c62828;
+    border-radius: 999px;
+    padding: .2rem .7rem;
+    font-size: .78rem;
+    font-weight: 700;
+    line-height: 1.35;
+    cursor: pointer;
+  }
+  .empty-required-chip:hover,
+  .empty-required-chip:focus {
+    background: #ffecec;
+    color: #b71c1c;
+  }
+  .empty-required-ok {
+    color: #2e7d32;
+    font-size: .86rem;
+    font-weight: 700;
+  }
+  .field-required.is-pinpoint .form-control,
+  .field-required.is-pinpoint .form-select,
+  .field-required.is-pinpoint [data-ref-name],
+  .field-required.is-pinpoint .kap-sig-pad,
+  .field-required.is-pinpoint .kap-choice-list,
+  .field-required.is-pinpoint .ts-wrapper .ts-control {
+    animation: kap-pinpoint 1.2s ease;
+  }
+  #characterReferenceSection.is-missing-name .ref-name-heading,
+  #characterReferenceSection.is-missing-name .ref-name-heading::after {
+    color: #c62828 !important;
+  }
+  @keyframes kap-pinpoint {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0); }
+    35% { box-shadow: 0 0 0 .28rem rgba(198, 40, 40, .35); }
+  }
   .creating-overlay {
     position: fixed;
     inset: 0;
@@ -212,6 +259,22 @@
     pointer-events: none;
     opacity: .45;
   }
+  .kap-draft-banner {
+    display: none;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: .75rem;
+    flex-wrap: wrap;
+    background: #eef7ee;
+    border: 1px solid #c8e0c8;
+    border-radius: var(--radius);
+    padding: .85rem 1rem;
+    margin-bottom: 1rem;
+    font-size: .9rem;
+  }
+  .kap-draft-banner.is-visible { display: flex; }
+  .kap-draft-banner p { margin: 0; color: var(--ink); }
+  .kap-draft-banner .text-muted { font-size: .82rem; }
 </style>
 {% endblock %}
 {% block content %}
@@ -225,19 +288,28 @@
 
 <div class="row g-4">
   <div class="col-xl-9">
-    <form method="post" action="{% if is_edit %}{% url 'officer_edit_application' application_id=application.id %}{% else %}{% url 'officer_apply_loan' %}{% endif %}" enctype="multipart/form-data" novalidate>
+    <form method="post" action="{% if is_edit %}{% url 'officer_edit_application' application_id=application.id %}{% else %}{% url 'officer_apply_loan' %}{% endif %}" enctype="multipart/form-data" novalidate id="kapApplicationForm">
       {% csrf_token %}
       {{ reference_formset.management_form }}
 
+      {% if not is_edit %}
+      <div class="kap-draft-banner" id="kapDraftBanner" role="status" aria-live="polite">
+        <div>
+          <p><i class="bi bi-cloud-check me-1"></i>Draft restored — your entries were kept after refresh.</p>
+          <div class="text-muted mt-1">Autosaves in this browser. Supporting documents must be re-attached.</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="kapClearDraftBtn">Clear draft</button>
+      </div>
+      {% endif %}
+
       <div class="kap-reminder mb-4">
         Reminder: use capital letters where applicable. Tick the appropriate boxes. Put <strong>N/A</strong> in fields that do not apply.
-        <div class="required-legend mt-2">Red labels with * are still empty required fields — they turn normal once filled</div>
+        <div class="required-legend mt-2" id="emptyRequiredLegend">Still empty — click a field name to jump there:</div>
+        <div class="empty-required-list mt-2" id="emptyRequiredList"></div>
+        <div class="empty-required-ok mt-2 d-none" id="emptyRequiredOk"><i class="bi bi-check-circle me-1"></i>All required fields are filled</div>
       </div>
 
-      {% include "includes/form_errors.html" %}
-      {% if reference_formset.non_form_errors %}
-      <div class="alert alert-danger">{{ reference_formset.non_form_errors }}</div>
-      {% endif %}
+      {% include "includes/kap_field_error_list.html" %}
 
       <div class="card-soft mb-4">
         <div class="card-header">
@@ -282,7 +354,8 @@
             </div>
             <div class="col-md-4 field-required">
               <label class="form-label label-required" for="{{ form.term_months.id_for_label }}">Loan term (months)</label>
-              <input class="form-control {% if form.term_months.errors %}is-invalid{% endif %}" type="number" min="1" max="60" id="{{ form.term_months.id_for_label }}" name="{{ form.term_months.html_name }}" value="{{ form.term_months.value|default:'' }}" required>
+              <input class="form-control {% if form.term_months.errors %}is-invalid{% endif %}" type="number" min="1" max="60" id="{{ form.term_months.id_for_label }}" name="{{ form.term_months.html_name }}" value="{{ form.term_months.value|default:'' }}" required data-term-months>
+              <div class="form-text" id="termWeeksHint" data-term-weeks-hint>{% if form.term_months.value %}{{ form.term_months.value|term_weeks }}{% else %}Enter months to see weeks (months × 4).{% endif %}</div>
               {% for error in form.term_months.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
           </div>
@@ -386,7 +459,7 @@
         </div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-12 field-required">
+            <div class="col-12 field-required" data-required-label="Payment frequency">
               <label class="form-label d-block label-required">Pay</label>
               <div class="kap-choice-list">
                 {% for radio in form.payment_frequency %}
@@ -753,11 +826,11 @@
         </div>
       </div>
 
-      <div class="card-soft mb-4">
+      <div class="card-soft mb-4" id="characterReferenceSection">
         <div class="card-header">
           <div class="kap-section-title">Character reference</div>
           <h2 class="card-title mt-1">References</h2>
-          <p class="text-muted small mb-0 mt-1">At least one reference is required. The second row is optional.</p>
+          <p class="text-muted small mb-0 mt-1">At least one <strong>name</strong> is required. Address, relationship, and contact are optional. The second row is optional.</p>
         </div>
         <div class="card-body">
           <div class="table-responsive">
@@ -765,7 +838,7 @@
               <thead>
                 <tr>
                   <th style="width:4%">#</th>
-                  <th>Name</th>
+                  <th><span class="label-required ref-name-heading">Name</span></th>
                   <th>Address</th>
                   <th>Relationship</th>
                   <th>Contact #</th>
@@ -779,7 +852,7 @@
                     {% if ref_form.id %}{{ ref_form.id }}{% endif %}
                     <span class="text-muted">{{ forloop.counter }}</span>
                   </td>
-                  <td>{{ ref_form.name }}{% for error in ref_form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</td>
+                  <td class="field-required" data-required-group="character-reference" data-required-label="Character reference — Name">{{ ref_form.name }}{% for error in ref_form.name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</td>
                   <td>{{ ref_form.address }}</td>
                   <td>{{ ref_form.relationship }}</td>
                   <td>{{ ref_form.contact_number }}</td>
@@ -805,7 +878,7 @@
           {% for error in form.borrower_signature_data.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
           {% for error in form.coborrower_signature_data.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
           <div class="row g-4">
-            <div class="col-md-6 field-required">
+            <div class="col-md-6 field-required" data-required-label="Borrower signature">
               <div class="kap-sig-pad">
                 <canvas id="borrowerSignaturePad" width="480" height="160"></canvas>
               </div>
@@ -858,37 +931,7 @@
       <div class="card-soft mb-4">
         <div class="card-header"><h2 class="card-title">Supporting documents</h2></div>
         <div class="card-body">
-          <p class="text-muted small mb-3">{% if is_edit %}Optional new attachments. Existing files stay unless you upload a replacement of the same type.{% else %}Optional attachments (JPG, PNG, GIF, WEBP, PDF, DOC, DOCX). You can also add these later from the review page.{% endif %}</p>
-          {% if is_edit and existing_documents %}
-          <div class="mb-3">
-            <div class="fw-semibold small mb-2">Current documents</div>
-            <ul class="mb-0 ps-3 small">
-              {% for document in existing_documents %}
-              <li class="mb-1"><a href="{{ document.download_url }}" target="_blank">{{ document.name }}</a> · {{ document.file_size }}</li>
-              {% endfor %}
-            </ul>
-          </div>
-          {% endif %}
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label" for="{{ document_forms.0.file.id_for_label }}"><i class="bi bi-card-image me-1"></i>Valid ID</label>
-              <input type="hidden" name="{{ document_forms.0.prefix }}-doc_type" value="valid_id">
-              <input class="form-control {% if document_forms.0.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.0.file.id_for_label }}" name="{{ document_forms.0.file.html_name }}">
-              {% for error in document_forms.0.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ document_forms.1.file.id_for_label }}"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Proof of income</label>
-              <input type="hidden" name="{{ document_forms.1.prefix }}-doc_type" value="proof_of_income">
-              <input class="form-control {% if document_forms.1.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.1.file.id_for_label }}" name="{{ document_forms.1.file.html_name }}">
-              {% for error in document_forms.1.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ document_forms.2.file.id_for_label }}"><i class="bi bi-file-earmark me-1"></i>Other document</label>
-              <input type="hidden" name="{{ document_forms.2.prefix }}-doc_type" value="other">
-              <input class="form-control {% if document_forms.2.file.errors %}is-invalid{% endif %}" type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx" id="{{ document_forms.2.file.id_for_label }}" name="{{ document_forms.2.file.html_name }}">
-              {% for error in document_forms.2.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-          </div>
+          {% include "includes/supporting_documents.html" %}
         </div>
       </div>
 
@@ -901,6 +944,11 @@
 
   <div class="col-xl-3">
     <div class="card-soft mb-4 sticky-below-topbar">
+      <div class="px-4 pt-3 pb-2 border-bottom" id="emptyRequiredSidebarWrap">
+        <div class="kap-section-title">Still empty</div>
+        <p class="small text-muted mb-0 mt-1">Click a name to jump to that field.</p>
+        <div class="empty-required-list mt-2" id="emptyRequiredSidebar"></div>
+      </div>
       <div class="card-header d-flex justify-content-between align-items-center">
         <h2 class="card-title mb-0">Active products</h2>
         {% if is_admin %}
@@ -1054,6 +1102,32 @@
   var amountInput = document.getElementById('{{ form.amount_requested.id_for_label }}');
   var amountForm = amountInput.closest('form');
   var signaturePads = {};
+  var restorePhotoFromDraft = null;
+  var formIsBound = {% if form.is_bound %}true{% else %}false{% endif %};
+  var DRAFT_KEY = 'officer_kap_application_draft_v1';
+  var restoredFromDraft = false;
+  var draftSaveTimer = null;
+  var draftEnabled = !isEdit;
+
+    function termWeeksLabel(months) {
+    var m = parseInt(months, 10);
+    if (!m || m < 1) return 'Enter months to see weeks (months × 4).';
+    return (m * 4) + ' weeks';
+  }
+
+  function syncTermWeeksHint() {
+    var input = document.querySelector('[data-term-months]');
+    var hint = document.querySelector('[data-term-weeks-hint]');
+    if (!input || !hint) return;
+    hint.textContent = termWeeksLabel(input.value);
+  }
+
+  var termMonthsInput = document.querySelector('[data-term-months]');
+  if (termMonthsInput) {
+    termMonthsInput.addEventListener('input', syncTermWeeksHint);
+    termMonthsInput.addEventListener('change', syncTermWeeksHint);
+    syncTermWeeksHint();
+  }
 
   function setupSignaturePad(canvasId, hiddenId) {
     var canvas = document.getElementById(canvasId);
@@ -1154,6 +1228,27 @@
       input.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
+    restorePhotoFromDraft = function (inputId, payload) {
+      if (!payload || !payload.dataUrl || !inputId) return;
+      var input = document.getElementById(inputId);
+      if (!input) return;
+      var field = input.closest('[data-photo-field]');
+      var comma = payload.dataUrl.indexOf(',');
+      if (comma < 0) return;
+      var meta = payload.dataUrl.slice(0, comma);
+      var base64 = payload.dataUrl.slice(comma + 1);
+      var mimeMatch = meta.match(/data:([^;]+)/);
+      var mime = payload.type || (mimeMatch ? mimeMatch[1] : 'image/jpeg');
+      try {
+        var binary = atob(base64);
+        var bytes = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        var file = new File([bytes], payload.name || (inputId + '.jpg'), { type: mime });
+        assignFile(input, file);
+        if (field) showPreview(field, file);
+      } catch (err) { /* ignore corrupt draft photo */ }
+    };
+
     function openCamera(field) {
       activeField = field;
       if (!modal || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -1244,10 +1339,23 @@
     }
   })();
 
+  function characterReferenceHasValue() {
+    var names = document.querySelectorAll('[data-ref-name]');
+    for (var i = 0; i < names.length; i++) {
+      if (String(names[i].value || '').trim() !== '') return true;
+    }
+    return false;
+  }
+
   function fieldHasValue(container) {
+    if (container.getAttribute('data-required-group') === 'character-reference') {
+      return characterReferenceHasValue();
+    }
     if (container.querySelector('#borrowerSignaturePad')) {
       var pad = signaturePads.borrowerSignaturePad;
-      return !!(pad && !pad.isEmpty());
+      if (pad && !pad.isEmpty()) return true;
+      if (typeof isEdit !== 'undefined' && isEdit && existingBorrowerSig) return true;
+      return false;
     }
     var checkedRadio = container.querySelector('input[type="radio"]:checked');
     if (container.querySelector('input[type="radio"]')) {
@@ -1258,6 +1366,99 @@
     return String(input.value || '').trim() !== '';
   }
 
+  function requiredFieldLabel(container) {
+    var explicit = container.getAttribute('data-required-label');
+    if (explicit) return explicit;
+    var label = container.querySelector('.label-required, label.form-label');
+    if (label) {
+      return label.textContent.replace(/\s+/g, ' ').replace(/\s+\*$/, '').trim();
+    }
+    return 'Required field';
+  }
+
+  function collectEmptyRequired() {
+    var seen = {};
+    var items = [];
+    document.querySelectorAll('.field-required').forEach(function (container) {
+      if (fieldHasValue(container)) return;
+      var group = container.getAttribute('data-required-group') || '';
+      var label = requiredFieldLabel(container);
+      var key = group || label;
+      if (seen[key]) return;
+      seen[key] = true;
+      items.push({ container: container, label: label });
+    });
+    return items;
+  }
+
+  function focusRequiredField(container) {
+    if (!container) return;
+    container.classList.add('is-pinpoint');
+    window.setTimeout(function () { container.classList.remove('is-pinpoint'); }, 1600);
+    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    var ts = container.querySelector('.ts-control');
+    if (ts) {
+      ts.click();
+      return;
+    }
+    var target = container.querySelector('[data-ref-name], input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]), select, textarea');
+    if (target && target.focus) {
+      try { target.focus({ preventScroll: true }); } catch (err) { target.focus(); }
+    }
+  }
+
+  function renderEmptyChip(item) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'empty-required-chip';
+    btn.textContent = item.label;
+    btn.addEventListener('click', function () { focusRequiredField(item.container); });
+    return btn;
+  }
+
+  function renderEmptyRequiredList() {
+    var empty = collectEmptyRequired();
+    var topList = document.getElementById('emptyRequiredList');
+    var legend = document.getElementById('emptyRequiredLegend');
+    var ok = document.getElementById('emptyRequiredOk');
+    var sideList = document.getElementById('emptyRequiredSidebar');
+    var sideWrap = document.getElementById('emptyRequiredSidebarWrap');
+
+    function fill(list) {
+      if (!list) return;
+      list.innerHTML = '';
+      empty.forEach(function (item) { list.appendChild(renderEmptyChip(item)); });
+    }
+
+    fill(topList);
+    fill(sideList);
+
+    var refSection = document.getElementById('characterReferenceSection');
+    if (refSection) refSection.classList.toggle('is-missing-name', !characterReferenceHasValue());
+
+    if (legend) legend.classList.toggle('d-none', empty.length === 0);
+    if (ok) ok.classList.toggle('d-none', empty.length !== 0);
+    if (topList) topList.classList.toggle('d-none', empty.length === 0);
+    if (sideWrap) {
+      var hint = sideWrap.querySelector('.text-muted');
+      var title = sideWrap.querySelector('.kap-section-title');
+      if (empty.length === 0) {
+        if (title) title.textContent = 'Required fields';
+        if (hint) hint.textContent = 'All required fields are filled.';
+        if (sideList) {
+          sideList.innerHTML = '';
+          var done = document.createElement('div');
+          done.className = 'empty-required-ok';
+          done.innerHTML = '<i class="bi bi-check-circle me-1"></i>All required fields are filled';
+          sideList.appendChild(done);
+        }
+      } else {
+        if (title) title.textContent = 'Still empty (' + empty.length + ')';
+        if (hint) hint.textContent = 'Click a name to jump to that field.';
+      }
+    }
+  }
+
   function updateRequiredFieldState(container) {
     if (!container) return;
     container.classList.toggle('is-filled', fieldHasValue(container));
@@ -1265,11 +1466,17 @@
 
   function updateAllRequiredFields() {
     document.querySelectorAll('.field-required').forEach(updateRequiredFieldState);
+    renderEmptyRequiredList();
   }
 
   document.querySelectorAll('.field-required').forEach(function (container) {
-    container.addEventListener('input', function () { updateRequiredFieldState(container); });
-    container.addEventListener('change', function () { updateRequiredFieldState(container); });
+    container.addEventListener('input', function () { updateRequiredFieldState(container); renderEmptyRequiredList(); });
+    container.addEventListener('change', function () { updateRequiredFieldState(container); renderEmptyRequiredList(); });
+  });
+
+  document.querySelectorAll('[data-ref-name]').forEach(function (input) {
+    input.addEventListener('input', updateAllRequiredFields);
+    input.addEventListener('change', updateAllRequiredFields);
   });
 
   document.querySelectorAll('[data-clear-sig]').forEach(function (btn) {
@@ -1550,7 +1757,216 @@
     updateAllRequiredFields();
   }
 
+  function readDraft() {
+    try {
+      var raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return null;
+      var data = JSON.parse(raw);
+      return data && typeof data === 'object' ? data : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function clearDraftStorage() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch (err) { /* ignore */ }
+    var banner = document.getElementById('kapDraftBanner');
+    if (banner) banner.classList.remove('is-visible');
+  }
+
+  function collectFormDraft(form) {
+    var fields = {};
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name || el.disabled) return;
+      if (el.name === 'csrfmiddlewaretoken' || el.name === 'create_application') return;
+      if (el.name === '_application_type_display') return;
+      var type = (el.type || '').toLowerCase();
+      if (type === 'file' || type === 'button' || type === 'submit' || type === 'reset') return;
+      if (type === 'checkbox' || type === 'radio') {
+        if (!el.checked) return;
+        if (type === 'checkbox' && form.querySelectorAll('[name="' + el.name + '"]').length > 1) {
+          if (!Array.isArray(fields[el.name])) fields[el.name] = fields[el.name] ? [].concat(fields[el.name]) : [];
+          fields[el.name].push(el.value);
+        } else {
+          fields[el.name] = el.value;
+        }
+        return;
+      }
+      fields[el.name] = el.value;
+    });
+
+    syncSignatures();
+    var borrowerHidden = document.getElementById('{{ form.borrower_signature_data.id_for_label }}');
+    var coborrowerHidden = document.getElementById('{{ form.coborrower_signature_data.id_for_label }}');
+    var signatures = {
+      borrower: borrowerHidden ? borrowerHidden.value : '',
+      coborrower: coborrowerHidden ? coborrowerHidden.value : '',
+    };
+
+    return { fields: fields, signatures: signatures, photos: {}, savedAt: Date.now() };
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise(function (resolve) {
+      if (!file) {
+        resolve(null);
+        return;
+      }
+      if (file.size > 900000) {
+        resolve(null);
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve({
+          dataUrl: reader.result,
+          name: file.name,
+          type: file.type || 'image/jpeg',
+        });
+      };
+      reader.onerror = function () { resolve(null); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function saveDraftSoon() {
+    if (!draftEnabled) return;
+    if (draftSaveTimer) window.clearTimeout(draftSaveTimer);
+    draftSaveTimer = window.setTimeout(function () {
+      saveDraftNow();
+    }, 350);
+  }
+
+  function saveDraftNow() {
+    if (!draftEnabled) return;
+    var form = document.getElementById('kapApplicationForm');
+    if (!form) return;
+    var draft = collectFormDraft(form);
+    var photoInputs = [
+      { key: 'borrower', id: '{{ form.borrower_photo.id_for_label }}' },
+      { key: 'coborrower', id: '{{ form.coborrower_photo.id_for_label }}' },
+    ];
+    var pending = photoInputs.map(function (item) {
+      var input = document.getElementById(item.id);
+      var file = input && input.files && input.files[0] ? input.files[0] : null;
+      return fileToDataUrl(file).then(function (payload) {
+        if (payload) draft.photos[item.key] = payload;
+      });
+    });
+    Promise.all(pending).then(function () {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } catch (err) {
+        try {
+          draft.photos = {};
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+        } catch (err2) { /* quota exceeded */ }
+      }
+    });
+  }
+
+  function applyDraftFields(fields) {
+    if (!fields) return;
+    Object.keys(fields).forEach(function (name) {
+      var value = fields[name];
+      var nodes = document.querySelectorAll('[name="' + name + '"]');
+      if (!nodes.length) return;
+      var first = nodes[0];
+      var type = (first.type || '').toLowerCase();
+      if (type === 'radio') {
+        Array.prototype.forEach.call(nodes, function (node) {
+          node.checked = String(node.value) === String(value);
+        });
+        return;
+      }
+      if (type === 'checkbox') {
+        if (Array.isArray(value)) {
+          Array.prototype.forEach.call(nodes, function (node) {
+            node.checked = value.indexOf(node.value) !== -1;
+          });
+        } else if (nodes.length === 1) {
+          first.checked = !!value && value !== 'false' && value !== 'off';
+          if (value && value !== true && value !== 'true' && value !== 'on' && value !== '1') {
+            first.checked = true;
+            first.value = value;
+          }
+        } else {
+          Array.prototype.forEach.call(nodes, function (node) {
+            node.checked = String(node.value) === String(value);
+          });
+        }
+        return;
+      }
+      first.value = value == null ? '' : value;
+    });
+  }
+
+  function restoreDraft() {
+    var draft = readDraft();
+    if (!draft || !draft.fields) return false;
+    var hasContent = Object.keys(draft.fields).some(function (key) {
+      var val = draft.fields[key];
+      return val !== null && val !== undefined && String(val).trim() !== '';
+    });
+    if (!hasContent && !(draft.signatures && (draft.signatures.borrower || draft.signatures.coborrower))) {
+      return false;
+    }
+
+    applyDraftFields(draft.fields);
+
+    if (draft.signatures) {
+      if (draft.signatures.borrower) {
+        loadExistingSignature('borrowerSignaturePad', draft.signatures.borrower);
+        var borrowerHidden = document.getElementById('{{ form.borrower_signature_data.id_for_label }}');
+        if (borrowerHidden) borrowerHidden.value = draft.signatures.borrower;
+      }
+      if (draft.signatures.coborrower) {
+        loadExistingSignature('coborrowerSignaturePad', draft.signatures.coborrower);
+        var coborrowerHidden = document.getElementById('{{ form.coborrower_signature_data.id_for_label }}');
+        if (coborrowerHidden) coborrowerHidden.value = draft.signatures.coborrower;
+      }
+    }
+
+    if (draft.photos && restorePhotoFromDraft) {
+      if (draft.photos.borrower) {
+        restorePhotoFromDraft('{{ form.borrower_photo.id_for_label }}', draft.photos.borrower);
+      }
+      if (draft.photos.coborrower) {
+        restorePhotoFromDraft('{{ form.coborrower_photo.id_for_label }}', draft.photos.coborrower);
+      }
+    }
+
+    if (amountInput && amountInput.value) {
+      amountInput.value = formatAmount(amountInput.value);
+    }
+    syncTermWeeksHint();
+    var typeVal = draft.fields.application_type || document.getElementById('applicationTypeValue');
+    if (typeof typeVal === 'string') {
+      setApplicationType(typeVal, typeVal === 'renew' ? 'Renew Application' : 'New Application', typeVal === 'renew');
+    }
+
+    var banner = document.getElementById('kapDraftBanner');
+    if (banner) banner.classList.add('is-visible');
+    return true;
+  }
+
+  function wipeDraftAndReload() {
+    clearDraftStorage();
+    var form = document.getElementById('kapApplicationForm');
+    if (form) form.reset();
+    window.location.reload();
+  }
+
   var skipNextBorrowerChange = isEdit;
+  var preferredProductId = productSelect.value;
+
+  if (draftEnabled && !formIsBound) {
+    restoredFromDraft = restoreDraft();
+    if (restoredFromDraft) {
+      skipNextBorrowerChange = true;
+      preferredProductId = productSelect.value;
+    }
+  }
 
   if (borrowerSelect && window.TomSelect) {
     new TomSelect(borrowerSelect, {
@@ -1570,11 +1986,44 @@
     validateAmount();
     updateAllRequiredFields();
   });
-  refreshAvailableProducts(productSelect.value);
-  if (borrowerSelect && borrowerSelect.value && !isEdit) {
+  refreshAvailableProducts(preferredProductId);
+  if (borrowerSelect && borrowerSelect.value && !isEdit && !restoredFromDraft) {
     refreshMemberProfile();
+  } else if (restoredFromDraft && borrowerSelect && borrowerSelect.value) {
+    // Keep restored typed fields; only refresh product availability for the member.
+    if (autofillHint) {
+      autofillHint.classList.remove('d-none');
+      autofillHint.textContent = 'Draft restored. Member details were kept from your last session.';
+    }
   }
   updateAllRequiredFields();
+
+  if (draftEnabled) {
+    try {
+      if (sessionStorage.getItem('kap_draft_clear_pending') === '1') {
+        // Returned here after a failed submit — keep the draft and drop the pending flag.
+        sessionStorage.removeItem('kap_draft_clear_pending');
+      }
+    } catch (err) { /* ignore */ }
+    var draftForm = document.getElementById('kapApplicationForm');
+    if (draftForm) {
+      draftForm.addEventListener('input', saveDraftSoon);
+      draftForm.addEventListener('change', saveDraftSoon);
+    }
+    ['borrowerSignaturePad', 'coborrowerSignaturePad'].forEach(function (canvasId) {
+      var pad = signaturePads[canvasId];
+      if (!pad || !pad.addEventListener) return;
+      pad.addEventListener('endStroke', saveDraftSoon);
+    });
+    var clearDraftBtn = document.getElementById('kapClearDraftBtn');
+    if (clearDraftBtn) {
+      clearDraftBtn.addEventListener('click', function () {
+        if (window.confirm('Clear the saved draft and start a blank application?')) {
+          wipeDraftAndReload();
+        }
+      });
+    }
+  }
 
   var saveBtn = document.getElementById('saveProductBtn');
   var errBox = document.getElementById('productFormErrors');
@@ -1705,6 +2154,12 @@
     }
     e.preventDefault();
 
+    updateAllRequiredFields();
+    var emptyRequired = collectEmptyRequired();
+    if (emptyRequired.length) {
+      focusRequiredField(emptyRequired[0].container);
+      return;
+    }
     if (!appForm.checkValidity()) {
       appForm.reportValidity();
       return;
@@ -1719,7 +2174,9 @@
     document.getElementById('confirmProduct').textContent = selectedText(productSelect) || '—';
     document.getElementById('confirmAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
     var termVal = document.getElementById('{{ form.term_months.id_for_label }}').value;
-    document.getElementById('confirmTerm').textContent = termVal ? termVal + ' month(s)' : '—';
+    document.getElementById('confirmTerm').textContent = termVal
+      ? termVal + ' month(s) · ' + termWeeksLabel(termVal)
+      : '—';
     var appliedOnVal = document.getElementById('{{ form.applied_on.id_for_label }}').value;
     document.getElementById('confirmAppliedOn').textContent = appliedOnVal || '—';
     document.getElementById('confirmFrequency').textContent = selectedRadioLabel('{{ form.payment_frequency.html_name }}') || '—';
@@ -1744,6 +2201,9 @@
     syncSignatures();
     appForm.dataset.confirmed = 'true';
     appForm.dataset.submitting = 'true';
+    if (draftEnabled) {
+      try { sessionStorage.setItem('kap_draft_clear_pending', '1'); } catch (err) { /* ignore */ }
+    }
     showCreatingState();
 
     // Brief delay so the loading overlay paints before the browser navigates.

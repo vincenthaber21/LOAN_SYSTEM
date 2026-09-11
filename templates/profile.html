@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load lending_tags %}
 {% block title %}My profile{% endblock %}
 {% block topbar_title %}Profile &amp; Settings{% endblock %}
 {% block topbar_context %}Keep your personal and financial details up to date.{% endblock %}
@@ -125,7 +126,7 @@
                 type="date"
                 id="{{ form.date_of_birth.id_for_label }}"
                 name="{{ form.date_of_birth.html_name }}"
-                value="{{ form.date_of_birth.value|default:'' }}"
+                value="{{ form.date_of_birth.value|iso_date }}"
                 class="form-control {% if form.date_of_birth.errors %}is-invalid{% endif %}"
               >
               {% if form.date_of_birth.errors %}

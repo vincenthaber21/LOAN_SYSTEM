@@ -16,8 +16,64 @@ from django.utils import timezone
 from .cashflow_reports import cashflow_report_context, resolve_staff_user
 from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
-from .models import Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, Manager, Notification, Payment, User
+from .audit import application_decision_log, record_activity
+from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, Manager, Notification, Payment, User
 from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
+
+
+APPLICATION_DOCUMENT_SPECS = (
+    ("valid_id", Document.DocType.VALID_ID),
+    ("proof_of_income", Document.DocType.PROOF_OF_INCOME),
+    ("other", Document.DocType.OTHER),
+)
+
+
+def _build_document_forms(request=None):
+    forms = []
+    for prefix, doc_type in APPLICATION_DOCUMENT_SPECS:
+        if request is None:
+            forms.append(DocumentForm(prefix=prefix, initial={"doc_type": doc_type}))
+        else:
+            forms.append(
+                DocumentForm(
+                    request.POST,
+                    request.FILES,
+                    prefix=prefix,
+                    initial={"doc_type": doc_type},
+                )
+            )
+    return forms
+
+
+def _validate_document_uploads(document_forms, request):
+    forms_by_prefix = {form.prefix: form for form in document_forms}
+    has_errors = False
+    for prefix, _doc_type in APPLICATION_DOCUMENT_SPECS:
+        uploads = request.FILES.getlist(f"{prefix}-file")
+        if not uploads:
+            continue
+        form = forms_by_prefix[prefix]
+        form.full_clean()
+        if form._errors is not None:
+            form._errors.pop("file", None)
+        for uploaded in uploads:
+            extension = uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else ""
+            if extension not in DocumentForm.ALLOWED_EXTENSIONS:
+                form.add_error(
+                    "file",
+                    f"{uploaded.name}: Upload an image (JPG, PNG, GIF, WEBP), PDF, or Word document (DOC, DOCX).",
+                )
+                has_errors = True
+    return has_errors
+
+
+def _save_uploaded_documents(application, request):
+    for prefix, doc_type in APPLICATION_DOCUMENT_SPECS:
+        for uploaded in request.FILES.getlist(f"{prefix}-file"):
+            extension = uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else ""
+            if extension not in DocumentForm.ALLOWED_EXTENSIONS:
+                continue
+            Document.objects.create(application=application, doc_type=doc_type, file=uploaded)
 
 
 def _parse_disbursed_date(value):
@@ -73,6 +129,19 @@ def logout_view(request):
         logout(request)
         messages.success(request, "You have been signed out.")
     return redirect("login")
+
+
+def _log_export(request, title, description=""):
+    record_activity(
+        request.user,
+        action=ActivityLog.Action.DATA_EXPORTED,
+        kind=ActivityLog.Kind.SECURITY,
+        title=title,
+        description=description or title,
+        status="neutral",
+        status_label="Export",
+        request=request,
+    )
 
 
 def register(request):
@@ -415,11 +484,6 @@ def _kap_profile_for_member(member):
 @login_required
 @role_required("member")
 def application_create(request):
-    document_specs = [
-        ("valid_id", Document.DocType.VALID_ID),
-        ("proof_of_income", Document.DocType.PROOF_OF_INCOME),
-        ("other", Document.DocType.OTHER),
-    ]
     products = list(available_loan_products_for_borrower(request.user))
     credit_blocked = credit_score_blocks_loans(request.user)
     kap_defaults = _kap_profile_for_member(request.user)
@@ -431,10 +495,7 @@ def application_create(request):
         reference_formset = CharacterReferenceFormSet(
             request.POST, prefix="refs", instance=LoanApplication()
         )
-        document_forms = [
-            DocumentForm(request.POST, request.FILES, prefix=prefix, initial={"doc_type": doc_type})
-            for prefix, doc_type in document_specs
-        ]
+        document_forms = _build_document_forms(request)
         if "create_application" not in request.POST:
             messages.error(request, "Complete the form and confirm to submit your application.")
         elif credit_blocked or not products:
@@ -445,17 +506,31 @@ def application_create(request):
                 else "No loan products are available for you right now.",
             )
         else:
-            document_errors = any(
-                request.FILES.get(f"{prefix}-file") and not doc_form.is_valid()
-                for prefix, doc_form in zip((item[0] for item in document_specs), document_forms)
-            )
+            document_errors = _validate_document_uploads(document_forms, request)
             if form.is_valid() and reference_formset.is_valid() and not document_errors:
                 application = form.save(commit=False)
                 application.borrower = request.user
                 application.status = LoanApplication.Status.SUBMITTED
                 if not application.applied_on:
                     application.applied_on = timezone.localdate()
+                application.created_by = request.user
                 application.save()
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.APPLICATION_CREATED,
+                    kind=ActivityLog.Kind.APPLICATION,
+                    title=f"{application.reference} created",
+                    description=f"{application.product_name} · submitted by {application.borrower_name}.",
+                    member=application.borrower,
+                    reference=application.reference,
+                    amount=application.amount_requested,
+                    status=application.status,
+                    status_label="Created",
+                    url_name="application_review",
+                    url_kwargs={"application_id": application.pk},
+                    request=request,
+                    source_key=f"application_created:{application.pk}",
+                )
                 reference_formset.instance = application
                 references = reference_formset.save(commit=False)
                 for index, reference in enumerate(references, start=1):
@@ -465,13 +540,7 @@ def application_create(request):
                     if not reference.sort_order:
                         reference.sort_order = index
                     reference.save()
-                for doc_form in document_forms:
-                    if not request.FILES.get(f"{doc_form.prefix}-file"):
-                        continue
-                    if doc_form.is_valid() and doc_form.cleaned_data.get("file"):
-                        doc = doc_form.save(commit=False)
-                        doc.application = application
-                        doc.save()
+                _save_uploaded_documents(application, request)
                 messages.success(request, "Application submitted for review.")
                 return redirect("application-detail", application.pk)
     else:
@@ -481,10 +550,7 @@ def application_create(request):
         reference_formset = CharacterReferenceFormSet(prefix="refs")
         for index, ref_form in enumerate(reference_formset.forms, start=1):
             ref_form.fields["sort_order"].initial = index
-        document_forms = [
-            DocumentForm(prefix=prefix, initial={"doc_type": doc_type})
-            for prefix, doc_type in document_specs
-        ]
+        document_forms = _build_document_forms()
 
     return render(request, "borrower/application_wizard.html", {
         "form": form,
@@ -829,6 +895,7 @@ def application_review(request, application_id):
             app.decision_date = timezone.now()
             app.status = LoanApplication.Status.APPROVED if form.cleaned_data["decision"] == "approve" else LoanApplication.Status.REJECTED
             app.save()
+            application_decision_log(request.user, app, request=request)
             if app.status == LoanApplication.Status.APPROVED:
                 reject_superseded_applications(app, request.user)
                 messages.success(request, "Application approved — proceed to release the funds.")
@@ -921,6 +988,21 @@ def application_pdf(request, application_id):
 
     pdf_bytes = build_kap_application_pdf(application)
     filename = f"KAP-Application-{application.reference}.pdf"
+    record_activity(
+        request.user,
+        action=ActivityLog.Action.DATA_EXPORTED,
+        kind=ActivityLog.Kind.APPLICATION,
+        title=f"{application.reference} form downloaded",
+        description=f"Application form PDF for {application.borrower_name}.",
+        member=application.borrower,
+        reference=application.reference,
+        amount=application.amount_requested,
+        status="neutral",
+        status_label="Exported",
+        url_name="application_review",
+        url_kwargs={"application_id": application.pk},
+        request=request,
+    )
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     disposition = "attachment" if request.GET.get("download") == "1" else "inline"
     response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
@@ -934,6 +1016,22 @@ def application_delete(request, application_id):
     if request.method != "POST":
         return redirect("applications_queue")
     reference = application.reference
+    borrower = application.borrower
+    amount = application.amount_requested
+    product_name = application.product_name
+    record_activity(
+        request.user,
+        action=ActivityLog.Action.APPLICATION_DELETED,
+        kind=ActivityLog.Kind.APPLICATION,
+        title=f"{reference} deleted",
+        description=f"{product_name} application for {borrower.display_name()} was deleted.",
+        member=borrower,
+        reference=reference,
+        amount=amount,
+        status="rejected",
+        status_label="Deleted",
+        request=request,
+    )
     application.delete()
     messages.success(request, f"Application {reference} was deleted.")
     return redirect("applications_queue")
@@ -1050,6 +1148,20 @@ def add_loan_product(request):
     form = LoanProductForm(request.POST)
     if form.is_valid():
         product = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PRODUCT_CREATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f'Loan product "{product.name}" created',
+            description=f"{product.get_loan_type_display()} · {product.interest_rate}% / month.",
+            reference=product.name,
+            status="active" if product.is_active else "inactive",
+            status_label="Created",
+            url_name="edit_loan_product",
+            url_kwargs={"product_id": product.pk},
+            request=request,
+            source_key=f"loan_product:{product.pk}",
+        )
         return JsonResponse({
             "ok": True,
             "id": product.pk,
@@ -1064,6 +1176,20 @@ def add_loan_product_page(request):
     form = LoanProductForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         product = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PRODUCT_CREATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f'Loan product "{product.name}" created',
+            description=f"{product.get_loan_type_display()} · {product.interest_rate}% / month.",
+            reference=product.name,
+            status="active" if product.is_active else "inactive",
+            status_label="Created",
+            url_name="edit_loan_product",
+            url_kwargs={"product_id": product.pk},
+            request=request,
+            source_key=f"loan_product:{product.pk}",
+        )
         messages.success(request, f'Loan product "{product.name}" added successfully.')
         return redirect("loan_products")
     return render(request, "officer/add_loan_product.html", {
@@ -1106,7 +1232,20 @@ def edit_loan_product(request, product_id):
     product = get_object_or_404(LoanProduct, pk=product_id)
     form = LoanProductEditForm(request.POST or None, instance=product)
     if request.method == "POST" and form.is_valid():
-        form.save()
+        product = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PRODUCT_UPDATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f'Loan product "{product.name}" updated',
+            description=f"{product.get_loan_type_display()} · {product.interest_rate}% / month.",
+            reference=product.name,
+            status="active" if product.is_active else "inactive",
+            status_label="Updated",
+            url_name="edit_loan_product",
+            url_kwargs={"product_id": product.pk},
+            request=request,
+        )
         messages.success(request, f'Loan product "{product.name}" was updated.')
         return redirect("loan_products")
     return render(request, "officer/edit_loan_product.html", {"form": form, "product": product})
@@ -1115,33 +1254,38 @@ def edit_loan_product(request, product_id):
 @login_required
 @role_required("officer")
 def officer_apply_loan(request):
-    document_specs = [
-        ("valid_id", Document.DocType.VALID_ID),
-        ("proof_of_income", Document.DocType.PROOF_OF_INCOME),
-        ("other", Document.DocType.OTHER),
-    ]
     if request.method == "POST":
         form = OfficerLoanApplicationForm(request.POST, request.FILES)
         reference_formset = CharacterReferenceFormSet(
             request.POST, prefix="refs", instance=LoanApplication()
         )
-        document_forms = [
-            DocumentForm(request.POST, request.FILES, prefix=prefix, initial={"doc_type": doc_type})
-            for prefix, doc_type in document_specs
-        ]
+        document_forms = _build_document_forms(request)
         if "create_application" not in request.POST:
             messages.error(request, "Complete the form and confirm to create an application.")
         else:
-            document_errors = any(
-                request.FILES.get(f"{prefix}-file") and not doc_form.is_valid()
-                for prefix, doc_form in zip((item[0] for item in document_specs), document_forms)
-            )
+            document_errors = _validate_document_uploads(document_forms, request)
             if form.is_valid() and reference_formset.is_valid() and not document_errors:
                 application = form.save(commit=False)
                 application.status = LoanApplication.Status.SUBMITTED
                 application.created_by = request.user
                 application.save()
-                _persist_application_related(application, reference_formset, document_forms, request)
+                _persist_application_related(application, reference_formset, request)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.APPLICATION_CREATED,
+                    kind=ActivityLog.Kind.APPLICATION,
+                    title=f"{application.reference} created",
+                    description=f"{application.product_name} · submitted for {application.borrower_name}.",
+                    member=application.borrower,
+                    reference=application.reference,
+                    amount=application.amount_requested,
+                    status=application.status,
+                    status_label="Created",
+                    url_name="application_review",
+                    url_kwargs={"application_id": application.pk},
+                    request=request,
+                    source_key=f"application_created:{application.pk}",
+                )
                 messages.success(request, f"Application {application.reference} created for {application.borrower_name}.")
                 return redirect("application_review", application_id=application.pk)
     else:
@@ -1149,10 +1293,7 @@ def officer_apply_loan(request):
         reference_formset = CharacterReferenceFormSet(prefix="refs")
         for index, ref_form in enumerate(reference_formset.forms, start=1):
             ref_form.fields["sort_order"].initial = index
-        document_forms = [
-            DocumentForm(prefix=prefix, initial={"doc_type": doc_type})
-            for prefix, doc_type in document_specs
-        ]
+        document_forms = _build_document_forms()
 
     products = LoanProduct.objects.filter(is_active=True)
     return render(request, "officer/apply_loan.html", {
@@ -1164,7 +1305,7 @@ def officer_apply_loan(request):
     })
 
 
-def _persist_application_related(application, reference_formset, document_forms, request):
+def _persist_application_related(application, reference_formset, request):
     reference_formset.instance = application
     references = reference_formset.save(commit=False)
     for index, reference in enumerate(references, start=1):
@@ -1174,13 +1315,7 @@ def _persist_application_related(application, reference_formset, document_forms,
         if not reference.sort_order:
             reference.sort_order = index
         reference.save()
-    for doc_form in document_forms:
-        if not request.FILES.get(f"{doc_form.prefix}-file"):
-            continue
-        if doc_form.is_valid() and doc_form.cleaned_data.get("file"):
-            doc = doc_form.save(commit=False)
-            doc.application = application
-            doc.save()
+    _save_uploaded_documents(application, request)
 
 
 @login_required
@@ -1199,30 +1334,34 @@ def officer_edit_application(request, application_id):
         )
         return redirect("application_review", application_id=application.pk)
 
-    document_specs = [
-        ("valid_id", Document.DocType.VALID_ID),
-        ("proof_of_income", Document.DocType.PROOF_OF_INCOME),
-        ("other", Document.DocType.OTHER),
-    ]
     if request.method == "POST":
         form = OfficerLoanApplicationForm(request.POST, request.FILES, instance=application)
         reference_formset = CharacterReferenceFormSet(
             request.POST, prefix="refs", instance=application
         )
-        document_forms = [
-            DocumentForm(request.POST, request.FILES, prefix=prefix, initial={"doc_type": doc_type})
-            for prefix, doc_type in document_specs
-        ]
+        document_forms = _build_document_forms(request)
         if "create_application" not in request.POST:
             messages.error(request, "Complete the form and confirm to save your changes.")
         else:
-            document_errors = any(
-                request.FILES.get(f"{prefix}-file") and not doc_form.is_valid()
-                for prefix, doc_form in zip((item[0] for item in document_specs), document_forms)
-            )
+            document_errors = _validate_document_uploads(document_forms, request)
             if form.is_valid() and reference_formset.is_valid() and not document_errors:
                 application = form.save()
-                _persist_application_related(application, reference_formset, document_forms, request)
+                _persist_application_related(application, reference_formset, request)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.APPLICATION_UPDATED,
+                    kind=ActivityLog.Kind.APPLICATION,
+                    title=f"{application.reference} updated",
+                    description=f"Application form saved for {application.borrower_name}.",
+                    member=application.borrower,
+                    reference=application.reference,
+                    amount=application.amount_requested,
+                    status=application.status,
+                    status_label="Updated",
+                    url_name="application_review",
+                    url_kwargs={"application_id": application.pk},
+                    request=request,
+                )
                 messages.success(request, f"Application {application.reference} was updated.")
                 return redirect("application_review", application_id=application.pk)
     else:
@@ -1231,10 +1370,7 @@ def officer_edit_application(request, application_id):
         for index, ref_form in enumerate(reference_formset.forms, start=1):
             if not ref_form.fields["sort_order"].initial:
                 ref_form.fields["sort_order"].initial = index
-        document_forms = [
-            DocumentForm(prefix=prefix, initial={"doc_type": doc_type})
-            for prefix, doc_type in document_specs
-        ]
+        document_forms = _build_document_forms()
 
     products = form.fields["loan_product"].queryset.order_by("name")
     return render(request, "officer/apply_loan.html", {
@@ -1363,6 +1499,21 @@ def add_member(request):
     form = OfficerMemberForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         member = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.MEMBER_CREATED,
+            kind=ActivityLog.Kind.MEMBER,
+            title=f"{member.display_name()} created",
+            description=f"Member account {member.reference} opened.",
+            member=member,
+            reference=member.reference,
+            status="active" if member.is_active else "inactive",
+            status_label="Created",
+            url_name="borrower_detail",
+            url_kwargs={"borrower_id": member.pk},
+            request=request,
+            source_key=f"member_created:{member.pk}",
+        )
         messages.success(request, f"{member.display_name()} was added as a member.")
         return redirect("all_members")
     return render(request, "officer/add_member.html", {"form": form})
@@ -1375,6 +1526,20 @@ def edit_member(request, borrower_id):
     form = OfficerMemberEditForm(request.POST or None, instance=borrower)
     if request.method == "POST" and form.is_valid():
         member = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.MEMBER_UPDATED,
+            kind=ActivityLog.Kind.MEMBER,
+            title=f"{member.display_name()} updated",
+            description=f"Member profile {member.reference} was changed.",
+            member=member,
+            reference=member.reference,
+            status="active" if member.is_active else "inactive",
+            status_label="Updated",
+            url_name="borrower_detail",
+            url_kwargs={"borrower_id": member.pk},
+            request=request,
+        )
         messages.success(request, f"{member.display_name()}'s profile was updated.")
         return redirect("borrower_detail", borrower_id=member.id)
     return render(request, "officer/edit_member.html", {"form": form, "borrower": borrower, "has_active_loan": borrower.has_active_loan})
@@ -1409,6 +1574,22 @@ def add_officer(request):
     form = OfficerAccountForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         officer = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.OFFICER_CREATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f"{officer.display_name()} created",
+            description="Loan officer account opened.",
+            member=officer,
+            member_name=officer.display_name(),
+            reference=officer.username,
+            status="active" if officer.is_active else "inactive",
+            status_label="Created",
+            url_name="officer_activity_log",
+            url_kwargs={"officer_id": officer.pk},
+            request=request,
+            source_key=f"officer_created:{officer.pk}",
+        )
         messages.success(request, f"{officer.display_name()} was added as a loan officer.")
         return redirect("loan_officers")
     return render(request, "officer/add_officer.html", {"form": form})
@@ -1421,6 +1602,21 @@ def edit_officer(request, officer_id):
     form = OfficerAccountEditForm(request.POST or None, instance=officer)
     if request.method == "POST" and form.is_valid():
         member = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.OFFICER_UPDATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f"{member.display_name()} updated",
+            description="Loan officer profile was changed.",
+            member=member,
+            member_name=member.display_name(),
+            reference=member.username,
+            status="active" if member.is_active else "inactive",
+            status_label="Updated",
+            url_name="officer_activity_log",
+            url_kwargs={"officer_id": member.pk},
+            request=request,
+        )
         messages.success(request, f"{member.display_name()}'s profile was updated.")
         return redirect("loan_officers")
     return render(request, "officer/edit_officer.html", {"form": form, "officer": officer})
@@ -1455,6 +1651,22 @@ def add_manager(request):
     form = ManagerAccountForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         manager = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.MANAGER_CREATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f"{manager.display_name()} created",
+            description="Manager account opened.",
+            member=manager,
+            member_name=manager.display_name(),
+            reference=manager.username,
+            status="active" if manager.is_active else "inactive",
+            status_label="Created",
+            url_name="manager_activity_log",
+            url_kwargs={"manager_id": manager.pk},
+            request=request,
+            source_key=f"manager_created:{manager.pk}",
+        )
         messages.success(request, f"{manager.display_name()} was added as a manager.")
         return redirect("managers")
     return render(request, "officer/add_manager.html", {"form": form})
@@ -1467,6 +1679,21 @@ def edit_manager(request, manager_id):
     form = ManagerAccountEditForm(request.POST or None, instance=manager)
     if request.method == "POST" and form.is_valid():
         member = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.MANAGER_UPDATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f"{member.display_name()} updated",
+            description="Manager profile was changed.",
+            member=member,
+            member_name=member.display_name(),
+            reference=member.username,
+            status="active" if member.is_active else "inactive",
+            status_label="Updated",
+            url_name="manager_activity_log",
+            url_kwargs={"manager_id": member.pk},
+            request=request,
+        )
         messages.success(request, f"{member.display_name()}'s profile was updated.")
         return redirect("managers")
     return render(request, "officer/edit_manager.html", {"form": form, "manager": manager})
@@ -1476,7 +1703,17 @@ def _build_activity_log_context(request, staff):
     activity_type = request.GET.get("type", "all")
     if activity_type in {"collection", "pay_collection"}:
         activity_type = "payment"
-    if activity_type not in {"all", "application", "payment", "disbursement"}:
+    if activity_type not in {
+        "all",
+        "application",
+        "payment",
+        "disbursement",
+        "member",
+        "savings",
+        "mutual_aid",
+        "account",
+        "security",
+    }:
         activity_type = "all"
     period, date_from, date_to = resolve_activity_date_range(
         request.GET.get("period", "all"),
@@ -1492,7 +1729,10 @@ def _build_activity_log_context(request, staff):
     for event in events:
         event["created_at_display"] = format_activity_timestamp(event["created_at"])
         if event.get("url_name"):
-            event["detail_url"] = reverse(event["url_name"], kwargs=event["url_kwargs"])
+            try:
+                event["detail_url"] = reverse(event["url_name"], kwargs=event.get("url_kwargs") or {})
+            except Exception:
+                event["detail_url"] = ""
 
     if activity_type == "payment":
         collection_events = events
@@ -1506,7 +1746,10 @@ def _build_activity_log_context(request, staff):
         for event in collection_events:
             event["created_at_display"] = format_activity_timestamp(event["created_at"])
             if event.get("url_name"):
-                event["detail_url"] = reverse(event["url_name"], kwargs=event["url_kwargs"])
+                try:
+                    event["detail_url"] = reverse(event["url_name"], kwargs=event.get("url_kwargs") or {})
+                except Exception:
+                    event["detail_url"] = ""
     collection_total = sum((event.get("amount") or Decimal("0.00")) for event in collection_events)
     collection_preview = collection_events[:20]
     show_collection_section = activity_type not in ("payment", "all")
@@ -1528,20 +1771,25 @@ def _build_activity_log_context(request, staff):
     applications = staff.reviewed_applications.filter(decision_date__isnull=False)
     payments = staff.recorded_payments.all()
     loans = staff.disbursed_loans.all()
+    staff_logs = ActivityLog.objects.filter(actor=staff)
     if date_from:
         applications = applications.filter(decision_date__date__gte=date_from)
         payments = payments.filter(payment_date__gte=date_from)
         loans = loans.filter(disbursed_date__gte=date_from)
+        staff_logs = staff_logs.filter(created_at__date__gte=date_from)
     if date_to:
         applications = applications.filter(decision_date__date__lte=date_to)
         payments = payments.filter(payment_date__lte=date_to)
         loans = loans.filter(disbursed_date__lte=date_to)
+        staff_logs = staff_logs.filter(created_at__date__lte=date_to)
 
     application_count = applications.count()
     payment_count = payments.count()
     disbursement_count = loans.count()
     payment_total = payments.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
     disbursed_total = loans.aggregate(total=Sum("principal"))["total"] or Decimal("0.00")
+    members_created = staff_logs.filter(action=ActivityLog.Action.MEMBER_CREATED).count()
+    applications_created = staff_logs.filter(action=ActivityLog.Action.APPLICATION_CREATED).count()
 
     custom_from = ""
     custom_to = ""
@@ -1558,6 +1806,18 @@ def _build_activity_log_context(request, staff):
             if date_to:
                 collection_query_parts.append(f"to={date_to.isoformat()}")
     collection_filter_query = "&".join(collection_query_parts)
+    activity_copy = {
+        "all": ("Activity history", "Members, application forms, payments, disbursements, and other staff actions."),
+        "member": ("Members", "Member accounts created or updated by this staff member."),
+        "application": ("Applications", "Application forms created, saved, reviewed, or deleted."),
+        "payment": ("Pay collection", "Loan payments recorded by this staff member."),
+        "disbursement": ("Disbursements", "Loans released by this staff member."),
+        "savings": ("Savings", "Savings accounts and transactions handled by this staff member."),
+        "mutual_aid": ("Mutual aid", "Enrollments, contributions, and claims handled by this staff member."),
+        "account": ("Accounts", "Officer, manager, and product changes."),
+        "security": ("Security", "Sign-ins, sign-outs, and data exports."),
+    }
+    activity_heading, activity_blurb = activity_copy.get(activity_type, activity_copy["all"])
 
     return {
         "activity": page_obj,
@@ -1572,9 +1832,14 @@ def _build_activity_log_context(request, staff):
         },
         "activity_type_filters": [
             {"value": "all", "label": "All activity"},
+            {"value": "member", "label": "Members"},
             {"value": "application", "label": "Applications"},
             {"value": "payment", "label": "Pay collection"},
             {"value": "disbursement", "label": "Disbursements"},
+            {"value": "savings", "label": "Savings"},
+            {"value": "mutual_aid", "label": "Mutual aid"},
+            {"value": "account", "label": "Accounts"},
+            {"value": "security", "label": "Security"},
         ],
         "activity_period_filters": ACTIVITY_PERIOD_FILTERS,
         "date_range_label": activity_range_label(period, date_from, date_to),
@@ -1584,8 +1849,19 @@ def _build_activity_log_context(request, staff):
         "collection_has_more": len(collection_events) > len(collection_preview),
         "collection_filter_query": collection_filter_query,
         "show_collection_section": show_collection_section,
+        "activity_heading": activity_heading,
+        "activity_blurb": activity_blurb,
         "activity_summary": [
-            {"label": "Applications processed", "value": application_count, "note": "Decisions recorded"},
+            {
+                "label": "Members created",
+                "value": members_created,
+                "note": "Accounts opened",
+            },
+            {
+                "label": "Applications created",
+                "value": applications_created,
+                "note": f"{application_count} decision{'s' if application_count != 1 else ''} recorded",
+            },
             {
                 "label": "Pay collection",
                 "value": f"₱{payment_total:,.0f}",
@@ -1706,6 +1982,12 @@ def borrower_detail(request, borrower_id):
 
 @login_required
 @role_required("officer")
+def officer_loans(request):
+    return redirect("borrowers")
+
+
+@login_required
+@role_required("officer")
 def officer_loan_detail(request, loan_id):
     loan = get_object_or_404(Loan.objects.select_related("application", "application__borrower", "application__loan_product"), pk=loan_id)
     mark_overdue_installments()
@@ -1738,6 +2020,24 @@ def officer_loan_detail(request, loan_id):
                     f"{'s' if quote['months'] != 1 else ''} at {BALANCE_EXTENSION_RATE}% interest. "
                     f"New total due: ₱{quote['total_payable']:,.2f}."
                 ),
+            )
+            record_activity(
+                request.user,
+                action=ActivityLog.Action.BALANCE_EXTENDED,
+                kind=ActivityLog.Kind.DISBURSEMENT,
+                title=f"{loan.reference} balance extended",
+                description=(
+                    f"Remaining balance restructured over {quote['months']} month"
+                    f"{'s' if quote['months'] != 1 else ''}."
+                ),
+                member=loan.application.borrower,
+                reference=loan.reference,
+                amount=quote["total_payable"],
+                status="active",
+                status_label="Extended",
+                url_name="officer_loan_detail",
+                url_kwargs={"loan_id": loan.pk},
+                request=request,
             )
             return redirect("officer_loan_detail", loan_id=loan.id)
 
@@ -1831,11 +2131,12 @@ def officer_make_payment(request, loan_id):
     max_mutual_aid = (
         daily_mutual_aid_amount() * Decimal(remaining_periods)
     ).quantize(Decimal("0.01")) if remaining_periods else daily_mutual_aid_amount()
-    max_amount = adjust_payment(exact_max) + max_mutual_aid
+    max_loan_amount = adjust_payment(exact_max)
+    max_amount = max_loan_amount + max_mutual_aid
     max_amount_label = (
-        "adjusted remaining on this installment plus mutual aid"
+        "adjusted remaining on this installment"
         if installment
-        else "adjusted outstanding balance plus mutual aid"
+        else "adjusted outstanding balance"
     )
 
     def _capped(frequency):
@@ -1873,6 +2174,7 @@ def officer_make_payment(request, loan_id):
             "mutual_aid_contribution": default_mutual_aid,
         },
         max_amount=max_amount,
+        max_loan_amount=max_loan_amount,
         max_amount_label=max_amount_label,
     )
     if request.method == "POST" and form.is_valid():
@@ -1887,13 +2189,29 @@ def officer_make_payment(request, loan_id):
             mutual_aid_contribution=form.cleaned_data.get("mutual_aid_contribution"),
             pay_frequency=pay_frequency if not installment else "daily",
         )
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PAYMENT_RECORDED,
+            kind=ActivityLog.Kind.PAYMENT,
+            title=f"Pay collection · {loan.reference}",
+            description=f"{payment.get_method_display()} · ref {payment.reference_number or payment.pk}",
+            member=loan.application.borrower,
+            reference=payment.reference_number or f"PAY-{payment.pk:05d}",
+            amount=payment.amount,
+            status="paid",
+            status_label="Pay collection",
+            url_name="payment_receipt",
+            url_kwargs={"payment_id": payment.pk},
+            request=request,
+            source_key=f"payment:{payment.pk}",
+        )
         loan.refresh_from_db()
         parts = [
             f"Payment of ₱{payment.amount:,.2f} recorded for {loan.reference}.",
             f"₱{payment.loan_amount_applied:,.2f} applied to loan (new principal ₱{loan.principal:,.2f}).",
         ]
         if payment.savings_adjustment:
-            parts.append(f"₱{payment.savings_adjustment:,.2f} credited to member savings.")
+            parts.append(f"₱{payment.savings_adjustment:,.2f} credited to Membership/Savings Deposit.")
         if payment.mutual_aid_contribution:
             parts.append(f"₱{payment.mutual_aid_contribution:,.2f} credited to mutual aid.")
         messages.success(request, " ".join(parts))
@@ -1914,6 +2232,7 @@ def officer_make_payment(request, loan_id):
             "loan": loan,
             "installment": installment,
             "max_payment_amount": max_amount,
+            "max_loan_amount": max_loan_amount,
             "max_payment_label": max_amount_label,
             "pay_frequency": pay_frequency,
             "pay_frequency_label": frequency_labels.get(pay_frequency, pay_frequency.title()),
@@ -2057,6 +2376,22 @@ def disburse(request, disbursement_id):
             extras.append(f"₱{membership_deposit:,.2f} credited to Membership/Savings Deposit")
         if kap_contribution > 0:
             extras.append(f"₱{kap_contribution:,.2f} recorded for KAPAMILYA MUTUAL AID")
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.LOAN_DISBURSED,
+            kind=ActivityLog.Kind.DISBURSEMENT,
+            title=f"{loan.reference} disbursed",
+            description=f"{loan.disbursement_method} · net {loan.net_release_amount:,.2f} released",
+            member=application.borrower,
+            reference=loan.reference,
+            amount=loan.net_release_amount,
+            status="disbursed",
+            status_label="Disbursed",
+            url_name="disbursement_receipt",
+            url_kwargs={"disbursement_id": application.pk},
+            request=request,
+            source_key=f"disbursement:{loan.pk}",
+        )
         if extras:
             messages.success(
                 request,
@@ -2076,7 +2411,7 @@ def disburse(request, disbursement_id):
 
 
 @login_required
-@role_required("officer")
+@role_required("manager")
 def reports(request):
     staff_user_id = request.GET.get("staff", "")
     cashflow = cashflow_report_context(
@@ -2223,8 +2558,9 @@ def reports(request):
 
 
 @login_required
-@role_required("officer")
+@role_required("manager")
 def export_cashflow_csv(request):
+    _log_export(request, "Cashflow CSV exported", "Cashflow report downloaded.")
     cashflow = cashflow_report_context(
         lookback_key=request.GET.get("period", "30"),
         granularity=request.GET.get("grain", "day"),
@@ -2296,8 +2632,9 @@ def export_cashflow_csv(request):
 
 
 @login_required
-@role_required("officer")
+@role_required("manager")
 def export_portfolio_csv(request):
+    _log_export(request, "Portfolio CSV exported", "Disbursed loan portfolio downloaded.")
     loans = Loan.objects.select_related(
         "application__borrower",
         "application__loan_product",
@@ -2335,6 +2672,7 @@ def export_portfolio_csv(request):
 @login_required
 @role_required("officer")
 def export_applications_csv(request):
+    _log_export(request, "Applications CSV exported", "Application queue downloaded.")
     applications = LoanApplication.objects.select_related("borrower", "loan_product")
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "")
@@ -2357,6 +2695,7 @@ def export_applications_csv(request):
 @login_required
 @role_required("officer")
 def export_borrowers_csv(request):
+    _log_export(request, "Members CSV exported", "Member directory downloaded.")
     members = User.member_accounts()
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
@@ -2386,6 +2725,7 @@ def export_borrowers_csv(request):
 @login_required
 @role_required("officer")
 def export_disbursements_csv(request):
+    _log_export(request, "Disbursements CSV exported", "Disbursement queue downloaded.")
     ready = LoanApplication.objects.filter(status=LoanApplication.Status.APPROVED).select_related("borrower", "loan_product")
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="lumen-disbursement-queue.csv"'
@@ -2401,6 +2741,8 @@ def schedule_export(request, loan_id):
     loan_qs = Loan.objects if request.user.is_officer else Loan.objects.filter(application__borrower=request.user)
     loan = get_object_or_404(loan_qs, pk=loan_id)
     ensure_schedule_current(loan)
+    if request.user.is_officer:
+        _log_export(request, f"{loan.reference} schedule exported", f"Repayment schedule for {loan.application.borrower_name}.")
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{loan.reference}-schedule.csv"'
     writer = csv.writer(response)
@@ -2471,6 +2813,7 @@ def application_decision(request, application_id):
             application.status = LoanApplication.Status.REJECTED
             messages.success(request, "Application declined with a decision note.")
         application.save()
+        application_decision_log(request.user, application, request=request)
         if application.status == LoanApplication.Status.APPROVED:
             reject_superseded_applications(application, request.user)
             return redirect("disbursement_detail", disbursement_id=application_id)
@@ -2485,6 +2828,21 @@ def add_review_note(request, application_id):
         application.reviewed_by = request.user
         application.review_notes = request.POST["body"]
         application.save(update_fields=["reviewed_by", "review_notes"])
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.REVIEW_NOTE,
+            kind=ActivityLog.Kind.APPLICATION,
+            title=f"Review note on {application.reference}",
+            description=application.review_notes,
+            member=application.borrower,
+            reference=application.reference,
+            amount=application.amount_requested,
+            status="under_review",
+            status_label="Note",
+            url_name="application_review",
+            url_kwargs={"application_id": application.pk},
+            request=request,
+        )
         messages.success(request, "Private review note added.")
     return redirect("application_review", application_id=application_id)
 
@@ -2494,6 +2852,17 @@ def profile(request):
     form = ProfileForm(request.POST or None, instance=request.user)
     if request.method == "POST" and form.is_valid():
         form.save()
+        if request.user.is_officer:
+            record_activity(
+                request.user,
+                action=ActivityLog.Action.PROFILE_UPDATED,
+                kind=ActivityLog.Kind.ACCOUNT,
+                title="Profile updated",
+                description=f"{request.user.display_name()} updated their own profile.",
+                status="neutral",
+                status_label="Updated",
+                request=request,
+            )
         messages.success(request, "Profile updated successfully.")
         return redirect("profile")
     completion = profile_completion(request.user)

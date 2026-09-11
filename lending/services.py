@@ -12,6 +12,8 @@ CREDIT_SCORE_PRECISION = Decimal("0.1")
 MIN_CREDIT_SCORE_FOR_LOANS = Decimal("50.0")
 BALANCE_EXTENSION_RATE = Decimal("5.00")
 MAX_BALANCE_EXTENSION_MONTHS = 3
+# Remaining principal at or below this amount is collected with no added interest.
+NO_INTEREST_PRINCIPAL_CEILING = Decimal("1000.00")
 # Fallback when DisbursementSetting is unavailable (Monday=0 … Sunday=6).
 DISBURSEMENT_WEEKDAY = DisbursementSetting.Weekday.FRIDAY
 
@@ -271,11 +273,45 @@ def reject_superseded_applications(application, reviewer):
         other.decision_date = timezone.now()
         other.review_notes = f"Auto-rejected: superseded by {application.reference}."
         other.save(update_fields=["status", "reviewed_by", "decision_date", "review_notes"])
+        from .audit import application_decision_log
+
+        application_decision_log(reviewer, other)
 
 
 WORKING_DAYS_PER_MONTH = 22
 WORKING_DAYS_PER_WEEK = 5
 WORKING_DAYS_PER_BIWEEK = 10
+
+# Display-only term weeks (does not change payment / interest formulas).
+# Example: 4 months → 16 weeks total.
+CALENDAR_WEEKS_PER_MONTH = 4
+
+
+def term_weeks_total(term_months):
+    """Calendar weeks for a term: months × 4 (display only)."""
+    try:
+        months = int(term_months)
+    except (TypeError, ValueError):
+        return 0
+    if months <= 0:
+        return 0
+    return months * CALENDAR_WEEKS_PER_MONTH
+
+
+def term_weeks_summary(term_months):
+    """Display labels for term weeks without changing calculation formulas."""
+    months = 0
+    try:
+        months = int(term_months)
+    except (TypeError, ValueError):
+        months = 0
+    total = term_weeks_total(months)
+    return {
+        "term_months": months,
+        "weeks_total": total,
+        "label": f"{total} weeks" if total else "",
+        "short_label": f"{total} weeks" if total else "",
+    }
 
 
 def daily_mutual_aid_amount():
@@ -391,6 +427,12 @@ def working_day_count(term_months):
     return int(term_months) * WORKING_DAYS_PER_MONTH
 
 
+def principal_waives_interest(principal):
+    """True when remaining principal is ₱1,000 or less — no interest is added."""
+    amount = Decimal(str(principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return amount > 0 and amount <= NO_INTEREST_PRINCIPAL_CEILING
+
+
 def calculate_flat_loan_amounts(principal, interest_rate, term_months):
     """Flat interest using working-day collection (Mon–Fri, 22 days/month).
 
@@ -399,13 +441,35 @@ def calculate_flat_loan_amounts(principal, interest_rate, term_months):
         total_payable  = 1800 + 10000 = 11800
         per_day        = 11800 / (3 * 22) = 178.79
         per_month      = 11800 / 3 = 3933.33
+
+    When principal is ₱1,000 or less, interest is waived (payable = principal only).
     """
-    principal = Decimal(str(principal))
-    rate = Decimal(str(interest_rate)) / Decimal("100")
+    principal = Decimal(str(principal)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     months = Decimal(int(term_months))
+    periods = working_day_count(term_months)
+    if principal_waives_interest(principal) or months <= 0 or periods <= 0:
+        per_day = (
+            (principal / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if periods > 0
+            else Decimal("0.00")
+        )
+        per_month = (
+            (principal / months).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if months > 0
+            else principal
+        )
+        return {
+            "principal": principal,
+            "total_interest": Decimal("0.00"),
+            "total_payable": principal,
+            "periods": periods,
+            "per_day": per_day,
+            "per_month": per_month,
+            "interest_waived": principal_waives_interest(principal),
+        }
+    rate = Decimal(str(interest_rate)) / Decimal("100")
     total_interest = (principal * rate * months).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     total_payable = (principal + total_interest).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    periods = working_day_count(term_months)
     per_day = (total_payable / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     per_month = (total_payable / months).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return {
@@ -415,6 +479,7 @@ def calculate_flat_loan_amounts(principal, interest_rate, term_months):
         "periods": periods,
         "per_day": per_day,
         "per_month": per_month,
+        "interest_waived": False,
     }
 
 
@@ -492,18 +557,23 @@ def balance_extension_principal(loan):
 
 
 def balance_extension_quote(principal, months):
-    """Flat-interest quote for paying a remaining balance over `months` at 5%."""
+    """Flat-interest quote for paying a remaining balance over `months` at 5%.
+
+    Principal of ₱1,000 or less is quoted with no interest.
+    """
     months = int(months)
     amounts = calculate_flat_loan_amounts(principal, BALANCE_EXTENSION_RATE, months)
+    rate = Decimal("0.00") if amounts.get("interest_waived") else BALANCE_EXTENSION_RATE
     return {
         "months": months,
         "principal": amounts["principal"],
-        "interest_rate": BALANCE_EXTENSION_RATE,
+        "interest_rate": rate,
         "total_interest": amounts["total_interest"],
         "total_payable": amounts["total_payable"],
         "per_day": amounts["per_day"],
         "per_month": amounts["per_month"],
         "periods": amounts["periods"],
+        "interest_waived": bool(amounts.get("interest_waived")),
     }
 
 
@@ -518,8 +588,11 @@ class BalanceExtensionError(ValueError):
 
 
 def _flat_amounts_for_periods(principal, interest_rate, periods):
-    """Flat interest for an exact number of working-day periods (same formula, proportional months)."""
-    principal = Decimal(str(principal))
+    """Flat interest for an exact number of working-day periods (same formula, proportional months).
+
+    Remaining principal of ₱1,000 or less carries no interest.
+    """
+    principal = Decimal(str(principal)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     periods = int(periods)
     if periods <= 0:
         return {
@@ -529,6 +602,18 @@ def _flat_amounts_for_periods(principal, interest_rate, periods):
             "periods": 0,
             "per_day": Decimal("0.00"),
             "months": Decimal("0"),
+            "interest_waived": principal_waives_interest(principal),
+        }
+    if principal_waives_interest(principal):
+        per_day = (principal / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return {
+            "principal": principal,
+            "total_interest": Decimal("0.00"),
+            "total_payable": principal,
+            "periods": periods,
+            "per_day": per_day,
+            "months": Decimal(periods) / Decimal(WORKING_DAYS_PER_MONTH),
+            "interest_waived": True,
         }
     rate = Decimal(str(interest_rate)) / Decimal("100")
     months = Decimal(periods) / Decimal(WORKING_DAYS_PER_MONTH)
@@ -542,6 +627,7 @@ def _flat_amounts_for_periods(principal, interest_rate, periods):
         "periods": periods,
         "per_day": per_day,
         "months": months,
+        "interest_waived": False,
     }
 
 
@@ -666,6 +752,7 @@ def generate_schedule(loan):
 
     Payments reduce principal (e.g. ₱20,000 − ₱3,000 → ₱17,000) and the same
     formula is reapplied on the new principal for the remaining working days.
+    When remaining principal is ₱1,000 or less, interest is waived.
 
     Interest begins on the Monday on/after `schedule_start_date` (or disbursement).
     That total is then split evenly across `term_months * 22` working-day payments.
@@ -723,11 +810,50 @@ def rebuild_loan_schedule(loan):
 
 
 def ensure_schedule_current(loan):
-    """Regenerate the schedule when it is out of sync with loan terms or disbursement date."""
+    """Regenerate the schedule when it is out of sync with loan terms or disbursement date.
+
+    Also strips interest from unpaid rows when remaining principal is ₱1,000 or less.
+    """
     sync_loan_term_from_application(loan)
     if schedule_is_stale(loan):
         return rebuild_loan_schedule(loan)
+    if _waive_interest_on_small_remaining_principal(loan):
+        return True
     return False
+
+
+def _waive_interest_on_small_remaining_principal(loan):
+    """If principal is ≤₱1,000, rebuild unpaid schedule with principal only (no interest)."""
+    principal = Decimal(str(loan.principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if not principal_waives_interest(principal):
+        return False
+    unpaid = list(
+        loan.installments.exclude(status=Installment.Status.PAID).order_by("installment_number", "due_date")
+    )
+    if not unpaid:
+        if (loan.outstanding_balance or Decimal("0.00")) != principal:
+            loan.outstanding_balance = principal
+            loan.save(update_fields=["outstanding_balance"])
+            return True
+        return False
+
+    unpaid_interest = sum((row.interest_component for row in unpaid), Decimal("0.00"))
+    if unpaid_interest <= 0 and (loan.outstanding_balance or Decimal("0.00")) <= principal:
+        return False
+
+    periods = len(unpaid)
+    start_due = unpaid[0].due_date
+    amounts = _rebuild_schedule_for_remaining_principal(loan, principal, start_due, periods)
+    loan_payments_sum = sum(
+        (item.loan_amount_applied for item in loan.payments.all()),
+        Decimal("0.00"),
+    )
+    loan.outstanding_balance = amounts["total_payable"]
+    loan.total_payable = (loan_payments_sum + amounts["total_payable"]).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    loan.save(update_fields=["outstanding_balance", "total_payable"])
+    return True
 
 
 def _bucket_status(chunk):
@@ -824,19 +950,67 @@ def _annotate_schedule_with_mutual_aid(schedule, view_mode):
     return annotated
 
 
+def _fold_schedule_buckets(buckets, target_count, label_prefix):
+    """Merge overflow buckets into the last allowed period (display only)."""
+    items = list(buckets)
+    if target_count <= 0 or len(items) <= target_count:
+        return items
+    kept = [dict(row) for row in items[:target_count]]
+    overflow = items[target_count:]
+    last = kept[-1]
+    for extra in overflow:
+        last["amount"] = last["amount"] + extra["amount"]
+        last["principal"] = last["principal"] + extra["principal"]
+        last["interest"] = last["interest"] + extra["interest"]
+        last["amount_paid"] = last.get("amount_paid", Decimal("0.00")) + extra.get(
+            "amount_paid", Decimal("0.00")
+        )
+        last["remaining"] = last["remaining"] + extra["remaining"]
+        last["day_count"] = int(last.get("day_count") or 0) + int(extra.get("day_count") or 0)
+        last["end_date"] = extra["end_date"]
+        last["due_date"] = extra["due_date"]
+        last["is_next"] = bool(last.get("is_next")) or bool(extra.get("is_next"))
+    last["adjusted_amount"] = adjust_payment(last["amount"])
+    statuses = {last["status"]} | {row["status"] for row in overflow}
+    if Installment.Status.OVERDUE in statuses:
+        last["status"] = Installment.Status.OVERDUE
+        last["status_label"] = "Overdue"
+    elif Installment.Status.PENDING in statuses:
+        last["status"] = Installment.Status.PENDING
+        last["status_label"] = "Pending"
+    else:
+        last["status"] = Installment.Status.PAID
+        last["status_label"] = "Paid"
+    last["installment_number"] = target_count
+    last["period_number"] = target_count
+    last["label"] = f"{label_prefix} {target_count}"
+    return kept
+
+
 def schedule_month_buckets(installments):
     """Group daily installments into loan months (22 working days each)."""
     return _schedule_period_buckets(installments, WORKING_DAYS_PER_MONTH, "Month")
 
 
-def schedule_week_buckets(installments):
-    """Group daily installments into weeks (5 working days each)."""
-    return _schedule_period_buckets(installments, WORKING_DAYS_PER_WEEK, "Week")
+def schedule_week_buckets(installments, term_months=None):
+    """Group daily installments into weeks (5 working days each).
+
+    Display is capped at months × 4 weeks. Leftover working days fold into the
+    last week so a 4-month term shows Week 1–16 only. Daily formulas are unchanged.
+    """
+    buckets = _schedule_period_buckets(installments, WORKING_DAYS_PER_WEEK, "Week")
+    return _fold_schedule_buckets(buckets, term_weeks_total(term_months), "Week")
 
 
-def schedule_biweek_buckets(installments):
-    """Group daily installments into biweekly periods (10 working days each)."""
-    return _schedule_period_buckets(installments, WORKING_DAYS_PER_BIWEEK, "Biweek")
+def schedule_biweek_buckets(installments, term_months=None):
+    """Group daily installments into biweekly periods (10 working days each).
+
+    Display is capped at months × 2 biweeks so the weekly standard (months × 4)
+    stays consistent. Daily formulas are unchanged.
+    """
+    buckets = _schedule_period_buckets(installments, WORKING_DAYS_PER_BIWEEK, "Biweek")
+    target = term_weeks_total(term_months) // 2 if term_months is not None else 0
+    return _fold_schedule_buckets(buckets, target, "Biweek")
 
 
 def application_schedule_view_mode(loan):
@@ -899,11 +1073,12 @@ def next_due_for_display(loan, view_mode="day"):
         }
 
     installments = list(loan.installments.all())
+    term = loan_term_months(loan)
     if view_mode == "week":
-        buckets = schedule_week_buckets(installments)
+        buckets = schedule_week_buckets(installments, term_months=term)
         label = "Weekly"
     elif view_mode == "biweek":
-        buckets = schedule_biweek_buckets(installments)
+        buckets = schedule_biweek_buckets(installments, term_months=term)
         label = "Biweekly"
     else:
         buckets = schedule_month_buckets(installments)
@@ -1076,6 +1251,8 @@ def application_payment_preview(application, view_mode=None, month=None, start_d
             "principal": amounts["principal"],
             "interest_rate": rate,
             "term_months": int(term),
+            "weeks_total": term_weeks_total(term),
+            "weeks_label": term_weeks_summary(term)["label"],
             "periods": amounts["periods"],
             "total_interest": amounts["total_interest"],
             "total_payable": amounts["total_payable"],
@@ -1130,11 +1307,11 @@ def _schedule_display_from_installments(installments, term_months, view_mode="mo
         if selected_month is not None:
             schedule = [row for row in schedule if row["month_number"] == selected_month]
     elif view_mode == "week":
-        schedule = schedule_week_buckets(installments)
+        schedule = schedule_week_buckets(installments, term_months=term)
         if selected_month is not None:
             schedule = [row for row in schedule if row["month_number"] == selected_month]
     elif view_mode == "biweek":
-        schedule = schedule_biweek_buckets(installments)
+        schedule = schedule_biweek_buckets(installments, term_months=term)
         if selected_month is not None:
             schedule = [row for row in schedule if row["month_number"] == selected_month]
     else:
@@ -1796,102 +1973,18 @@ def _activity_event_date(value):
 
 
 def get_officer_activity_log(officer, activity_type="all", date_from=None, date_to=None):
-    events = []
+    from .audit import KIND_BY_FILTER
+    from .models import ActivityLog
 
-    if activity_type in ("all", "application"):
-        applications = list(officer.reviewed_applications.select_related("borrower", "loan_product"))
-        reviewed_ids = {application.pk for application in applications}
-        applications += [
-            application
-            for application in officer.created_applications.select_related("borrower", "loan_product")
-            if application.pk not in reviewed_ids
-        ]
-        for application in applications:
-            if application.decision_date:
-                events.append({
-                    "kind": "application",
-                    "title": f"{application.reference} {application.status_label.lower()}",
-                    "description": application.review_notes or f"{application.product_name} decision recorded.",
-                    "member_name": application.borrower_name,
-                    "borrower_id": application.borrower_id,
-                    "reference": application.reference,
-                    "amount": application.amount_requested,
-                    "created_at": application.decision_date,
-                    "status": application.status,
-                    "status_label": application.status_label,
-                    "url_name": "application_review",
-                    "url_kwargs": {"application_id": application.pk},
-                })
-            else:
-                events.append({
-                    "kind": "application",
-                    "title": f"{application.reference} created",
-                    "description": f"{application.product_name} · submitted for {application.borrower_name}.",
-                    "member_name": application.borrower_name,
-                    "borrower_id": application.borrower_id,
-                    "reference": application.reference,
-                    "amount": application.amount_requested,
-                    "created_at": application.created_at,
-                    "status": application.status,
-                    "status_label": application.status_label,
-                    "url_name": "application_review",
-                    "url_kwargs": {"application_id": application.pk},
-                })
-
-    if activity_type in ("all", "payment", "collection"):
-        payments = officer.recorded_payments.select_related(
-            "loan", "loan__application", "loan__application__borrower", "loan__application__loan_product"
-        )
-        for payment in payments:
-            loan = payment.loan
-            events.append({
-                "kind": "payment",
-                "title": f"Pay collection · {loan.reference}",
-                "description": f"{payment.get_method_display()} · ref {payment.reference_number or payment.pk}",
-                "member_name": loan.application.borrower_name,
-                "borrower_id": loan.application.borrower_id,
-                "reference": payment.reference_number or f"PAY-{payment.pk:05d}",
-                "amount": payment.amount,
-                "created_at": payment.payment_date,
-                "status": "paid",
-                "status_label": "Pay collection",
-                "url_name": "payment_receipt",
-                "url_kwargs": {"payment_id": payment.pk},
-            })
-
-    if activity_type in ("all", "disbursement"):
-        loans = officer.disbursed_loans.select_related("application", "application__borrower", "application__loan_product")
-        for loan in loans:
-            events.append({
-                "kind": "disbursement",
-                "title": f"{loan.reference} disbursed",
-                "description": f"{loan.disbursement_method} · net {loan.net_release_amount:,.2f} released",
-                "member_name": loan.application.borrower_name,
-                "borrower_id": loan.application.borrower_id,
-                "reference": loan.reference,
-                "amount": loan.net_release_amount,
-                "created_at": loan.disbursed_date,
-                "status": "disbursed",
-                "status_label": "Disbursed",
-                "url_name": "disbursement_receipt",
-                "url_kwargs": {"disbursement_id": loan.application_id},
-            })
-
-    if date_from or date_to:
-        filtered = []
-        for event in events:
-            event_date = _activity_event_date(event.get("created_at"))
-            if event_date is None:
-                continue
-            if date_from and event_date < date_from:
-                continue
-            if date_to and event_date > date_to:
-                continue
-            filtered.append(event)
-        events = filtered
-
-    events.sort(key=lambda event: _activity_sort_key(event["created_at"]), reverse=True)
-    return events
+    logs = ActivityLog.objects.filter(actor=officer).select_related("member")
+    kind = KIND_BY_FILTER.get(activity_type)
+    if kind:
+        logs = logs.filter(kind=kind)
+    if date_from:
+        logs = logs.filter(created_at__date__gte=date_from)
+    if date_to:
+        logs = logs.filter(created_at__date__lte=date_to)
+    return [log.as_event() for log in logs]
 
 
 def format_activity_timestamp(value):

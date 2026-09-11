@@ -52,6 +52,7 @@ urlpatterns = [
     path("officer/managers/<int:manager_id>/activity/", views.manager_activity_log, name="manager_activity_log"),
     path("officer/borrowers/<int:borrower_id>/", views.borrower_detail, name="borrower_detail"),
     path("officer/borrowers/<int:borrower_id>/edit/", views.edit_member, name="edit_member"),
+    path("officer/loans/", views.officer_loans, name="officer_loans"),
     path("officer/loans/<int:loan_id>/", views.officer_loan_detail, name="officer_loan_detail"),
     path("officer/loans/<int:loan_id>/schedule/", views.officer_schedule, name="officer_repayment_schedule"),
     path("officer/loans/<int:loan_id>/pay/", views.officer_make_payment, name="officer_make_payment"),

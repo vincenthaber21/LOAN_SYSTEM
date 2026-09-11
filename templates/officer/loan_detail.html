@@ -44,7 +44,7 @@
     <div class="eyebrow mt-3">{{ loan.reference }}</div>
     <h1>{{ loan.product_name }}</h1>
     <p>
-      Opened {{ loan.start_date }} · {{ loan.term_months }} month term · Pay {{ loan.application.get_payment_frequency_display }}
+      Opened {{ loan.start_date }} · {{ loan.term_months }} month term · {{ loan.term_weeks_label }} · Pay {{ loan.application.get_payment_frequency_display }}
       {% if loan.is_rescheduled %}
       · <span class="badge status-rescheduled">Rescheduled {{ loan.reschedule_date_display }}</span>
       {% endif %}
@@ -133,6 +133,16 @@
           <div class="col-sm-4"><div class="detail-label">Loan reference</div><div class="detail-value">{{ loan.reference }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Disbursement method</div><div class="detail-value">{{ loan.disbursement_method }}</div></div>
           <div class="col-sm-4">
+            <div class="detail-label">Term</div>
+            <div class="detail-value">{{ loan.term_months }} months</div>
+            <div class="text-muted small">{{ loan.term_weeks_label }}</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Payment per week</div>
+            <div class="detail-value">{{ loan.adjusted_weekly_payment|peso }}</div>
+            <div class="text-muted small">Exact {{ loan.weekly_payment|peso }} · 5 working days</div>
+          </div>
+          <div class="col-sm-4">
             <div class="detail-label">Payment per day</div>
             <div class="detail-value">{{ loan.adjusted_daily_payment|peso }}</div>
             <div class="text-muted small">Exact {{ loan.daily_payment|peso }}</div>
@@ -201,6 +211,10 @@
               <div class="detail-label">Per working day</div>
               <div class="detail-value" data-preview="per-day">—</div>
             </div>
+            <div class="col-sm-4">
+              <div class="detail-label">Weeks</div>
+              <div class="detail-value" data-preview="weeks">—</div>
+            </div>
           </div>
           <button class="btn btn-primary" type="submit" id="applyExtensionBtn" disabled>Apply new schedule</button>
         </form>
@@ -239,6 +253,12 @@
           setText("total", peso(quote.total_payable));
           setText("per-month", peso(quote.per_month));
           setText("per-day", peso(quote.per_day));
+          var months = Number(quote.months) || 0;
+          var weeksTotal = months * 4;
+          setText(
+            "weeks",
+            months ? weeksTotal + " weeks" : "—"
+          );
           preview.hidden = false;
           applyBtn.disabled = false;
         }

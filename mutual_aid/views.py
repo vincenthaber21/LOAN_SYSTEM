@@ -7,7 +7,8 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from lending.decorators import role_required
-from lending.models import User
+from lending.audit import record_activity
+from lending.models import ActivityLog, User
 
 from .forms import (
     ClaimDisburseForm,
@@ -116,6 +117,21 @@ def officer_enroll_mutual_aid(request):
                 enrolled_by=request.user,
                 notes=form.cleaned_data.get("notes", ""),
             )
+            record_activity(
+                request.user,
+                action=ActivityLog.Action.MUTUAL_AID_ENROLLED,
+                kind=ActivityLog.Kind.MUTUAL_AID,
+                title=f"{membership.member.display_name()} enrolled",
+                description=membership.plan_name,
+                member=membership.member,
+                reference=membership.membership_number,
+                status="active",
+                status_label="Enrolled",
+                url_name="officer_mutual_aid_membership_detail",
+                url_kwargs={"membership_id": membership.pk},
+                request=request,
+                source_key=f"mutual_aid_enrolled:{membership.pk}",
+            )
             messages.success(
                 request,
                 f"Enrolled {membership.member.display_name()} in {membership.plan_name}.",
@@ -171,6 +187,21 @@ def officer_mutual_aid_membership_detail(request, membership_id):
                         notes=data.get("notes", ""),
                         occurred_on=data.get("contribution_date"),
                     )
+                    record_activity(
+                        request.user,
+                        action=ActivityLog.Action.MUTUAL_AID_CONTRIBUTION,
+                        kind=ActivityLog.Kind.MUTUAL_AID,
+                        title=f"Mutual aid contribution · {membership.membership_number}",
+                        description=f"{data['method']} · {membership.member.display_name()}",
+                        member=membership.member,
+                        reference=data.get("reference_number") or membership.membership_number,
+                        amount=data["amount"],
+                        status="paid",
+                        status_label="Contribution",
+                        url_name="officer_mutual_aid_membership_detail",
+                        url_kwargs={"membership_id": membership.pk},
+                        request=request,
+                    )
                     messages.success(request, "Contribution recorded.")
                     return redirect("officer_mutual_aid_membership_detail", membership_id=membership.pk)
                 except MutualAidError as exc:
@@ -201,6 +232,22 @@ def officer_mutual_aid_membership_detail(request, membership_id):
                         data["amount_requested"],
                         data["reason"],
                     )
+                    record_activity(
+                        request.user,
+                        action=ActivityLog.Action.MUTUAL_AID_CLAIM,
+                        kind=ActivityLog.Kind.MUTUAL_AID,
+                        title=f"Claim {claim.reference} submitted",
+                        description=f"{membership.plan_name} · {membership.member.display_name()}",
+                        member=membership.member,
+                        reference=claim.reference,
+                        amount=data["amount_requested"],
+                        status="submitted",
+                        status_label="Submitted",
+                        url_name="officer_mutual_aid_claim_review",
+                        url_kwargs={"claim_id": claim.pk},
+                        request=request,
+                        source_key=f"mutual_aid_claim:{claim.pk}",
+                    )
                     messages.success(request, f"Claim {claim.reference} submitted for review.")
                     return redirect("officer_mutual_aid_claim_review", claim_id=claim.pk)
                 except MutualAidError as exc:
@@ -208,6 +255,20 @@ def officer_mutual_aid_membership_detail(request, membership_id):
         elif action == "suspend":
             try:
                 suspend_membership(membership)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.MEMBERSHIP_STATUS,
+                    kind=ActivityLog.Kind.MUTUAL_AID,
+                    title=f"{membership.membership_number} suspended",
+                    description=f"{membership.member.display_name()} · {membership.plan_name}",
+                    member=membership.member,
+                    reference=membership.membership_number,
+                    status="suspended",
+                    status_label="Suspended",
+                    url_name="officer_mutual_aid_membership_detail",
+                    url_kwargs={"membership_id": membership.pk},
+                    request=request,
+                )
                 messages.success(request, "Membership suspended.")
                 return redirect("officer_mutual_aid_membership_detail", membership_id=membership.pk)
             except MutualAidError as exc:
@@ -215,6 +276,20 @@ def officer_mutual_aid_membership_detail(request, membership_id):
         elif action == "reactivate":
             try:
                 reactivate_membership(membership)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.MEMBERSHIP_STATUS,
+                    kind=ActivityLog.Kind.MUTUAL_AID,
+                    title=f"{membership.membership_number} reactivated",
+                    description=f"{membership.member.display_name()} · {membership.plan_name}",
+                    member=membership.member,
+                    reference=membership.membership_number,
+                    status="active",
+                    status_label="Reactivated",
+                    url_name="officer_mutual_aid_membership_detail",
+                    url_kwargs={"membership_id": membership.pk},
+                    request=request,
+                )
                 messages.success(request, "Membership reactivated.")
                 return redirect("officer_mutual_aid_membership_detail", membership_id=membership.pk)
             except MutualAidError as exc:
@@ -222,6 +297,18 @@ def officer_mutual_aid_membership_detail(request, membership_id):
         elif action == "terminate":
             try:
                 terminate_membership(membership)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.MEMBERSHIP_STATUS,
+                    kind=ActivityLog.Kind.MUTUAL_AID,
+                    title=f"{membership.membership_number} terminated",
+                    description=f"{membership.member.display_name()} · {membership.plan_name}",
+                    member=membership.member,
+                    reference=membership.membership_number,
+                    status="terminated",
+                    status_label="Terminated",
+                    request=request,
+                )
                 messages.success(request, "Membership terminated.")
                 return redirect("officer_mutual_aid_memberships")
             except MutualAidError as exc:
@@ -276,6 +363,18 @@ def officer_add_mutual_aid_plan(request):
     form = MutualAidPlanForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         plan = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PRODUCT_CREATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f'Mutual aid plan "{plan.name}" created',
+            description=plan.name,
+            reference=plan.name,
+            status="active" if plan.is_active else "inactive",
+            status_label="Created",
+            request=request,
+            source_key=f"mutual_aid_plan:{plan.pk}",
+        )
         messages.success(request, f'Mutual aid plan "{plan.name}" added successfully.')
         return redirect("officer_mutual_aid_plans")
     return render(request, "officer/add_mutual_aid_plan.html", {
@@ -290,7 +389,18 @@ def officer_edit_mutual_aid_plan(request, plan_id):
     plan = get_object_or_404(MutualAidPlan, pk=plan_id)
     form = MutualAidPlanForm(request.POST or None, instance=plan)
     if request.method == "POST" and form.is_valid():
-        form.save()
+        plan = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PRODUCT_UPDATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f'Mutual aid plan "{plan.name}" updated',
+            description=plan.name,
+            reference=plan.name,
+            status="active" if plan.is_active else "inactive",
+            status_label="Updated",
+            request=request,
+        )
         messages.success(request, "Mutual aid plan updated.")
         return redirect("officer_mutual_aid_plans")
     return render(request, "officer/edit_mutual_aid_plan.html", {"form": form, "plan": plan})
@@ -362,7 +472,24 @@ def officer_mutual_aid_claim_review(request, claim_id):
                         review_notes=data.get("review_notes", ""),
                         amount_approved=data.get("amount_approved"),
                     )
+                    claim.refresh_from_db()
                     label = {"approve": "approved", "reject": "rejected", "review": "marked under review"}[action]
+                    status_map = {"approve": "approved", "reject": "rejected", "review": "under_review"}
+                    record_activity(
+                        request.user,
+                        action=ActivityLog.Action.MUTUAL_AID_CLAIM_REVIEWED,
+                        kind=ActivityLog.Kind.MUTUAL_AID,
+                        title=f"Claim {claim.reference} {label}",
+                        description=data.get("review_notes") or f"{claim.membership.member.display_name()} · {claim.membership.plan_name}",
+                        member=claim.membership.member,
+                        reference=claim.reference,
+                        amount=data.get("amount_approved") or claim.amount_requested,
+                        status=status_map[action],
+                        status_label=label.title(),
+                        url_name="officer_mutual_aid_claim_review",
+                        url_kwargs={"claim_id": claim.pk},
+                        request=request,
+                    )
                     messages.success(request, f"Claim {claim.reference} {label}.")
                     return redirect("officer_mutual_aid_claim_review", claim_id=claim.pk)
                 except MutualAidError as exc:
@@ -375,6 +502,23 @@ def officer_mutual_aid_claim_review(request, claim_id):
                         claim,
                         request.user,
                         disbursement_reference=disburse_form.cleaned_data.get("disbursement_reference", ""),
+                    )
+                    claim.refresh_from_db()
+                    record_activity(
+                        request.user,
+                        action=ActivityLog.Action.MUTUAL_AID_CLAIM_DISBURSED,
+                        kind=ActivityLog.Kind.MUTUAL_AID,
+                        title=f"Claim {claim.reference} disbursed",
+                        description=claim.membership.member.display_name(),
+                        member=claim.membership.member,
+                        reference=claim.reference,
+                        amount=getattr(claim, "amount_approved", None) or claim.amount_requested,
+                        status="disbursed",
+                        status_label="Disbursed",
+                        url_name="officer_mutual_aid_claim_review",
+                        url_kwargs={"claim_id": claim.pk},
+                        request=request,
+                        source_key=f"mutual_aid_claim_disbursed:{claim.pk}",
                     )
                     messages.success(request, f"Claim {claim.reference} disbursed.")
                     return redirect("officer_mutual_aid_claims")

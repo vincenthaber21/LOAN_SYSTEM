@@ -1,0 +1,31 @@
+{% if form.errors or reference_formset.non_form_errors or reference_formset.total_error_count %}
+<div class="alert alert-danger" id="kapFieldErrorAlert">
+  <div class="fw-semibold mb-2"><i class="bi bi-exclamation-circle me-1"></i>These fields are still empty or invalid — click a name to jump there:</div>
+  <ul class="mb-0 ps-3">
+    {% for field in form %}
+      {% if field.errors %}
+      <li>
+        <a class="alert-link" href="#{{ field.id_for_label }}">{{ field.label }}</a>
+        — {{ field.errors.0 }}
+      </li>
+      {% endif %}
+    {% endfor %}
+    {% for error in form.non_field_errors %}
+      <li>{{ error }}</li>
+    {% endfor %}
+    {% for ref_form in reference_formset %}
+      {% for field in ref_form %}
+        {% if field.errors %}
+        <li>
+          <a class="alert-link" href="#{{ field.id_for_label }}">Character reference {{ forloop.parentloop.counter }} — {{ field.label }}</a>
+          — {{ field.errors.0 }}
+        </li>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {% for error in reference_formset.non_form_errors %}
+      <li>{{ error }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}

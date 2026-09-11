@@ -792,6 +792,19 @@ class Loan(models.Model):
         return adjust_payment(self.weekly_payment)
 
     @property
+    def term_weeks_total(self):
+        """Calendar weeks for this term (months × 4). Display only."""
+        from .services import loan_term_months, term_weeks_total
+
+        return term_weeks_total(loan_term_months(self))
+
+    @property
+    def term_weeks_label(self):
+        from .services import loan_term_months, term_weeks_summary
+
+        return term_weeks_summary(loan_term_months(self))["label"]
+
+    @property
     def biweekly_payment(self):
         """Ten working days (two weeks)."""
         return (self.daily_payment * Decimal("10")).quantize(Decimal("0.01"))
@@ -1091,6 +1104,8 @@ class Document(models.Model):
         PROOF_OF_INCOME = "proof_of_income", "Proof of income"
         OTHER = "other", "Other"
 
+    IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+
     application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="documents")
     doc_type = models.CharField(max_length=30, choices=DocType.choices)
     file = models.FileField(upload_to="loan-documents/%Y/%m/")
@@ -1098,6 +1113,25 @@ class Document(models.Model):
 
     def __str__(self):
         return f"{self.get_doc_type_display()} — {self.application.reference}"
+
+    @property
+    def filename(self):
+        if not self.file:
+            return ""
+        return self.file.name.rsplit("/", 1)[-1]
+
+    @property
+    def extension(self):
+        name = self.filename.lower()
+        return name.rsplit(".", 1)[-1] if "." in name else ""
+
+    @property
+    def is_image(self):
+        return self.extension in self.IMAGE_EXTENSIONS
+
+    @property
+    def is_pdf(self):
+        return self.extension == "pdf"
 
     @property
     def name(self):
@@ -1284,3 +1318,113 @@ class Features(models.Model):
             if relative and (Path(settings.MEDIA_ROOT) / relative).is_file():
                 return mark
         return static(self.DEFAULT_LOGO_MARK_STATIC)
+
+
+class ActivityLog(models.Model):
+    """Append-only staff audit trail. Rows are kept even if the related record is later changed or deleted."""
+
+    class Kind(models.TextChoices):
+        MEMBER = "member", "Member"
+        APPLICATION = "application", "Application"
+        PAYMENT = "payment", "Pay collection"
+        DISBURSEMENT = "disbursement", "Disbursement"
+        SAVINGS = "savings", "Savings"
+        MUTUAL_AID = "mutual_aid", "Mutual aid"
+        ACCOUNT = "account", "Account"
+        SECURITY = "security", "Security"
+
+    class Action(models.TextChoices):
+        MEMBER_CREATED = "member_created", "Member created"
+        MEMBER_UPDATED = "member_updated", "Member updated"
+        APPLICATION_CREATED = "application_created", "Application created"
+        APPLICATION_UPDATED = "application_updated", "Application updated"
+        APPLICATION_APPROVED = "application_approved", "Application approved"
+        APPLICATION_REJECTED = "application_rejected", "Application rejected"
+        APPLICATION_INFO_REQUESTED = "application_info_requested", "More information requested"
+        APPLICATION_DELETED = "application_deleted", "Application deleted"
+        REVIEW_NOTE = "review_note", "Review note added"
+        PAYMENT_RECORDED = "payment_recorded", "Pay collection"
+        LOAN_DISBURSED = "loan_disbursed", "Loan disbursed"
+        BALANCE_EXTENDED = "balance_extended", "Balance extended"
+        OFFICER_CREATED = "officer_created", "Officer created"
+        OFFICER_UPDATED = "officer_updated", "Officer updated"
+        MANAGER_CREATED = "manager_created", "Manager created"
+        MANAGER_UPDATED = "manager_updated", "Manager updated"
+        PRODUCT_CREATED = "product_created", "Product created"
+        PRODUCT_UPDATED = "product_updated", "Product updated"
+        SAVINGS_OPENED = "savings_opened", "Savings account opened"
+        SAVINGS_DEPOSIT = "savings_deposit", "Savings deposit"
+        SAVINGS_WITHDRAWAL = "savings_withdrawal", "Savings withdrawal"
+        SAVINGS_CLOSED = "savings_closed", "Savings account closed"
+        MUTUAL_AID_ENROLLED = "mutual_aid_enrolled", "Mutual aid enrolled"
+        MUTUAL_AID_CONTRIBUTION = "mutual_aid_contribution", "Mutual aid contribution"
+        MUTUAL_AID_CLAIM = "mutual_aid_claim", "Mutual aid claim submitted"
+        MUTUAL_AID_CLAIM_REVIEWED = "mutual_aid_claim_reviewed", "Mutual aid claim reviewed"
+        MUTUAL_AID_CLAIM_DISBURSED = "mutual_aid_claim_disbursed", "Mutual aid claim disbursed"
+        MEMBERSHIP_STATUS = "membership_status", "Membership status changed"
+        PROFILE_UPDATED = "profile_updated", "Profile updated"
+        DATA_EXPORTED = "data_exported", "Data exported"
+        SIGNED_IN = "signed_in", "Signed in"
+        SIGNED_OUT = "signed_out", "Signed out"
+        SIGN_IN_FAILED = "sign_in_failed", "Failed sign-in"
+
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activity_logs",
+    )
+    action = models.CharField(max_length=40, choices=Action.choices)
+    kind = models.CharField(max_length=20, choices=Kind.choices, db_index=True)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    member = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="subject_activity_logs",
+    )
+    member_name = models.CharField(max_length=160, blank=True)
+    reference = models.CharField(max_length=80, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=30, blank=True)
+    status_label = models.CharField(max_length=80, blank=True)
+    url_name = models.CharField(max_length=80, blank=True)
+    url_kwargs = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True)
+    source_key = models.CharField(max_length=80, null=True, blank=True, unique=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["actor", "created_at"]),
+            models.Index(fields=["actor", "kind", "created_at"]),
+        ]
+
+    def __str__(self):
+        who = self.actor.display_name() if self.actor_id else "Unknown"
+        return f"{who} · {self.title}"
+
+    def as_event(self):
+        borrower_id = None
+        if self.member_id and self.member and self.member.role == User.Role.MEMBER and not self.member.is_staff:
+            borrower_id = self.member_id
+        return {
+            "kind": self.kind,
+            "title": self.title,
+            "description": self.description,
+            "member_name": self.member_name,
+            "borrower_id": borrower_id,
+            "reference": self.reference,
+            "amount": self.amount,
+            "created_at": self.created_at,
+            "status": self.status or "neutral",
+            "status_label": self.status_label or self.get_action_display(),
+            "url_name": self.url_name,
+            "url_kwargs": self.url_kwargs or {},
+            "ip_address": self.ip_address,
+        }

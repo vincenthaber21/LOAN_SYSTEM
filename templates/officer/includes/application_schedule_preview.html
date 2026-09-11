@@ -8,6 +8,7 @@
         {% if schedule_preview_terms %}
         If approved and released on {{ schedule_preview_terms.assumed_release_date|date:"M d, Y" }}
         · {{ schedule_preview_terms.term_months }}-month term at {{ schedule_preview_terms.interest_rate }}%
+        · {{ schedule_preview_terms.weeks_label }}
         · chosen pay {{ schedule_preview_terms.payment_frequency_label }}
         · interest starts {{ schedule_preview_terms.interest_start_date|date:"M d, Y" }}.
         {% else %}
@@ -113,7 +114,7 @@
         <div class="detail-label">Flat interest ({{ schedule_preview_terms.interest_rate }}% × {{ schedule_preview_terms.term_months }} mo)</div>
         <div class="detail-value mb-3">{{ schedule_preview_terms.total_interest|peso }}</div>
         <div class="detail-label">Term</div>
-        <div class="detail-value mb-3">{{ schedule_preview_terms.term_months }} months · {{ schedule_preview_terms.periods }} working days</div>
+        <div class="detail-value mb-3">{{ schedule_preview_terms.term_months }} months · {{ schedule_preview_terms.weeks_label }} · {{ schedule_preview_terms.periods }} working days</div>
         <div class="detail-label">Chosen to pay</div>
         <div class="detail-value mb-3">{{ schedule_preview_terms.payment_frequency_label }}</div>
         <div class="detail-label">Assumed release</div>

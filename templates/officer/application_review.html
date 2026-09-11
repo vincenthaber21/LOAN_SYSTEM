@@ -271,4 +271,14 @@
   });
 })();
 </script>
+<script>
+(function () {
+  try {
+    if (sessionStorage.getItem('kap_draft_clear_pending') === '1') {
+      localStorage.removeItem('officer_kap_application_draft_v1');
+      sessionStorage.removeItem('kap_draft_clear_pending');
+    }
+  } catch (err) { /* ignore */ }
+})();
+</script>
 {% endblock %}

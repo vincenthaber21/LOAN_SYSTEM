@@ -10,7 +10,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from lending.decorators import role_required
-from lending.models import User
+from lending.audit import record_activity
+from lending.models import ActivityLog, User
 
 from .forms import (
     OfficerOpenAccountForm,
@@ -226,6 +227,16 @@ def officer_savings_accounts(request):
 @login_required
 @role_required("officer")
 def officer_export_savings_interest(request):
+    record_activity(
+        request.user,
+        action=ActivityLog.Action.DATA_EXPORTED,
+        kind=ActivityLog.Kind.SAVINGS,
+        title="Savings interest exported",
+        description="Savings interest report downloaded.",
+        status="neutral",
+        status_label="Export",
+        request=request,
+    )
     export_format = request.GET.get("format", "csv")
     form = SavingsInterestExportForm(request.GET)
     if not form.is_valid():
@@ -298,6 +309,21 @@ def officer_savings_account_detail(request, account_id):
                             occurred_on=data.get("transaction_date"),
                         )
                         messages.success(request, "Deposit recorded.")
+                        record_activity(
+                            request.user,
+                            action=ActivityLog.Action.SAVINGS_DEPOSIT,
+                            kind=ActivityLog.Kind.SAVINGS,
+                            title=f"Savings deposit · {account.reference}",
+                            description=f"{data['method']} · {account.member.display_name()}",
+                            member=account.member,
+                            reference=data.get("reference_number") or account.reference,
+                            amount=data["amount"],
+                            status="paid",
+                            status_label="Deposit",
+                            url_name="officer_savings_account_detail",
+                            url_kwargs={"account_id": account.pk},
+                            request=request,
+                        )
                     else:
                         record_withdrawal(
                             account,
@@ -309,12 +335,40 @@ def officer_savings_account_detail(request, account_id):
                             occurred_on=data.get("transaction_date"),
                         )
                         messages.success(request, "Withdrawal recorded.")
+                        record_activity(
+                            request.user,
+                            action=ActivityLog.Action.SAVINGS_WITHDRAWAL,
+                            kind=ActivityLog.Kind.SAVINGS,
+                            title=f"Savings withdrawal · {account.reference}",
+                            description=f"{data['method']} · {account.member.display_name()}",
+                            member=account.member,
+                            reference=data.get("reference_number") or account.reference,
+                            amount=data["amount"],
+                            status="pending",
+                            status_label="Withdrawal",
+                            url_name="officer_savings_account_detail",
+                            url_kwargs={"account_id": account.pk},
+                            request=request,
+                        )
                     return redirect("officer_savings_account_detail", account_id=account.pk)
                 except SavingsError as exc:
                     messages.error(request, str(exc))
         elif action == "close" and request.user.is_admin:
             try:
                 close_account(account, closed_by=request.user)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.SAVINGS_CLOSED,
+                    kind=ActivityLog.Kind.SAVINGS,
+                    title=f"Savings account {account.reference} closed",
+                    description=f"Closed for {account.member.display_name()}.",
+                    member=account.member,
+                    reference=account.reference,
+                    amount=account.balance,
+                    status="closed",
+                    status_label="Closed",
+                    request=request,
+                )
                 messages.success(request, "Account closed.")
                 return redirect("officer_savings_accounts")
             except SavingsError as exc:
@@ -389,6 +443,22 @@ def officer_open_savings_account(request):
                 initial_deposit=form.cleaned_data.get("initial_deposit"),
                 opened_on=form.cleaned_data.get("opened_on"),
             )
+            record_activity(
+                request.user,
+                action=ActivityLog.Action.SAVINGS_OPENED,
+                kind=ActivityLog.Kind.SAVINGS,
+                title=f"Savings account {account.reference} opened",
+                description=f"{account.product_name} for {account.member.display_name()}.",
+                member=account.member,
+                reference=account.reference,
+                amount=account.balance,
+                status="active",
+                status_label="Opened",
+                url_name="officer_savings_account_detail",
+                url_kwargs={"account_id": account.pk},
+                request=request,
+                source_key=f"savings_opened:{account.pk}",
+            )
             messages.success(request, f"Opened savings account {account.reference} for {account.member.display_name()}.")
             return redirect("officer_savings_account_detail", account_id=account.pk)
         except SavingsError as exc:
@@ -426,6 +496,18 @@ def officer_add_savings_product(request):
     form = SavingsProductForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         product = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PRODUCT_CREATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f'Savings product "{product.name}" created',
+            description=f"{product.interest_rate}% p.a.",
+            reference=product.name,
+            status="active" if product.is_active else "inactive",
+            status_label="Created",
+            request=request,
+            source_key=f"savings_product:{product.pk}",
+        )
         messages.success(request, f'Savings product "{product.name}" added successfully.')
         return redirect("officer_savings_products")
     return render(request, "officer/add_savings_product.html", {
@@ -441,6 +523,17 @@ def officer_edit_savings_product(request, product_id):
     form = SavingsProductForm(request.POST or None, instance=product)
     if request.method == "POST" and form.is_valid():
         product = form.save()
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.PRODUCT_UPDATED,
+            kind=ActivityLog.Kind.ACCOUNT,
+            title=f'Savings product "{product.name}" updated',
+            description=f"{product.interest_rate}% p.a.",
+            reference=product.name,
+            status="active" if product.is_active else "inactive",
+            status_label="Updated",
+            request=request,
+        )
         messages.success(request, f'Savings product "{product.name}" updated successfully.')
         return redirect("officer_savings_products")
     return render(request, "officer/edit_savings_product.html", {"form": form, "product": product})

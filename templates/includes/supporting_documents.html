@@ -1,0 +1,320 @@
+<style>
+  .kap-doc-slot {
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    padding: .85rem;
+    background: #fafcfb;
+    height: 100%;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .kap-doc-slot.is-dragover {
+    border-color: var(--teal);
+    background: var(--mint);
+  }
+  .kap-doc-previews {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: .55rem;
+    margin-top: .7rem;
+  }
+  .kap-doc-card {
+    position: relative;
+    margin: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .kap-doc-thumb {
+    height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #eef3ee;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .kap-doc-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .kap-doc-thumb .bi { font-size: 1.7rem; }
+  .kap-doc-card figcaption {
+    padding: .35rem .45rem .45rem;
+    font-size: .68rem;
+    line-height: 1.25;
+  }
+  .kap-doc-card figcaption strong {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 700;
+  }
+  .kap-doc-remove {
+    position: absolute;
+    top: .3rem;
+    right: .3rem;
+    width: 1.4rem;
+    height: 1.4rem;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(15, 23, 15, .72);
+    color: #fff;
+    font-size: .78rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .kap-doc-remove:hover {
+    background: #c62828;
+  }
+  .kap-doc-empty {
+    margin-top: .55rem;
+    font-size: .78rem;
+    color: var(--muted);
+  }
+</style>
+
+<p class="text-muted small mb-3">{% if is_edit %}Optional new attachments — you can add several files per type. Existing files stay on the application.{% else %}Optional. Choose one or more files per type (JPG, PNG, GIF, WEBP, PDF, DOC, DOCX). Images and PDFs show a preview before you submit.{% endif %}</p>
+{% if is_edit and existing_documents %}
+<div class="mb-3">
+  <div class="fw-semibold small mb-2">Already on this application</div>
+  <div class="kap-doc-previews">
+    {% for document in existing_documents %}
+    <figure class="kap-doc-card">
+      <div class="kap-doc-thumb" data-doc-open="{{ document.download_url }}" data-doc-name="{{ document.filename }}" data-doc-kind="{% if document.is_image %}image{% elif document.is_pdf %}pdf{% else %}file{% endif %}">
+        {% if document.is_image %}
+        <img src="{{ document.download_url }}" alt="{{ document.filename }}">
+        {% elif document.is_pdf %}
+        <i class="bi bi-file-earmark-pdf text-danger"></i>
+        {% else %}
+        <i class="bi bi-file-earmark-text"></i>
+        {% endif %}
+      </div>
+      <figcaption>
+        <strong title="{{ document.filename }}">{{ document.filename }}</strong>
+        <span class="text-muted">{{ document.name }} · {{ document.file_size }}</span>
+      </figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+<div class="row g-3">
+  {% for doc_form in document_forms %}
+  <div class="col-md-4">
+    <div class="kap-doc-slot" data-doc-upload>
+      <label class="form-label" for="{{ doc_form.file.id_for_label }}">
+        {% if doc_form.prefix == "valid_id" %}<i class="bi bi-card-image me-1"></i>Valid ID
+        {% elif doc_form.prefix == "proof_of_income" %}<i class="bi bi-file-earmark-spreadsheet me-1"></i>Proof of income
+        {% else %}<i class="bi bi-file-earmark me-1"></i>Other document{% endif %}
+      </label>
+      <input type="hidden" name="{{ doc_form.prefix }}-doc_type" value="{% if doc_form.prefix == 'valid_id' %}valid_id{% elif doc_form.prefix == 'proof_of_income' %}proof_of_income{% else %}other{% endif %}">
+      <input class="form-control {% if doc_form.file.errors %}is-invalid{% endif %}" type="file" multiple accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,image/*" id="{{ doc_form.file.id_for_label }}" name="{{ doc_form.file.html_name }}" data-doc-input>
+      {% for error in doc_form.file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+      <div class="kap-doc-empty" data-doc-empty>No files selected yet. Choose or drop several files — up to 10.</div>
+      <div class="kap-doc-previews d-none" data-doc-preview></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="modal fade" id="kapDocPreviewModal" tabindex="-1" aria-labelledby="kapDocPreviewTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="kapDocPreviewTitle">Document preview</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center" id="kapDocPreviewBody"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  if (window.__kapDocUploadsInit) return;
+  window.__kapDocUploadsInit = true;
+
+  var ACCEPT = /\.(jpe?g|png|gif|webp|pdf|docx?)$/i;
+  var IMAGE = /^image\//;
+  var MAX_PER_SLOT = 10;
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function iconFor(file) {
+    if (IMAGE.test(file.type) || /\.(jpe?g|png|gif|webp)$/i.test(file.name)) return null;
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return 'bi-file-earmark-pdf text-danger';
+    return 'bi-file-earmark-word text-primary';
+  }
+
+  function kindFor(file) {
+    if (IMAGE.test(file.type) || /\.(jpe?g|png|gif|webp)$/i.test(file.name)) return 'image';
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return 'pdf';
+    return 'file';
+  }
+
+  function openPreview(url, name, kind) {
+    var modalEl = document.getElementById('kapDocPreviewModal');
+    var title = document.getElementById('kapDocPreviewTitle');
+    var body = document.getElementById('kapDocPreviewBody');
+    if (!modalEl || !body) {
+      window.open(url, '_blank');
+      return;
+    }
+    if (title) title.textContent = name || 'Document preview';
+    body.innerHTML = '';
+    if (kind === 'image') {
+      var img = document.createElement('img');
+      img.src = url;
+      img.alt = name || 'Preview';
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '70vh';
+      img.style.borderRadius = '8px';
+      body.appendChild(img);
+    } else if (kind === 'pdf') {
+      var frame = document.createElement('iframe');
+      frame.src = url;
+      frame.title = name || 'PDF preview';
+      frame.style.width = '100%';
+      frame.style.height = '70vh';
+      frame.style.border = '0';
+      body.appendChild(frame);
+    } else {
+      var p = document.createElement('p');
+      p.className = 'text-muted mb-3';
+      p.textContent = 'This file type cannot be previewed here.';
+      var link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.className = 'btn btn-primary';
+      link.textContent = 'Open file';
+      body.appendChild(p);
+      body.appendChild(link);
+    }
+    if (window.bootstrap) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+
+  document.addEventListener('click', function (event) {
+    var opener = event.target.closest('[data-doc-open]');
+    if (!opener) return;
+    event.preventDefault();
+    openPreview(opener.getAttribute('data-doc-open'), opener.getAttribute('data-doc-name'), opener.getAttribute('data-doc-kind'));
+  });
+
+  document.querySelectorAll('[data-doc-upload]').forEach(function (slot) {
+    var input = slot.querySelector('[data-doc-input]');
+    var preview = slot.querySelector('[data-doc-preview]');
+    var empty = slot.querySelector('[data-doc-empty]');
+    if (!input || !preview) return;
+    var files = [];
+    var urls = [];
+
+    function revokeUrls() {
+      urls.forEach(function (url) { URL.revokeObjectURL(url); });
+      urls = [];
+    }
+
+    function syncInput() {
+      var dt = new DataTransfer();
+      files.forEach(function (file) { dt.items.add(file); });
+      input.files = dt.files;
+      render();
+    }
+
+    function addFiles(list) {
+      Array.from(list || []).forEach(function (file) {
+        if (!ACCEPT.test(file.name)) return;
+        if (files.some(function (existing) { return existing.name === file.name && existing.size === file.size; })) return;
+        if (files.length >= MAX_PER_SLOT) return;
+        files.push(file);
+      });
+      syncInput();
+    }
+
+    function render() {
+      revokeUrls();
+      preview.innerHTML = '';
+      if (!files.length) {
+        preview.classList.add('d-none');
+        if (empty) empty.classList.remove('d-none');
+        return;
+      }
+      preview.classList.remove('d-none');
+      if (empty) empty.classList.add('d-none');
+      files.forEach(function (file, index) {
+        var card = document.createElement('figure');
+        card.className = 'kap-doc-card';
+        var thumb = document.createElement('div');
+        thumb.className = 'kap-doc-thumb';
+        var kind = kindFor(file);
+        var url = URL.createObjectURL(file);
+        urls.push(url);
+        thumb.setAttribute('data-doc-open', url);
+        thumb.setAttribute('data-doc-name', file.name);
+        thumb.setAttribute('data-doc-kind', kind);
+        if (kind === 'image') {
+          var img = document.createElement('img');
+          img.src = url;
+          img.alt = file.name;
+          thumb.appendChild(img);
+        } else {
+          var icon = document.createElement('i');
+          icon.className = 'bi ' + iconFor(file);
+          thumb.appendChild(icon);
+        }
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'kap-doc-remove';
+        remove.setAttribute('aria-label', 'Remove ' + file.name);
+        remove.innerHTML = '&times;';
+        remove.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          files.splice(index, 1);
+          syncInput();
+        });
+        var caption = document.createElement('figcaption');
+        caption.innerHTML = '<strong></strong><span class="text-muted"></span>';
+        caption.querySelector('strong').textContent = file.name;
+        caption.querySelector('strong').title = file.name;
+        caption.querySelector('span').textContent = formatSize(file.size);
+        card.appendChild(thumb);
+        card.appendChild(remove);
+        card.appendChild(caption);
+        preview.appendChild(card);
+      });
+    }
+
+    input.addEventListener('change', function () {
+      addFiles(input.files);
+    });
+
+    ['dragenter', 'dragover'].forEach(function (type) {
+      slot.addEventListener(type, function (event) {
+        event.preventDefault();
+        slot.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (type) {
+      slot.addEventListener(type, function (event) {
+        event.preventDefault();
+        slot.classList.remove('is-dragover');
+      });
+    });
+    slot.addEventListener('drop', function (event) {
+      addFiles(event.dataTransfer && event.dataTransfer.files);
+    });
+  });
+})();
+</script>

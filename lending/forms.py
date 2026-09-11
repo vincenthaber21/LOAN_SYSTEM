@@ -254,7 +254,11 @@ class OfficerMemberForm(BaseAccountCreationForm):
     ROLE = User.Role.MEMBER
 
     email = forms.EmailField(required=False)
-    date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    date_of_birth = forms.DateField(
+        required=False,
+        input_formats=["%Y-%m-%d"],
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+    )
     address = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
     employment_status = forms.CharField(max_length=40, required=False)
     monthly_income = forms.DecimalField(required=False, max_digits=12, decimal_places=2, widget=forms.NumberInput(attrs={"step": "0.01"}))
@@ -291,7 +295,11 @@ class OfficerMemberEditForm(forms.ModelForm):
     full_name = forms.CharField(max_length=160, label="Full name")
     middle_initial = forms.CharField(max_length=80, required=False, label="Middle name")
     phone = forms.CharField(max_length=30, required=False)
-    date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    date_of_birth = forms.DateField(
+        required=False,
+        input_formats=["%Y-%m-%d"],
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+    )
     address = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
     employment_status = forms.CharField(max_length=40, required=False)
     monthly_income = forms.DecimalField(required=False, max_digits=12, decimal_places=2, widget=forms.NumberInput(attrs={"step": "0.01"}))
@@ -490,7 +498,7 @@ class ProfileForm(forms.ModelForm):
         model = User
         fields = ("full_name", "phone", "date_of_birth", "employment_status", "monthly_income", "address")
         widgets = {
-            "date_of_birth": forms.DateInput(attrs={"type": "date"}),
+            "date_of_birth": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
             "monthly_income": forms.NumberInput(attrs={"step": "0.01", "placeholder": "0.00"}),
             "address": forms.Textarea(attrs={"rows": 3, "placeholder": "Street, Barangay, City, Province"}),
             "full_name": forms.TextInput(attrs={"placeholder": "Your legal full name"}),
@@ -576,8 +584,16 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         input_formats=["%Y-%m-%d"],
         help_text="Date written on the KAP application form.",
     )
-    borrower_signature_data = forms.CharField(required=False, widget=forms.HiddenInput)
-    coborrower_signature_data = forms.CharField(required=False, widget=forms.HiddenInput)
+    borrower_signature_data = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput,
+        label="Borrower signature",
+    )
+    coborrower_signature_data = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput,
+        label="Co-borrower signature",
+    )
 
     class Meta:
         model = LoanApplication
@@ -1031,7 +1047,9 @@ class CharacterReferenceForm(forms.ModelForm):
         model = CharacterReference
         fields = ("name", "address", "relationship", "contact_number", "sort_order")
         widgets = {
-            "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Full name"}),
+            "name": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "Full name", "data-ref-name": "1"}
+            ),
             "address": forms.TextInput(attrs={"class": "form-control"}),
             "relationship": forms.TextInput(attrs={"class": "form-control"}),
             "contact_number": forms.TextInput(attrs={"class": "form-control"}),
@@ -1077,7 +1095,24 @@ class BaseCharacterReferenceFormSet(forms.BaseInlineFormSet):
             if str(name).strip():
                 named += 1
         if named < 1:
-            raise forms.ValidationError("Add at least one character reference.")
+            target = None
+            for form in self.forms:
+                if self.can_delete and self._should_delete_form(form):
+                    continue
+                target = form
+                break
+            if target is not None:
+                target.add_error(
+                    "name",
+                    "This name is empty. Enter at least one character reference name.",
+                )
+                css = target.fields["name"].widget.attrs.get("class", "")
+                if "is-invalid" not in css:
+                    target.fields["name"].widget.attrs["class"] = (css + " is-invalid").strip()
+            else:
+                raise forms.ValidationError(
+                    "Character reference — Name is empty. Fill in at least one name in the References section."
+                )
 
 
 CharacterReferenceFormSet = forms.inlineformset_factory(
@@ -1112,7 +1147,7 @@ class PaymentForm(forms.ModelForm):
         min_value=Decimal("0.00"),
         max_digits=12,
         decimal_places=2,
-        label="To savings (cash rounding)",
+        label="Membership/Savings Deposit",
         widget=forms.NumberInput(
             attrs={"step": "0.01", "min": "0", "class": "form-control", "inputmode": "decimal"}
         ),
@@ -1137,16 +1172,23 @@ class PaymentForm(forms.ModelForm):
             "reference_number": forms.TextInput(attrs={"class": "form-control", "placeholder": "Optional reference"}),
         }
 
-    def __init__(self, *args, max_amount=None, max_amount_label="outstanding balance", **kwargs):
+    def __init__(
+        self,
+        *args,
+        max_amount=None,
+        max_loan_amount=None,
+        max_amount_label="outstanding balance",
+        **kwargs,
+    ):
         self.max_amount = max_amount
+        self.max_loan_amount = max_loan_amount if max_loan_amount is not None else max_amount
         self.max_amount_label = max_amount_label
         super().__init__(*args, **kwargs)
 
     def clean_amount(self):
-        amount = self.cleaned_data.get("amount")
-        if amount is not None and self.max_amount is not None and amount > self.max_amount:
-            raise forms.ValidationError(f"Amount cannot exceed the {self.max_amount_label} of ₱{self.max_amount:,.2f}.")
-        return amount
+        # Total remittance may include Membership/Savings Deposit on top of the loan
+        # portion; loan-portion caps are enforced in clean().
+        return self.cleaned_data.get("amount")
 
     def clean(self):
         cleaned = super().clean()
@@ -1176,7 +1218,7 @@ class PaymentForm(forms.ModelForm):
             if savings > amount:
                 self.add_error(
                     "savings_adjustment",
-                    f"Savings cannot exceed the payment amount of ₱{amount:,.2f}.",
+                    f"Membership/Savings Deposit cannot exceed the payment amount of ₱{amount:,.2f}.",
                 )
             if mutual_aid > amount:
                 self.add_error(
@@ -1187,6 +1229,17 @@ class PaymentForm(forms.ModelForm):
                 self.add_error(
                     "mutual_aid_contribution",
                     "Savings plus mutual aid cannot exceed the payment amount.",
+                )
+            loan_portion = (amount - savings - mutual_aid).quantize(Decimal("0.01"))
+            if loan_portion < 0:
+                loan_portion = Decimal("0.00")
+            if self.max_loan_amount is not None and loan_portion > self.max_loan_amount:
+                self.add_error(
+                    "amount",
+                    (
+                        f"Loan portion (₱{loan_portion:,.2f}) cannot exceed the "
+                        f"{self.max_amount_label} of ₱{self.max_loan_amount:,.2f}."
+                    ),
                 )
         return cleaned
 
@@ -1207,7 +1260,9 @@ class DocumentForm(forms.ModelForm):
         model = Document
         fields = ("doc_type", "file")
         widgets = {
-            "file": forms.ClearableFileInput(attrs={"accept": ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx"}),
+            "file": forms.ClearableFileInput(
+                attrs={"accept": ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx"}
+            ),
         }
 
     def __init__(self, *args, **kwargs):

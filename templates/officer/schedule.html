@@ -13,16 +13,19 @@
       {% if showing_original and original_terms %}
       {{ loan.application.borrower_name }}'s original plan from disbursement on {{ loan.start_date }}
       · {{ original_terms.term_months }}-month term at {{ original_terms.interest_rate }}%
+      · {{ original_terms.term_months|term_weeks }}
       · {% if view_mode == "month" %}{{ original_terms.term_months }} monthly payments of {{ original_terms.per_month|peso }}{% elif view_mode == "biweek" %}biweekly working-day payments{% elif view_mode == "week" %}weekly working-day payments{% else %}{{ original_terms.periods }} working-day payments of {{ original_terms.per_day|peso }}{% endif %}
       · interest started the Monday on or after disbursement.
       {% elif loan.is_rescheduled %}
       {{ loan.application.borrower_name }}'s rescheduled plan from {{ loan.reschedule_date_display }}
       · {{ loan.term_months }}-month term at {{ loan.interest_rate }}%
+      · {{ loan.term_weeks_label }}
       · {% if view_mode == "month" %}{{ loan.term_months }} monthly payments of {{ loan.adjusted_monthly_payment|peso }} <span class="text-muted">(exact {{ loan.monthly_payment|peso }})</span>{% elif view_mode == "biweek" %}biweekly payments of {{ loan.adjusted_biweekly_payment|peso }} <span class="text-muted">(exact {{ loan.biweekly_payment|peso }})</span>{% elif view_mode == "week" %}weekly payments of {{ loan.adjusted_weekly_payment|peso }} <span class="text-muted">(exact {{ loan.weekly_payment|peso }})</span>{% else %}{{ loan.working_days }} working-day payments of {{ loan.adjusted_daily_payment|peso }} <span class="text-muted">(exact {{ loan.daily_payment|peso }})</span>{% endif %}
       · interest starts {{ loan.reschedule_interest_start_display }}.
       {% else %}
       {{ loan.application.borrower_name }}'s full payment plan from disbursement on {{ loan.start_date }}
       · {{ loan.term_months }}-month term
+      · {{ loan.term_weeks_label }}
       · {% if view_mode == "month" %}{{ loan.term_months }} monthly payments of {{ loan.adjusted_monthly_payment|peso }} <span class="text-muted">(exact {{ loan.monthly_payment|peso }})</span>{% elif view_mode == "biweek" %}biweekly payments of {{ loan.adjusted_biweekly_payment|peso }} <span class="text-muted">(exact {{ loan.biweekly_payment|peso }})</span>{% elif view_mode == "week" %}weekly payments of {{ loan.adjusted_weekly_payment|peso }} <span class="text-muted">(exact {{ loan.weekly_payment|peso }})</span>{% else %}{{ loan.working_days }} working-day payments of {{ loan.adjusted_daily_payment|peso }} <span class="text-muted">(exact {{ loan.daily_payment|peso }})</span>{% endif %}
       · interest starts the Monday on or after disbursement.
       {% endif %}
@@ -30,6 +33,40 @@
   </div>
   <a class="btn btn-outline-primary csv-link" href="{% url 'export_schedule_csv' loan_id=loan.id %}"><i class="bi bi-download"></i>Download CSV</a>
 </div>
+
+{% if showing_original and original_terms %}
+<div class="card-soft mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-center">
+      <div class="col-md-6">
+        <div class="detail-label">Term</div>
+        <div class="detail-value mb-0">{{ original_terms.term_months }} months</div>
+      </div>
+      <div class="col-md-6">
+        <div class="detail-label">Weeks</div>
+        <div class="detail-value mb-0">{{ original_terms.term_months|term_weeks_total }} weeks</div>
+        <div class="text-muted small">months × 4</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="card-soft mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-center">
+      <div class="col-md-6">
+        <div class="detail-label">Term</div>
+        <div class="detail-value mb-0">{{ loan.term_months }} months</div>
+      </div>
+      <div class="col-md-6">
+        <div class="detail-label">Weeks</div>
+        <div class="detail-value mb-0">{{ loan.term_weeks_total }} weeks</div>
+        <div class="text-muted small">months × 4</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {% if loan.is_rescheduled %}
 <div class="reschedule-banner" role="status">
@@ -90,6 +127,14 @@
       <strong>{{ loan.application.get_payment_frequency_display }}</strong>
     </div>
     {% endif %}
+    <div class="schedule-filter-meta">
+      <span class="schedule-filter-meta-label">Weeks</span>
+      {% if showing_original and original_terms %}
+      <strong>{{ original_terms.term_months|term_weeks_total }} weeks</strong>
+      {% else %}
+      <strong>{{ loan.term_weeks_total }} weeks</strong>
+      {% endif %}
+    </div>
   </div>
 </form>
 
@@ -105,6 +150,9 @@
           {{ payment_count|default:"0" }} original payment{{ payment_count|pluralize }}
           {% else %}
           {{ paid_payment_count|default:"0" }} of {{ payment_count|default:"0" }} paid
+          {% endif %}
+          {% if view_mode == "week" %}
+          · {% if showing_original and original_terms %}{{ original_terms.term_months|term_weeks_total }}{% else %}{{ loan.term_weeks_total }}{% endif %} weeks
           {% endif %}
         </span>
       </div>
@@ -170,10 +218,19 @@
         <div class="detail-label">Original principal</div><div class="detail-value mb-3">{{ original_terms.principal|peso }}</div>
         <div class="detail-label">Origination date</div><div class="detail-value mb-3">{{ loan.start_date }}</div>
         <div class="detail-label">Flat interest ({{ original_terms.interest_rate }}% × {{ original_terms.term_months }} mo)</div><div class="detail-value mb-3">{{ original_terms.total_interest|peso }}</div>
-        <div class="detail-label">Term</div><div class="detail-value mb-3">{{ original_terms.term_months }} months · {{ original_terms.periods }} working days</div>
+        <div class="detail-label">Term</div>
+        <div class="detail-value mb-1">{{ original_terms.term_months }} months</div>
+        <div class="text-muted small mb-3">{{ original_terms.term_months|term_weeks }}</div>
+        <div class="detail-label">Weeks</div>
+        <div class="detail-value mb-1">{{ original_terms.term_months|term_weeks_total }} weeks</div>
+        <div class="text-muted small mb-3">months × 4</div>
+        <div class="detail-label">Working days</div><div class="detail-value mb-3">{{ original_terms.periods }}</div>
         <div class="detail-label">Payment per day</div>
         <div class="detail-value mb-1">{{ original_terms.per_day|peso }}</div>
         <div class="text-muted small mb-3">Exact schedule amounts</div>
+        <div class="detail-label">Payment per week</div>
+        <div class="detail-value mb-1">5 working days</div>
+        <div class="text-muted small mb-3">Same daily formula × 5</div>
         <div class="detail-label">Payment per month</div>
         <div class="detail-value mb-1">{{ original_terms.per_month|peso }}</div>
         <div class="text-muted small mb-3">Exact schedule amounts</div>
@@ -188,10 +245,19 @@
         <div class="detail-label">Original release</div><div class="detail-value mb-3">{{ loan.original_amount|peso }}</div>
         {% endif %}
         <div class="detail-label">Flat interest ({{ loan.interest_rate }}% × {{ loan.term_months }} mo)</div><div class="detail-value mb-3">{{ loan.total_interest|peso }}</div>
-        <div class="detail-label">Term</div><div class="detail-value mb-3">{{ loan.term_months }} months · {{ loan.working_days }} working days</div>
+        <div class="detail-label">Term</div>
+        <div class="detail-value mb-1">{{ loan.term_months }} months</div>
+        <div class="text-muted small mb-3">{{ loan.term_weeks_label }}</div>
+        <div class="detail-label">Weeks</div>
+        <div class="detail-value mb-1">{{ loan.term_weeks_total }} weeks</div>
+        <div class="text-muted small mb-3">months × 4</div>
+        <div class="detail-label">Working days</div><div class="detail-value mb-3">{{ loan.working_days }}</div>
         <div class="detail-label">Payment per day</div>
         <div class="detail-value mb-1">{{ loan.adjusted_daily_payment|peso }}</div>
         <div class="text-muted small mb-3">Exact {{ loan.daily_payment|peso }}</div>
+        <div class="detail-label">Payment per week</div>
+        <div class="detail-value mb-1">{{ loan.adjusted_weekly_payment|peso }}</div>
+        <div class="text-muted small mb-3">Exact {{ loan.weekly_payment|peso }} · 5 working days</div>
         <div class="detail-label">Mutual aid / day</div>
         <div class="detail-value mb-1">{{ daily_mutual_aid_amount|peso }}</div>
         <div class="text-muted small mb-3">Added to every working-day remittance</div>

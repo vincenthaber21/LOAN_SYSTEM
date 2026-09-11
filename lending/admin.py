@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - older Django
 from .forms import DisbursementAdminForm
 from .services import disbursement_start_time_label, normalize_credit_score
 from .models import (
+    ActivityLog,
     Administrator,
     CharacterReference,
     Disbursement,
@@ -747,6 +748,24 @@ class PaymentAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         "reference_number",
     )
     date_hierarchy = "payment_date"
+
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    list_display = ("created_at", "actor", "action", "kind", "title", "member_name", "reference", "ip_address")
+    list_filter = ("kind", "action", "created_at")
+    search_fields = ("title", "description", "member_name", "reference", "actor__username", "actor__full_name", "ip_address")
+    date_hierarchy = "created_at"
+    readonly_fields = [field.name for field in ActivityLog._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Notification)

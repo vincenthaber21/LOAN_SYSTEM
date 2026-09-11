@@ -2,7 +2,7 @@
 {% load lending_tags %}
 {% block title %}Activity log · {{ manager.display_name }}{% endblock %}
 {% block topbar_title %}Manager activity log{% endblock %}
-{% block topbar_context %}Monitor applications, pay collection, and disbursements handled by this manager.{% endblock %}
+{% block topbar_context %}Monitor members, application forms, payments, and other actions by this manager.{% endblock %}
 {% block content %}
 
 <div class="page-heading fade-up">
@@ -28,7 +28,7 @@
 
 <div class="row g-3 mb-4 fade-up-2">
   {% for metric in activity_summary %}
-  <div class="col-md-4">
+  <div class="col-6 col-xl-3">
     <div class="card-soft metric-card">
       <div class="metric-label">{{ metric.label }}</div>
       <div class="metric-value">{{ metric.value }}</div>
@@ -71,8 +71,8 @@
 <div class="card-soft fade-up-3{% if show_collection_section %} mb-4{% endif %}">
   <div class="card-header d-flex justify-content-between align-items-center">
     <div>
-      <h2 class="card-title">{% if filters.type == "payment" %}Pay collection{% elif filters.type == "disbursement" %}Disbursements{% elif filters.type == "application" %}Applications{% else %}Activity history{% endif %}</h2>
-      <span class="text-muted small">{{ date_range_label }} · {% if filters.type == "payment" %}loan payments recorded by this manager.{% elif filters.type == "disbursement" %}loans released by this manager.{% elif filters.type == "application" %}applications reviewed by this manager.{% else %}applications, pay collection, and disbursements linked to this manager.{% endif %}</span>
+      <h2 class="card-title">{{ activity_heading }}</h2>
+      <span class="text-muted small">{{ date_range_label }} · {{ activity_blurb }}</span>
     </div>
     <span class="badge {% if filters.type == 'payment' %}status-paid{% else %}status-neutral{% endif %}">{% if filters.type == "payment" %}{{ collection_total|peso }} · {% endif %}{{ page_obj.paginator.count }} event{{ page_obj.paginator.count|pluralize }}</span>
   </div>
@@ -97,12 +97,15 @@
           <td>
             <div class="fw-semibold">{{ event.title }}</div>
             <div class="person-sub">{{ event.description }}</div>
+            {% if event.ip_address %}<div class="person-sub">IP {{ event.ip_address }}</div>{% endif %}
           </td>
           <td>
             {% if event.borrower_id %}
             <a class="person" href="{% url 'borrower_detail' borrower_id=event.borrower_id %}">
               <span class="person-name d-block">{{ event.member_name }}</span>
             </a>
+            {% elif event.member_name %}
+            <span class="person-name d-block">{{ event.member_name }}</span>
             {% else %}
             —
             {% endif %}
@@ -149,7 +152,7 @@
     {% if filters.period != "all" %}
     {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity in this period" description="Try a different day, week, month, or custom date range." %}
     {% else %}
-    {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity recorded yet" description="Applications, payments, and disbursements handled by this manager will appear here." %}
+    {% include "includes/empty_state.html" with icon="bi-clock-history" title="No activity recorded yet" description="Creating members, saving application forms, payments, and other staff actions will appear here." %}
     {% endif %}
   </div>
   {% endif %}
