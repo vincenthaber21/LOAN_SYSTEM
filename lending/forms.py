@@ -1060,7 +1060,13 @@ class CharacterReferenceForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         # One completed reference is enough; blank extra rows must not fail validation.
         self.fields["name"].required = False
-        self.empty_permitted = True
+        # Saved rows must always run full_clean. With empty_permitted=True, an
+        # unchanged existing name skips cleaning (cleaned_data={}) and the
+        # formset falsely reports "This name is empty" on edit/save.
+        if self.instance and self.instance.pk:
+            self.empty_permitted = False
+        else:
+            self.empty_permitted = True
 
     def has_changed(self):
         # Ignore hidden sort_order so an untouched extra row stays "empty".
@@ -1091,7 +1097,10 @@ class BaseCharacterReferenceFormSet(forms.BaseInlineFormSet):
         for form in self.forms:
             if self.can_delete and self._should_delete_form(form):
                 continue
-            name = (form.cleaned_data or {}).get("name") or ""
+            cleaned = form.cleaned_data or {}
+            name = cleaned.get("name") or ""
+            if not str(name).strip() and form.instance and form.instance.pk:
+                name = form.instance.name or ""
             if str(name).strip():
                 named += 1
         if named < 1:

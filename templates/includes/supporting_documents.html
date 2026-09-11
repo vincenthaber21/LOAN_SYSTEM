@@ -188,7 +188,15 @@
       frame.style.width = '100%';
       frame.style.height = '70vh';
       frame.style.border = '0';
+      frame.setAttribute('allow', 'fullscreen');
       body.appendChild(frame);
+      var openLink = document.createElement('a');
+      openLink.href = url;
+      openLink.target = '_blank';
+      openLink.rel = 'noopener';
+      openLink.className = 'btn btn-sm btn-outline-primary mt-3';
+      openLink.textContent = 'Open in new tab';
+      body.appendChild(openLink);
     } else {
       var p = document.createElement('p');
       p.className = 'text-muted mb-3';

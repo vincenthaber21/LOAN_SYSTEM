@@ -2,16 +2,20 @@ import csv
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import mimetypes
+
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
-from django.http import HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from .audit_export import build_audit_workbook
 from .cashflow_reports import cashflow_report_context, resolve_loan_product, resolve_report_period, resolve_staff_user, write_audit_csv
@@ -1010,6 +1014,30 @@ def application_pdf(request, application_id):
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     disposition = "attachment" if request.GET.get("download") == "1" else "inline"
     response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+    return response
+
+
+@login_required
+@xframe_options_sameorigin
+def application_document(request, document_id):
+    """Serve an uploaded application document for preview/download."""
+    document = get_object_or_404(Document.objects.select_related("application"), pk=document_id)
+    user = request.user
+    if not (
+        user.is_officer
+        or document.application.borrower_id == user.id
+        or document.application.created_by_id == user.id
+    ):
+        raise PermissionDenied
+    if not document.file:
+        raise Http404("Document file not found.")
+    try:
+        file_handle = document.file.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404("Document file not found.") from exc
+    content_type = mimetypes.guess_type(document.filename)[0] or "application/octet-stream"
+    response = FileResponse(file_handle, as_attachment=False, filename=document.filename, content_type=content_type)
+    response["Content-Disposition"] = f'inline; filename="{document.filename}"'
     return response
 
 

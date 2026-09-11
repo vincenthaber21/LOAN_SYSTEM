@@ -1155,7 +1155,11 @@ class Document(models.Model):
 
     @property
     def download_url(self):
-        return self.file.url
+        if not self.pk:
+            return self.file.url if self.file else ""
+        from django.urls import reverse
+
+        return reverse("application_document", kwargs={"document_id": self.pk})
 
 
 class Features(models.Model):
