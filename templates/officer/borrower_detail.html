@@ -59,7 +59,14 @@
                 <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <td>{% include "includes/status_badge.html" with status=loan.status label=loan.status_label %}</td>
+              <td>
+                {% include "includes/status_badge.html" with status=loan.status label=loan.status_label %}
+                {% if loan.has_expired_months %}
+                <div class="mt-1">
+                  <span class="badge status-overdue" title="{{ loan.expired_month_count }} expired loan month{{ loan.expired_month_count|pluralize }}{% if loan.expired_unsigned_count %} · {{ loan.expired_unsigned_count }} awaiting signature{% else %} · all signed{% endif %}"><i class="bi bi-exclamation-triangle-fill me-1"></i>Expired{% if loan.expired_unsigned_count %} · {{ loan.expired_unsigned_count }} to sign{% endif %}</span>
+                </div>
+                {% endif %}
+              </td>
               <td class="text-end">
                 <div class="table-row-actions">
                   <a href="{% url 'officer_loan_detail' loan_id=loan.id %}" class="btn btn-sm btn-outline-secondary">View</a>

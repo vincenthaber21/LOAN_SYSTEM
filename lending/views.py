@@ -1975,6 +1975,10 @@ def borrower_detail(request, borrower_id):
     )
     for loan in loans:
         loan.next_due = next_due_for_display(loan, application_schedule_view_mode(loan))
+        expired_rows = expired_month_rows(loan)
+        loan.expired_month_count = len(expired_rows)
+        loan.expired_unsigned_count = sum(1 for row in expired_rows if not row["is_signed"])
+        loan.has_expired_months = loan.expired_month_count > 0
     applications = borrower.loan_applications.select_related("loan_product", "reviewed_by")
 
     activity = []
