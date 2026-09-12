@@ -35,6 +35,7 @@ from .models import (
     Disbursement,
     DisbursementSetting,
     Document,
+    ExpiredMonthSignature,
     Features,
     Installment,
     Loan,
@@ -859,6 +860,18 @@ class PaymentAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         "reference_number",
     )
     date_hierarchy = "payment_date"
+
+
+@admin.register(ExpiredMonthSignature)
+class ExpiredMonthSignatureAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    list_display = ("loan", "month_number", "start_date", "end_date", "signed_name", "signed_at", "recorded_by")
+    list_filter = ("signed_at",)
+    search_fields = (
+        "loan__application__borrower__full_name",
+        "loan__application__borrower__email",
+        "signed_name",
+    )
+    date_hierarchy = "signed_at"
 
 
 @admin.register(ActivityLog)

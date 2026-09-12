@@ -87,7 +87,12 @@
               <a class="person" href="{% url 'borrower_detail' borrower_id=member.id %}">
                 <span class="avatar">{{ member.initials }}</span>
                 <span>
-                  <span class="person-name">{{ member.full_name|default:member.email }}</span>
+                  <span class="person-name">
+                    {{ member.full_name|default:member.email }}
+                    {% if member.has_expired_months %}
+                    <span class="badge status-overdue ms-1" title="{{ member.expired_month_count }} expired loan month{{ member.expired_month_count|pluralize }}{% if member.expired_unsigned_count %} · {{ member.expired_unsigned_count }} awaiting signature{% else %} · all signed{% endif %}"><i class="bi bi-exclamation-triangle-fill me-1"></i>Expired{% if member.expired_unsigned_count %} {{ member.expired_unsigned_count }}{% endif %}</span>
+                    {% endif %}
+                  </span>
                   <span class="person-sub">{{ member.email }}</span>
                 </span>
               </a>

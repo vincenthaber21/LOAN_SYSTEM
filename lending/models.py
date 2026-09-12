@@ -1078,6 +1078,38 @@ class Payment(models.Model):
         return max(Decimal("0.00"), self.amount - extras)
 
 
+class ExpiredMonthSignature(models.Model):
+    """Borrower acknowledgment that a loan month’s payment period has expired unpaid."""
+
+    loan = models.ForeignKey(Loan, on_delete=models.CASCADE, related_name="expired_month_signatures")
+    month_number = models.PositiveIntegerField()
+    start_date = models.DateField()
+    end_date = models.DateField()
+    remaining_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    signed_name = models.CharField(max_length=160, blank=True)
+    signed_at = models.DateTimeField(default=timezone.now)
+    signature = models.ImageField(upload_to="loan-expired-months/signatures/%Y/%m/")
+    recorded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recorded_expired_month_signatures",
+    )
+
+    class Meta:
+        ordering = ["month_number", "start_date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["loan", "month_number", "start_date"],
+                name="unique_expired_month_signature",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.loan_id} · month {self.month_number} signed"
+
+
 class Notification(models.Model):
     class Kind(models.TextChoices):
         CREDIT_SCORE = "credit_score", "Credit score"
@@ -1350,6 +1382,7 @@ class ActivityLog(models.Model):
         PAYMENT_RECORDED = "payment_recorded", "Pay collection"
         LOAN_DISBURSED = "loan_disbursed", "Loan disbursed"
         BALANCE_EXTENDED = "balance_extended", "Balance extended"
+        EXPIRED_MONTH_SIGNED = "expired_month_signed", "Expired month signed"
         OFFICER_CREATED = "officer_created", "Officer created"
         OFFICER_UPDATED = "officer_updated", "Officer updated"
         MANAGER_CREATED = "manager_created", "Manager created"

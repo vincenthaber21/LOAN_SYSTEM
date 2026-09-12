@@ -509,6 +509,43 @@ body.auth-body .app-footer { background: var(--paper); }
   opacity: .92;
 }
 .badge.status-rescheduled { background: #ffe7c2; color: #9b5b21; }
+.expired-banner {
+  align-items: flex-start;
+  background: #fbeceb;
+  border: 1px solid #e6b3b1;
+  border-radius: 12px;
+  color: #8f3a3c;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 1.25rem;
+  padding: 14px 16px;
+}
+.expired-banner__icon {
+  align-items: center;
+  background: #f5d3d1;
+  border-radius: 50%;
+  color: #994a4c;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+.expired-banner__body { flex: 1 1 auto; min-width: 0; }
+.expired-banner__title {
+  font-size: .92rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0 0 2px;
+}
+.expired-banner__meta {
+  font-size: .78rem;
+  line-height: 1.45;
+  margin: 0;
+  opacity: .92;
+}
+.expired-banner__meta a { color: inherit; font-weight: 700; text-decoration: underline; }
 .table-hover tbody tr.schedule-reschedule-start {
   --bs-table-bg: #fff8ee;
   --bs-table-hover-bg: #fff1df;
@@ -901,6 +938,7 @@ body.auth-body .app-footer { background: var(--paper); }
   .person-name,
   .person-sub { overflow-wrap: anywhere; word-break: break-word; }
   .reschedule-banner { flex-direction: column; gap: 10px; }
+  .expired-banner { flex-direction: column; gap: 10px; }
   .dropdown-menu { max-width: calc(100vw - 24px); }
 }
 

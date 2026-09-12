@@ -20,10 +20,10 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from .audit_export import build_audit_workbook
 from .cashflow_reports import cashflow_report_context, resolve_loan_product, resolve_report_period, resolve_staff_user, write_audit_csv
 from .decorators import role_required
-from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
+from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .audit import application_decision_log, browser_label, record_activity, record_staff_auth_event
 from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, LoginLogoutLog, Manager, Notification, Payment, User
-from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
+from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
 
 
 APPLICATION_DOCUMENT_SPECS = (
@@ -1449,6 +1449,10 @@ def _enrich_members(qs):
             (loan.adjusted_outstanding_balance for loan in loan_balances),
             Decimal("0.00"),
         )
+        expired_rows = [row for loan in loan_balances for row in expired_month_rows(loan)]
+        member.expired_month_count = len(expired_rows)
+        member.expired_unsigned_count = sum(1 for row in expired_rows if not row["is_signed"])
+        member.has_expired_months = member.expired_month_count > 0
         # Primary list display: cash-adjusted (₱5 remittance) outstanding
         member.total_balance = member.total_adjusted_outstanding
         member.last_activity = member.joined_at
@@ -2051,10 +2055,57 @@ def officer_loans(request):
 def officer_loan_detail(request, loan_id):
     loan = get_object_or_404(Loan.objects.select_related("application", "application__borrower", "application__loan_product"), pk=loan_id)
     mark_overdue_installments()
+    ensure_schedule_current(loan)
     payments = loan.payments.select_related("recorded_by", "installment").order_by("-payment_date", "-id")
     next_due = next_due_for_display(loan, application_schedule_view_mode(loan))
+    expired_months = expired_month_rows(loan)
+    signature_form = ExpiredMonthSignatureForm(
+        request.POST if request.method == "POST" and request.POST.get("form_name") == "expired_month_signature" else None
+    )
+    if request.method == "POST" and request.POST.get("form_name") == "expired_month_signature":
+        if signature_form.is_valid():
+            try:
+                record = record_expired_month_signature(
+                    loan,
+                    signature_form.cleaned_data["month_number"],
+                    signature_form.cleaned_data["start_date"],
+                    signature_form.cleaned_data["_signature_file"],
+                    signature_form.cleaned_data.get("signed_name") or "",
+                    recorded_by=request.user,
+                )
+            except ExpiredMonthSignatureError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(
+                    request,
+                    f"Expired month {record.month_number} signed by {record.signed_name or loan.application.borrower_name}.",
+                )
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.EXPIRED_MONTH_SIGNED,
+                    kind=ActivityLog.Kind.PAYMENT,
+                    title=f"{loan.reference} expired month signed",
+                    description=(
+                        f"Month {record.month_number} ({record.start_date:%b %d, %Y} – {record.end_date:%b %d, %Y}) "
+                        f"acknowledged unpaid."
+                    ),
+                    member=loan.application.borrower,
+                    reference=loan.reference,
+                    amount=record.remaining_amount,
+                    status="overdue",
+                    status_label="Signed",
+                    url_name="officer_loan_detail",
+                    url_kwargs={"loan_id": loan.pk},
+                    request=request,
+                    source_key=f"expired-month-sig:{record.pk}",
+                )
+                return redirect("officer_loan_detail", loan_id=loan.id)
+        else:
+            messages.error(request, "Capture the borrower signature and printed name for the expired month.")
+
     can_extend = can_extend_loan_balance(loan)
-    extension_form = BalanceExtensionForm(request.POST or None) if can_extend else None
+    is_signature_post = request.method == "POST" and request.POST.get("form_name") == "expired_month_signature"
+    extension_form = BalanceExtensionForm(None if is_signature_post else (request.POST or None)) if can_extend else None
     extension_previews = [
         {
             "months": row["months"],
@@ -2067,7 +2118,7 @@ def officer_loan_detail(request, loan_id):
         for row in (balance_extension_previews(loan) if can_extend else [])
     ]
 
-    if request.method == "POST" and can_extend and extension_form.is_valid():
+    if request.method == "POST" and can_extend and not is_signature_post and extension_form.is_valid():
         try:
             loan, quote = extend_loan_balance(loan, extension_form.cleaned_data["months"])
         except BalanceExtensionError as exc:
@@ -2113,6 +2164,9 @@ def officer_loan_detail(request, loan_id):
             "loan": loan,
             "payments": payments,
             "next_due": next_due,
+            "expired_months": expired_months,
+            "expired_unsigned_count": sum(1 for m in expired_months if not m["is_signed"]),
+            "signature_form": signature_form,
             "can_extend_balance": can_extend,
             "extension_form": extension_form,
             "extension_previews": extension_previews,

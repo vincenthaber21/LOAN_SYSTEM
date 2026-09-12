@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from django.db import transaction
 from django.utils import timezone
 
-from .models import DisbursementSetting, Installment, Loan, LoanApplication, Notification, User
+from .models import DisbursementSetting, ExpiredMonthSignature, Installment, Loan, LoanApplication, Notification, User
 
 INITIAL_CREDIT_SCORE = Decimal("100.000")
 LATE_PAYMENT_CREDIT_PENALTY = Decimal("0.1")
@@ -990,6 +990,63 @@ def _fold_schedule_buckets(buckets, target_count, label_prefix):
 def schedule_month_buckets(installments):
     """Group daily installments into loan months (22 working days each)."""
     return _schedule_period_buckets(installments, WORKING_DAYS_PER_MONTH, "Month")
+
+
+def expired_month_rows(loan):
+    """Unpaid loan months whose collection period has already ended."""
+    today = timezone.localdate()
+    signatures = {
+        (row.month_number, row.start_date): row
+        for row in loan.expired_month_signatures.all()
+    }
+    rows = []
+    for bucket in schedule_month_buckets(list(loan.installments.all())):
+        if bucket["status"] == Installment.Status.PAID:
+            continue
+        if bucket["end_date"] >= today:
+            continue
+        signature = signatures.get((bucket["month_number"], bucket["start_date"]))
+        row = dict(bucket)
+        row["signature"] = signature
+        row["is_signed"] = bool(signature)
+        rows.append(row)
+    return rows
+
+
+class ExpiredMonthSignatureError(ValueError):
+    """Raised when an expired-month signature cannot be recorded."""
+
+
+def record_expired_month_signature(loan, month_number, start_date, signature_file, signed_name, recorded_by=None):
+    """Store a borrower signature acknowledging an expired unpaid loan month."""
+    month_number = int(month_number)
+    match = next(
+        (
+            row
+            for row in expired_month_rows(loan)
+            if row["month_number"] == month_number and row["start_date"] == start_date
+        ),
+        None,
+    )
+    if not match:
+        raise ExpiredMonthSignatureError("That month is not an expired unpaid payment period.")
+    if match["is_signed"]:
+        raise ExpiredMonthSignatureError("This expired month is already signed.")
+    if signature_file is None:
+        raise ExpiredMonthSignatureError("Borrower signature is required.")
+
+    record = ExpiredMonthSignature(
+        loan=loan,
+        month_number=month_number,
+        start_date=match["start_date"],
+        end_date=match["end_date"],
+        remaining_amount=match["remaining"],
+        signed_name=(signed_name or "").strip(),
+        recorded_by=recorded_by,
+    )
+    record.signature.save(signature_file.name, signature_file, save=False)
+    record.save()
+    return record
 
 
 def schedule_week_buckets(installments, term_months=None):

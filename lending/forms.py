@@ -1262,6 +1262,23 @@ class BalanceExtensionForm(forms.Form):
     )
 
 
+class ExpiredMonthSignatureForm(forms.Form):
+    month_number = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    start_date = forms.DateField(widget=forms.HiddenInput)
+    signed_name = forms.CharField(max_length=160, required=False, label="Borrower printed name")
+    signature_data = forms.CharField(widget=forms.HiddenInput, required=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        signature = decode_signature_data_url(cleaned.get("signature_data"), "expired-month-sig")
+        cleaned["_signature_file"] = signature
+        if not signature:
+            self.add_error("signature_data", "Borrower signature is required.")
+        if not (cleaned.get("signed_name") or "").strip():
+            self.add_error("signed_name", "Printed name is required.")
+        return cleaned
+
+
 class DocumentForm(forms.ModelForm):
     ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "pdf", "doc", "docx"}
 
