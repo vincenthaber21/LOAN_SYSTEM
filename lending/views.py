@@ -2306,6 +2306,7 @@ def officer_make_payment(request, loan_id):
             savings_adjustment=form.cleaned_data.get("savings_adjustment"),
             mutual_aid_contribution=form.cleaned_data.get("mutual_aid_contribution"),
             pay_frequency=pay_frequency if not installment else "daily",
+            payment_date=form.cleaned_data.get("payment_date"),
         )
         record_activity(
             request.user,

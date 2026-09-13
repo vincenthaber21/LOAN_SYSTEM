@@ -48,6 +48,12 @@
             <div class="invalid-feedback d-none" id="savingsError"></div>
           </div>
           <div class="mb-3">
+            <label class="form-label" for="id_payment_date">{{ form.payment_date.label }}</label>
+            {{ form.payment_date }}
+            {% for error in form.payment_date.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            <div class="form-text">{{ form.payment_date.help_text }}</div>
+          </div>
+          <div class="mb-3">
             <label class="form-label">{{ form.method.label }}</label>
             {{ form.method }}
           </div>
@@ -112,6 +118,7 @@
         <dl class="row mb-0 confirm-summary">
           <dt class="col-5">Loan</dt><dd class="col-7">{{ loan.reference }}</dd>
           <dt class="col-5">Borrower</dt><dd class="col-7">{{ loan.application.borrower_name }}</dd>
+          <dt class="col-5">Payment date</dt><dd class="col-7" id="confirmPaymentDate">—</dd>
           <dt class="col-5">Amount</dt><dd class="col-7" id="confirmPaymentAmount">—</dd>
           <dt class="col-5">To loan</dt><dd class="col-7" id="confirmLoanAmount">—</dd>
           <dt class="col-5">To mutual aid</dt><dd class="col-7" id="confirmMutualAidAmount">—</dd>
@@ -471,6 +478,16 @@
   var paymentForm = document.getElementById('paymentForm');
   var methodSelect = document.getElementById('id_method');
   var referenceInput = document.getElementById('id_reference_number');
+  var paymentDateInput = document.getElementById('id_payment_date');
+
+  function formatPaymentDate(value) {
+    if (!value) return '—';
+    var parts = value.split('-');
+    if (parts.length !== 3) return value;
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    if (isNaN(d.getTime())) return value;
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
   var confirmModalEl = document.getElementById('confirmPaymentModal');
   var confirmBtn = document.getElementById('confirmPaymentBtn');
   var submitBtn = document.getElementById('submitPaymentBtn');
@@ -497,6 +514,7 @@
     var mutualAid = parseMoney(mutualAidInput);
     var savings = parseMoney(savingsInput);
     var preview = previewAfterPayment(amount, mutualAid, savings);
+    document.getElementById('confirmPaymentDate').textContent = paymentDateInput ? formatPaymentDate(paymentDateInput.value) : '—';
     document.getElementById('confirmPaymentAmount').textContent = amountInput.value ? '₱' + formatAmount(amountInput.value) : '—';
     document.getElementById('confirmLoanAmount').textContent = peso(preview.loan);
     document.getElementById('confirmMutualAidAmount').textContent = peso(preview.mutualAid);

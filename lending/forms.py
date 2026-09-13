@@ -1171,6 +1171,15 @@ class PaymentForm(forms.ModelForm):
             attrs={"step": "0.01", "min": "0", "class": "form-control", "inputmode": "decimal"}
         ),
     )
+    payment_date = forms.DateField(
+        required=False,
+        label="Payment date",
+        help_text="Date this collection was received. Defaults to today; pick any past date to record a payment made on an earlier day.",
+        widget=forms.DateInput(
+            format="%Y-%m-%d",
+            attrs={"type": "date", "class": "form-control"},
+        ),
+    )
 
     class Meta:
         model = Payment
@@ -1193,6 +1202,20 @@ class PaymentForm(forms.ModelForm):
         self.max_loan_amount = max_loan_amount if max_loan_amount is not None else max_amount
         self.max_amount_label = max_amount_label
         super().__init__(*args, **kwargs)
+        today = timezone.localdate()
+        # Officer may pick any past date up to today; a payment can't be in the future.
+        self.fields["payment_date"].widget.attrs["max"] = today.isoformat()
+        if not (self.is_bound or self.initial.get("payment_date")):
+            self.initial["payment_date"] = today
+
+    def clean_payment_date(self):
+        value = self.cleaned_data.get("payment_date")
+        today = timezone.localdate()
+        if value is None:
+            return today
+        if value > today:
+            raise forms.ValidationError("Payment date cannot be in the future.")
+        return value
 
     def clean_amount(self):
         # Total remittance may include Membership/Savings Deposit on top of the loan

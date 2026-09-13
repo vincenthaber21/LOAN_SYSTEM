@@ -1644,6 +1644,7 @@ def record_payment(
     savings_adjustment=None,
     mutual_aid_contribution=None,
     pay_frequency="daily",
+    payment_date=None,
 ):
     """Record a payment that reduces principal, then recalculates with the same flat formula.
 
@@ -1653,6 +1654,7 @@ def record_payment(
     """
     loan = Loan.objects.select_for_update().get(pk=loan.pk)
     amount = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    paid_date = payment_date or timezone.localdate()
 
     if mutual_aid_contribution is None:
         mutual_aid = mutual_aid_for_remittance_amount(loan, amount)
@@ -1685,8 +1687,8 @@ def record_payment(
         reference_number=reference or f"PAY-{timezone.now():%Y%m%d%H%M%S}",
         recorded_by=user,
         installment=installment,
+        payment_date=paid_date,
     )
-    paid_date = timezone.localdate()
 
     # Snapshot overdue months before the schedule is rebuilt (for late credit penalties).
     overdue_month_numbers = sorted(
