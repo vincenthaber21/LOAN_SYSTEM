@@ -22,7 +22,9 @@ if not SECRET_KEY:
         SECRET_KEY = "django-insecure-local-dev-only-do-not-use-in-production"
     else:
         raise ImproperlyConfigured(
-            "SESSION_SECRET environment variable must be set when DJANGO_DEBUG is not '1'."
+            "SESSION_SECRET must be set when DJANGO_DEBUG is not '1'. "
+            "Create a .env file in the project root (see .env.example), or set "
+            "SESSION_SECRET in the environment / WSGI file."
         )
 
 # Comma-separated list of allowed hostnames, e.g. "myapp.pythonanywhere.com,example.com".

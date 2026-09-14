@@ -17,6 +17,7 @@ media/
 # Environment
 .env
 .env.*
+!.env.example
 pythonanywhere_wsgi_snippet.py
 
 # Node

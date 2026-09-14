@@ -1,4 +1,3 @@
-
 Your PC
    ↓
 git add .
@@ -27,7 +26,17 @@ git pull origin main
 python manage.py collectstatic --noinput
 
 
-
-export SESSION_SECRET='r&fg9cr(hk1x_m+i(%sj4v4&@kgub*(0)cbehhtfz!x97g^t+*'
-export DJANGO_ALLOWED_HOSTS='calica.pythonanywhere.com'
-export DJANGO_BEHIND_PROXY='1'
+# ------------------------------------------------------------
+# ONE-TIME on PythonAnywhere (so you never export vars again)
+# Run this once in ~/LOAN_SYSTEM after workon venv:
+# ------------------------------------------------------------
+#
+# cat > .env << 'EOF'
+# SESSION_SECRET=r&fg9cr(hk1x_m+i(%sj4v4&@kgub*(0)cbehhtfz!x97g^t+*
+# DJANGO_ALLOWED_HOSTS=calica.pythonanywhere.com
+# DJANGO_BEHIND_PROXY=1
+# DJANGO_CSRF_TRUSTED_ORIGINS=https://calica.pythonanywhere.com
+# EOF
+#
+# After that, migrate / collectstatic / shell all work with no exports.
+# Keep the same values in the WSGI file for the web app (or rely on .env there too).
