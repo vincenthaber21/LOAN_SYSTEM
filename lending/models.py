@@ -757,7 +757,15 @@ class Loan(models.Model):
         return self.application.get_payment_frequency_display()
 
     def _flat_amounts(self):
-        from .services import calculate_flat_loan_amounts, loan_term_months
+        from .services import _flat_amounts_for_periods, calculate_flat_loan_amounts, loan_term_months
+
+        # After payments, unpaid rows are re-priced over the remaining period count
+        # (which can be shorter than term×22 once leading days are marked Paid).
+        # Prefer that unpaid count so sidebar daily/weekly figures match the schedule.
+        if self.payments.exists():
+            unpaid = self.installments.exclude(status="paid").count()
+            if unpaid > 0:
+                return _flat_amounts_for_periods(self.principal, self.interest_rate, unpaid)
 
         return calculate_flat_loan_amounts(
             self.principal,

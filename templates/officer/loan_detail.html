@@ -192,7 +192,7 @@
             <div class="text-muted small mt-2">
               Chosen remittance · {{ loan.application.get_payment_frequency_display }}
               {{ chosen_pay_amount|peso }}
-              <span class="ms-1">(loan exact {{ chosen_pay_amount_exact|peso }} + {{ plan_mutual_aid_amount|peso }} mutual aid)</span>
+              <span class="ms-1">(loan exact {{ chosen_pay_amount_exact|peso }})</span>
             </div>
           </div>
           <div class="col-sm-4"><div class="detail-label">Interest rate</div><div class="detail-value">{{ loan.interest_rate }}% fixed</div></div>
@@ -224,11 +224,6 @@
             <div class="detail-label">Payment per day</div>
             <div class="detail-value">{{ loan.adjusted_daily_payment|peso }}</div>
             <div class="text-muted small">Exact {{ loan.daily_payment|peso }}</div>
-          </div>
-          <div class="col-sm-4">
-            <div class="detail-label">Mutual aid / day</div>
-            <div class="detail-value">{{ daily_mutual_aid_amount|peso }}</div>
-            <div class="text-muted small">Collected with every working-day remittance</div>
           </div>
           <div class="col-sm-4">
             <div class="detail-label">Payment per month</div>

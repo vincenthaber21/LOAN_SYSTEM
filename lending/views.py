@@ -621,6 +621,8 @@ def schedule(request, loan_id):
         display = schedule_display_rows(loan, view_mode=view_mode, month=month)
         original_terms = loan.original_schedule_terms() if loan.is_rescheduled else None
         next_payment = loan.next_installment
+    payments_made_count = loan.payments.count()
+    total_collected_to_loan = max(Decimal("0.00"), loan.original_amount - loan.principal)
     return render(
         request,
         "borrower/repayment_schedule.html",
@@ -639,6 +641,10 @@ def schedule(request, loan_id):
             "showing_original": showing_original,
             "original_terms": original_terms,
             "daily_mutual_aid_amount": display.get("daily_mutual_aid_amount") or daily_mutual_aid_amount(),
+            # Payments mark fully covered periods Paid and re-price the rest. Surface
+            # cumulative collection progress so remittances are visible on the plan.
+            "payments_made_count": payments_made_count,
+            "total_collected_to_loan": total_collected_to_loan,
         },
     )
 
@@ -2177,7 +2183,7 @@ def officer_loan_detail(request, loan_id):
             "extension_rate": BALANCE_EXTENSION_RATE,
             "pay_frequency": pay_freq,
             "pay_frequency_choices": list(LoanApplication.PaymentFrequency.choices),
-            "chosen_pay_amount": loan_adjusted + mutual_aid_for_plan,
+            "chosen_pay_amount": loan_adjusted,
             "chosen_pay_amount_exact": loan_exact,
             "daily_mutual_aid_amount": mutual_aid_daily,
             "plan_mutual_aid_amount": mutual_aid_for_plan,
@@ -2208,6 +2214,8 @@ def officer_schedule(request, loan_id):
         original_terms = loan.original_schedule_terms() if loan.is_rescheduled else None
         next_due = next_due_for_display(loan, display["view_mode"])
 
+    payments_made_count = loan.payments.count()
+    total_collected_to_loan = max(Decimal("0.00"), loan.original_amount - loan.principal)
     return render(
         request,
         "officer/schedule.html",
@@ -2227,6 +2235,10 @@ def officer_schedule(request, loan_id):
             "showing_original": showing_original,
             "original_terms": original_terms,
             "daily_mutual_aid_amount": display.get("daily_mutual_aid_amount") or daily_mutual_aid_amount(),
+            # Payments mark fully covered periods Paid and re-price the rest. Surface
+            # cumulative collection progress so remittances are visible on the plan.
+            "payments_made_count": payments_made_count,
+            "total_collected_to_loan": total_collected_to_loan,
         },
     )
 
@@ -2258,11 +2270,10 @@ def officer_make_payment(request, loan_id):
     )
 
     def _capped(frequency):
+        # Loan remittance only — mutual aid is entered manually by the officer now.
         exact = loan.suggested_payment_for(frequency, adjust=False)
         adjusted = adjust_payment(exact)
-        mutual = mutual_aid_for_pay_frequency(frequency)
-        total = adjusted + mutual
-        return min(total, max_amount) if max_amount is not None else total
+        return min(adjusted, max_loan_amount) if max_loan_amount is not None else adjusted
 
     pay_amounts = {
         "daily": _capped("daily"),
@@ -2270,19 +2281,14 @@ def officer_make_payment(request, loan_id):
         "biweekly": _capped("biweekly"),
         "monthly": _capped("monthly"),
     }
-    suggested = pay_amounts[pay_frequency] if not installment else (
-        adjust_payment(exact_max) + mutual_aid_for_pay_frequency("daily")
-    )
+    suggested = pay_amounts[pay_frequency] if not installment else adjust_payment(exact_max)
     exact_for_frequency = loan.suggested_payment_for(pay_frequency, adjust=False)
-    default_mutual_aid = mutual_aid_for_remittance_amount(
-        loan, suggested, max_days=remaining_periods
-    )
-    loan_portion_suggested = (suggested - default_mutual_aid).quantize(Decimal("0.01"))
-    if loan_portion_suggested < 0:
-        loan_portion_suggested = Decimal("0.00")
-    _, default_savings = split_payment_for_savings(
-        loan, loan_portion_suggested, installment=installment
-    )
+    # Amount collected, mutual aid, and Membership/Savings are independent manual
+    # entries now. The amount collected is the loan payment; mutual aid and savings
+    # are added on top. No automatic ₱15/day and no cash-rounding uplift default.
+    default_mutual_aid = Decimal("0.00")
+    default_savings = Decimal("0.00")
+    loan_applied_suggested = suggested
     form = PaymentForm(
         request.POST or None,
         instance=Payment(installment=installment),
@@ -2296,15 +2302,23 @@ def officer_make_payment(request, loan_id):
         max_amount_label=max_amount_label,
     )
     if request.method == "POST" and form.is_valid():
+        # "Amount collected" is the loan payment; mutual aid and Membership/Savings are
+        # added on top. record_payment takes the total cash and carves the parts back out.
+        loan_payment_amount = form.cleaned_data["amount"]
+        mutual_aid_amount = form.cleaned_data.get("mutual_aid_contribution") or Decimal("0.00")
+        savings_amount = form.cleaned_data.get("savings_adjustment") or Decimal("0.00")
+        total_collected = (loan_payment_amount + mutual_aid_amount + savings_amount).quantize(
+            Decimal("0.01")
+        )
         payment = record_payment(
             loan,
-            form.cleaned_data["amount"],
+            total_collected,
             form.cleaned_data["method"],
             form.cleaned_data["reference_number"],
             request.user,
             installment,
-            savings_adjustment=form.cleaned_data.get("savings_adjustment"),
-            mutual_aid_contribution=form.cleaned_data.get("mutual_aid_contribution"),
+            savings_adjustment=savings_amount,
+            mutual_aid_contribution=mutual_aid_amount,
             pay_frequency=pay_frequency if not installment else "daily",
             payment_date=form.cleaned_data.get("payment_date"),
         )
@@ -2356,6 +2370,7 @@ def officer_make_payment(request, loan_id):
             "pay_frequency": pay_frequency,
             "pay_frequency_label": frequency_labels.get(pay_frequency, pay_frequency.title()),
             "suggested_amount": suggested,
+            "loan_applied_suggested": loan_applied_suggested,
             "default_savings_adjustment": default_savings,
             "default_mutual_aid_contribution": default_mutual_aid,
             "daily_mutual_aid_amount": daily_mutual_aid_amount(),

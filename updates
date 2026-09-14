@@ -25,3 +25,9 @@ git pull origin main
 
 
 python manage.py collectstatic --noinput
+
+
+
+export SESSION_SECRET='r&fg9cr(hk1x_m+i(%sj4v4&@kgub*(0)cbehhtfz!x97g^t+*'
+export DJANGO_ALLOWED_HOSTS='calica.pythonanywhere.com'
+export DJANGO_BEHIND_PROXY='1'

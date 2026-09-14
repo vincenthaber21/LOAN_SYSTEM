@@ -601,34 +601,74 @@ def _flat_amounts_for_periods(principal, interest_rate, periods):
             "total_payable": principal,
             "periods": 0,
             "per_day": Decimal("0.00"),
+            "per_month": Decimal("0.00"),
             "months": Decimal("0"),
             "interest_waived": principal_waives_interest(principal),
         }
+    months = Decimal(periods) / Decimal(WORKING_DAYS_PER_MONTH)
     if principal_waives_interest(principal):
         per_day = (principal / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        per_month = (per_day * Decimal(WORKING_DAYS_PER_MONTH)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return {
             "principal": principal,
             "total_interest": Decimal("0.00"),
             "total_payable": principal,
             "periods": periods,
             "per_day": per_day,
-            "months": Decimal(periods) / Decimal(WORKING_DAYS_PER_MONTH),
+            "per_month": per_month,
+            "months": months,
             "interest_waived": True,
         }
     rate = Decimal(str(interest_rate)) / Decimal("100")
-    months = Decimal(periods) / Decimal(WORKING_DAYS_PER_MONTH)
     total_interest = (principal * rate * months).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     total_payable = (principal + total_interest).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     per_day = (total_payable / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    per_month = (per_day * Decimal(WORKING_DAYS_PER_MONTH)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return {
         "principal": principal,
         "total_interest": total_interest,
         "total_payable": total_payable,
         "periods": periods,
         "per_day": per_day,
+        "per_month": per_month,
         "months": months,
         "interest_waived": False,
     }
+
+
+def _credit_installments_for_payment(unpaid_installments, loan_amount, paid_date):
+    """Mark as many leading installments Paid as this payment's loan portion fully covers.
+
+    Walks the given (already-ordered, unpaid) installments oldest-due-first, consuming
+    loan_amount as credit. An installment flips to Paid only once the remaining credit
+    fully covers its amount_due — a payment doesn't need to settle the whole loan to
+    retire individual periods, but a partial period is left unpaid (its due amount is
+    re-priced by the flat-rate recompute on the reduced principal instead).
+
+    Example: 3 unpaid weeks at ₱437.50 each, loan_amount ₱1,000 → weeks 1–2 are marked
+    Paid (₱875.00 consumed); ₱125.00 remains, not enough for week 3, so week 3 (and
+    anything after it) stays unpaid and gets re-priced on the smaller remaining balance.
+
+    Returns (paid, remaining): installments marked Paid (already saved to the database)
+    and the still-unpaid installments, in order, for the caller to rebuild.
+    """
+    credit = Decimal(str(loan_amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    paid = []
+    remaining = []
+    still_covering = credit > 0
+    for item in unpaid_installments:
+        if still_covering and credit >= item.amount_due:
+            credit = (credit - item.amount_due).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            item.amount_paid = item.amount_due
+            item.status = Installment.Status.PAID
+            item.paid_date = paid_date
+            paid.append(item)
+        else:
+            still_covering = False
+            remaining.append(item)
+    if paid:
+        Installment.objects.bulk_update(paid, ["amount_paid", "status", "paid_date"])
+    return paid, remaining
 
 
 def _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due_date, periods):
@@ -732,6 +772,13 @@ def extend_loan_balance(loan, months):
 
 def schedule_is_stale(loan):
     """True when stored installments no longer match the loan terms or disbursement date."""
+    if not loan.installments.exists():
+        return True
+    # After payments, paid rows are kept for history while unpaid rows (and often
+    # term_months) shrink. Total count will no longer equal term×22 — that is
+    # expected, and rebuild_loan_schedule refuses to wipe paid history anyway.
+    if loan.payments.exists():
+        return False
     term = loan_term_months(loan)
     expected = expected_period_count(term)
     if loan.installments.count() != expected:
@@ -915,12 +962,15 @@ def _mutual_aid_for_day_count(day_count):
 
 
 def _annotate_schedule_with_mutual_aid(schedule, view_mode):
-    """Attach mutual-aid amounts and fold them into the collect (adjusted) total."""
+    """Normalize schedule rows for display.
+
+    The collect amount is the loan remittance the officer collects (rounded up to
+    the nearest ₱5). Mutual aid is a separate, manual contribution now, so it is no
+    longer folded into the collect total; the per-row mutual aid is left at ₱0.00.
+    """
     annotated = []
     for row in schedule:
         if view_mode == "day":
-            day_count = 1
-            mutual_aid = _mutual_aid_for_day_count(day_count)
             loan_adjusted = row.adjusted_amount
             annotated.append(
                 {
@@ -928,24 +978,22 @@ def _annotate_schedule_with_mutual_aid(schedule, view_mode):
                     "due_date": row.due_date,
                     "amount": row.amount,
                     "loan_adjusted_amount": loan_adjusted,
-                    "mutual_aid": mutual_aid,
-                    "adjusted_amount": loan_adjusted + mutual_aid,
+                    "mutual_aid": Decimal("0.00"),
+                    "adjusted_amount": loan_adjusted,
                     "principal": row.principal,
                     "interest": row.interest,
                     "status": row.status,
                     "status_label": row.status_label,
                     "is_next": row.is_next,
-                    "day_count": day_count,
+                    "day_count": 1,
                 }
             )
         else:
-            day_count = int(row.get("day_count") or 1)
-            mutual_aid = _mutual_aid_for_day_count(day_count)
             loan_adjusted = row["adjusted_amount"]
             row = dict(row)
             row["loan_adjusted_amount"] = loan_adjusted
-            row["mutual_aid"] = mutual_aid
-            row["adjusted_amount"] = loan_adjusted + mutual_aid
+            row["mutual_aid"] = Decimal("0.00")
+            row["adjusted_amount"] = loan_adjusted
             annotated.append(row)
     return annotated
 
@@ -1049,14 +1097,36 @@ def record_expired_month_signature(loan, month_number, start_date, signature_fil
     return record
 
 
+def _display_term_months(installments, term_months):
+    """Months used to cap week/biweek/month schedule views.
+
+    Payments mark leading installments Paid and shrink the unpaid remaining term,
+    but paid rows stay on the loan for history. The remaining `term_months` can
+    therefore be shorter than the installment list — derive a floor from the
+    actual row count so weeks are not crushed into the last remaining period.
+    """
+    term = max(1, int(term_months or 1))
+    count = len(installments)
+    if count <= 0:
+        return term
+    spanned = int(
+        (Decimal(count) / Decimal(WORKING_DAYS_PER_MONTH)).to_integral_value(
+            rounding=ROUND_CEILING
+        )
+    )
+    return max(term, max(1, spanned))
+
+
 def schedule_week_buckets(installments, term_months=None):
     """Group daily installments into weeks (5 working days each).
 
     Display is capped at months × 4 weeks. Leftover working days fold into the
     last week so a 4-month term shows Week 1–16 only. Daily formulas are unchanged.
     """
-    buckets = _schedule_period_buckets(installments, WORKING_DAYS_PER_WEEK, "Week")
-    return _fold_schedule_buckets(buckets, term_weeks_total(term_months), "Week")
+    items = list(installments)
+    display_term = _display_term_months(items, term_months)
+    buckets = _schedule_period_buckets(items, WORKING_DAYS_PER_WEEK, "Week")
+    return _fold_schedule_buckets(buckets, term_weeks_total(display_term), "Week")
 
 
 def schedule_biweek_buckets(installments, term_months=None):
@@ -1065,8 +1135,10 @@ def schedule_biweek_buckets(installments, term_months=None):
     Display is capped at months × 2 biweeks so the weekly standard (months × 4)
     stays consistent. Daily formulas are unchanged.
     """
-    buckets = _schedule_period_buckets(installments, WORKING_DAYS_PER_BIWEEK, "Biweek")
-    target = term_weeks_total(term_months) // 2 if term_months is not None else 0
+    items = list(installments)
+    display_term = _display_term_months(items, term_months)
+    buckets = _schedule_period_buckets(items, WORKING_DAYS_PER_BIWEEK, "Biweek")
+    target = term_weeks_total(display_term) // 2
     return _fold_schedule_buckets(buckets, target, "Biweek")
 
 
@@ -1119,14 +1191,13 @@ def next_due_for_display(loan, view_mode="day"):
 
     if view_mode == "day":
         amount = next_item.remaining
-        mutual_aid = mutual_aid_for_pay_frequency(frequency)
         return {
             "due_date": next_item.due_date,
             "label": "Daily",
             "frequency": frequency,
             "amount": amount,
-            "mutual_aid": mutual_aid,
-            "adjusted_amount": adjust_payment(amount) + mutual_aid,
+            "mutual_aid": Decimal("0.00"),
+            "adjusted_amount": adjust_payment(amount),
         }
 
     installments = list(loan.installments.all())
@@ -1149,7 +1220,6 @@ def next_due_for_display(loan, view_mode="day"):
         return None
 
     amount = bucket["remaining"]
-    mutual_aid = mutual_aid_for_pay_frequency(frequency)
     return {
         "due_date": bucket["due_date"],
         "start_date": bucket["start_date"],
@@ -1157,8 +1227,8 @@ def next_due_for_display(loan, view_mode="day"):
         "label": bucket.get("label") or label,
         "frequency": frequency,
         "amount": amount,
-        "mutual_aid": mutual_aid,
-        "adjusted_amount": adjust_payment(amount) + mutual_aid,
+        "mutual_aid": Decimal("0.00"),
+        "adjusted_amount": adjust_payment(amount),
     }
 
 
@@ -1347,7 +1417,8 @@ def _schedule_display_from_installments(installments, term_months, view_mode="mo
         "monthly": "month",
     }
     view_mode = aliases.get(str(view_mode or "").lower(), "month")
-    term = int(term_months)
+    items = list(installments)
+    term = _display_term_months(items, term_months)
     month_options = [{"value": str(number), "label": f"Month {number}"} for number in range(1, term + 1)]
 
     selected_month = None
@@ -1360,23 +1431,23 @@ def _schedule_display_from_installments(installments, term_months, view_mode="mo
             selected_month = None
 
     if view_mode == "month":
-        schedule = schedule_month_buckets(installments)
+        schedule = schedule_month_buckets(items)
         if selected_month is not None:
             schedule = [row for row in schedule if row["month_number"] == selected_month]
     elif view_mode == "week":
-        schedule = schedule_week_buckets(installments, term_months=term)
+        schedule = schedule_week_buckets(items, term_months=term)
         if selected_month is not None:
             schedule = [row for row in schedule if row["month_number"] == selected_month]
     elif view_mode == "biweek":
-        schedule = schedule_biweek_buckets(installments, term_months=term)
+        schedule = schedule_biweek_buckets(items, term_months=term)
         if selected_month is not None:
             schedule = [row for row in schedule if row["month_number"] == selected_month]
     else:
         if selected_month is not None:
             start = (selected_month - 1) * WORKING_DAYS_PER_MONTH
-            schedule = installments[start : start + WORKING_DAYS_PER_MONTH]
+            schedule = items[start : start + WORKING_DAYS_PER_MONTH]
         else:
-            schedule = installments
+            schedule = items
 
     if view_mode in {"month", "week", "biweek"}:
         paid_count = sum(1 for row in schedule if row["status"] == Installment.Status.PAID)
@@ -1706,6 +1777,10 @@ def record_payment(
     unpaid = list(
         loan.installments.exclude(status=Installment.Status.PAID).order_by("installment_number", "due_date")
     )
+    # Credit whichever leading installments this payment's loan portion fully covers —
+    # they become Paid right away, even when the loan overall isn't settled yet. Only
+    # the still-uncovered remainder gets re-priced on the reduced principal below.
+    _paid_this_payment, unpaid = _credit_installments_for_payment(unpaid, loan_amount, paid_date)
     periods_remaining = len(unpaid)
     start_due = unpaid[0].due_date if unpaid else _first_installment_due_date(loan)
 
@@ -1736,16 +1811,20 @@ def record_payment(
             periods_remaining = max(1, working_day_count(loan.term_months))
             start_due = _interest_start_monday(paid_date)
         amounts = _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due, periods_remaining)
-        remaining_months = max(
+        # Paid rows stay for history; term must cover paid + remaining unpaid so
+        # week/month views and working-day counts stay aligned with the schedule.
+        paid_count = loan.installments.filter(status=Installment.Status.PAID).count()
+        schedule_periods = paid_count + periods_remaining
+        schedule_months = max(
             1,
             int(
-                (Decimal(periods_remaining) / Decimal(WORKING_DAYS_PER_MONTH)).to_integral_value(
+                (Decimal(schedule_periods) / Decimal(WORKING_DAYS_PER_MONTH)).to_integral_value(
                     rounding=ROUND_CEILING
                 )
             ),
         )
         loan.principal = new_principal
-        loan.term_months = remaining_months
+        loan.term_months = schedule_months
         loan.outstanding_balance = amounts["total_payable"]
         loan.total_payable = (loan_payments_sum + amounts["total_payable"]).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP

@@ -1246,30 +1246,15 @@ class PaymentForm(forms.ModelForm):
             mutual_aid = Decimal("0.00")
         cleaned["mutual_aid_contribution"] = max(Decimal("0.00"), mutual_aid)
 
+        # "Amount collected" is the loan payment on its own; mutual aid and
+        # Membership/Savings are independent amounts added on top (no cross-limits).
         if amount is not None:
-            if savings > amount:
-                self.add_error(
-                    "savings_adjustment",
-                    f"Membership/Savings Deposit cannot exceed the payment amount of ₱{amount:,.2f}.",
-                )
-            if mutual_aid > amount:
-                self.add_error(
-                    "mutual_aid_contribution",
-                    f"Mutual aid cannot exceed the payment amount of ₱{amount:,.2f}.",
-                )
-            if savings + mutual_aid > amount:
-                self.add_error(
-                    "mutual_aid_contribution",
-                    "Savings plus mutual aid cannot exceed the payment amount.",
-                )
-            loan_portion = (amount - savings - mutual_aid).quantize(Decimal("0.01"))
-            if loan_portion < 0:
-                loan_portion = Decimal("0.00")
+            loan_portion = amount.quantize(Decimal("0.01"))
             if self.max_loan_amount is not None and loan_portion > self.max_loan_amount:
                 self.add_error(
                     "amount",
                     (
-                        f"Loan portion (₱{loan_portion:,.2f}) cannot exceed the "
+                        f"Amount collected (₱{loan_portion:,.2f}) cannot exceed the "
                         f"{self.max_amount_label} of ₱{self.max_loan_amount:,.2f}."
                     ),
                 )

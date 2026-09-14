@@ -49,6 +49,16 @@
 </div>
 {% endif %}
 
+{% if not showing_original and payments_made_count > 0 %}
+<div class="alert alert-success d-flex align-items-start gap-2 mb-4" role="status">
+  <i class="bi bi-check2-circle mt-1"></i>
+  <div>
+    <strong>{{ total_collected_to_loan|peso }} collected across {{ payments_made_count }} payment{{ payments_made_count|pluralize }}.</strong>
+    Your principal is down from {{ loan.original_amount|peso }} to {{ loan.principal|peso }}. A payment marks a row Paid once it fully covers that period; any leftover lowers what's still owed on the rest.
+  </div>
+</div>
+{% endif %}
+
 <form class="filter-bar schedule-filters mb-4" method="get" action="{% url 'repayment_schedule' loan_id=loan.id %}">
   <div class="schedule-filters-row">
     {% if loan.is_rescheduled %}
@@ -115,7 +125,6 @@
               <th>{% if view_mode == "day" %}Due date{% else %}Period{% endif %}</th>
               <th>Collect</th>
               <th>Loan exact</th>
-              <th>Mutual aid</th>
               <th>Principal</th>
               <th>Interest</th>
               <th>Status</th>
@@ -140,7 +149,6 @@
               </td>
               <td class="fw-semibold">{{ payment.adjusted_amount|peso }}</td>
               <td class="text-muted">{{ payment.amount|peso }}</td>
-              <td class="text-muted">{{ payment.mutual_aid|peso }}</td>
               <td>{{ payment.principal|peso }}</td>
               <td>{{ payment.interest|peso }}</td>
               <td>
@@ -190,9 +198,6 @@
         <div class="detail-label">Payment per day</div>
         <div class="detail-value mb-1">{{ loan.adjusted_daily_payment|peso }}</div>
         <div class="text-muted small mb-3">Exact {{ loan.daily_payment|peso }}</div>
-        <div class="detail-label">Mutual aid / day</div>
-        <div class="detail-value mb-1">{{ daily_mutual_aid_amount|peso }}</div>
-        <div class="text-muted small mb-3">Added to every working-day remittance</div>
         <div class="detail-label">Payment per month</div>
         <div class="detail-value mb-1">{{ loan.adjusted_monthly_payment|peso }}</div>
         <div class="text-muted small mb-3">Exact {{ loan.monthly_payment|peso }}</div>
