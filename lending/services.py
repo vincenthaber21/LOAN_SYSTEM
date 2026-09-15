@@ -1728,6 +1728,9 @@ def record_payment(
     loan = Loan.objects.select_for_update().get(pk=loan.pk)
     amount = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     paid_date = payment_date or timezone.localdate()
+    outstanding_before = (loan.outstanding_balance or Decimal("0.00")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
     if mutual_aid_contribution is None:
         mutual_aid = mutual_aid_for_remittance_amount(loan, amount)
@@ -1761,6 +1764,7 @@ def record_payment(
         recorded_by=user,
         installment=installment,
         payment_date=paid_date,
+        outstanding_before=outstanding_before,
     )
 
     # Snapshot overdue months before the schedule is rebuilt (for late credit penalties).
@@ -1868,7 +1872,70 @@ def record_payment(
             pay_frequency=pay_frequency,
         )
 
+    loan.refresh_from_db(fields=["outstanding_balance"])
+    # Receipt outstanding moves by the principal applied to the loan (not the
+    # interest-rebuilt schedule total, which can drop by more than the remittance).
+    payment.outstanding_after = max(
+        Decimal("0.00"),
+        (outstanding_before - loan_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+    )
+    payment.save(update_fields=["outstanding_after"])
     return payment
+
+
+def payment_receipt_balances(payment):
+    """Return (outstanding_before, outstanding_after) for a payment receipt.
+
+    Outstanding after is always before minus the principal applied to the loan.
+    """
+    applied = payment.loan_amount_applied
+    if payment.outstanding_before is not None:
+        before = payment.outstanding_before
+    else:
+        loan = payment.loan
+        payments = list(loan.payments.order_by("pk"))
+        is_latest = bool(payments) and payments[-1].pk == payment.pk
+        if is_latest and len(payments) == 1:
+            principal = (
+                loan.disbursed_principal
+                if loan.disbursed_principal is not None
+                else (loan.principal or Decimal("0.00")) + applied
+            )
+            term = loan.original_term_months or loan.term_months
+            before = calculate_flat_loan_amounts(principal, loan.interest_rate, term)[
+                "total_payable"
+            ]
+        elif is_latest:
+            after_loan = (loan.outstanding_balance or Decimal("0.00")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            before = (after_loan + applied).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            paid_through = sum(
+                (item.loan_amount_applied for item in payments if item.pk <= payment.pk),
+                Decimal("0.00"),
+            )
+            principal = loan.disbursed_principal
+            if principal is None:
+                principal = (loan.principal or Decimal("0.00")) + sum(
+                    (item.loan_amount_applied for item in payments),
+                    Decimal("0.00"),
+                )
+            term = loan.original_term_months or loan.term_months
+            original_total = calculate_flat_loan_amounts(
+                principal, loan.interest_rate, term
+            )["total_payable"]
+            before = (original_total - paid_through + applied).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+
+    after = max(
+        Decimal("0.00"),
+        (before - applied).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+    )
+    return before, after
+
+
 @transaction.atomic
 def mark_overdue_installments():
     today = timezone.localdate()

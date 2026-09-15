@@ -1069,6 +1069,20 @@ class Payment(models.Model):
         default=Decimal("0.00"),
         help_text="Portion of this remittance credited to KAP mutual aid (₱15 × working days).",
     )
+    outstanding_before = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Loan outstanding balance immediately before this payment was applied.",
+    )
+    outstanding_after = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Loan outstanding balance immediately after this payment was applied.",
+    )
     payment_date = models.DateField(default=timezone.localdate)
     method = models.CharField(max_length=30, choices=Method.choices, default=Method.BANK_TRANSFER)
     reference_number = models.CharField(max_length=80, default="", blank=True)
