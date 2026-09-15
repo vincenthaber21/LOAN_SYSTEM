@@ -458,9 +458,10 @@
           <h2 class="card-title mt-1">Loan request</h2>
         </div>
         <div class="card-body">
+          {{ form.purpose }}
           <div class="row g-3">
-            <div class="col-12 field-required" data-required-label="Payment frequency">
-              <label class="form-label d-block label-required">Pay</label>
+            <div class="col-12 field-required" data-required-label="Proposed plan payment">
+              <label class="form-label d-block label-required">Proposed plan payment</label>
               <div class="kap-choice-list">
                 {% for radio in form.payment_frequency %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
@@ -486,18 +487,13 @@
               </div>
               {% for error in form.loan_purpose.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-md-8">
-              <label class="form-label" for="{{ form.purpose.id_for_label }}">Others / details</label>
-              <input class="form-control {% if form.purpose.errors %}is-invalid{% endif %}" type="text" id="{{ form.purpose.id_for_label }}" name="{{ form.purpose.html_name }}" value="{{ form.purpose.value|default:'' }}" placeholder="Required when purpose is Others">
-              {% for error in form.purpose.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
           </div>
         </div>
       </div>
 
       <div class="card-soft mb-4">
         <div class="card-header">
-          <div class="kap-section-title">Borrower information</div>
+          <div class="kap-section-title">Borrower</div>
           <h2 class="card-title mt-1">Personal data</h2>
         </div>
         <div class="card-body">
@@ -518,20 +514,16 @@
               {% for error in form.borrower_middle_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
             <div class="col-12 field-required">
-              <label class="form-label label-required" for="{{ form.borrower_present_address.id_for_label }}">Present address (House #, Street, Subd., Brgy.)</label>
+              <label class="form-label label-required" for="{{ form.borrower_present_address.id_for_label }}">Present address (House #, Street, Subd., Brgy., Municipality, Province)</label>
               <input class="form-control {% if form.borrower_present_address.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_present_address.id_for_label }}" name="{{ form.borrower_present_address.html_name }}" value="{{ form.borrower_present_address.value|default:'' }}" required>
               {% for error in form.borrower_present_address.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-md-8">
-              <label class="form-label" for="{{ form.borrower_municipality_city.id_for_label }}">Municipality, Province / City</label>
-              <input class="form-control {% if form.borrower_municipality_city.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_municipality_city.id_for_label }}" name="{{ form.borrower_municipality_city.html_name }}" value="{{ form.borrower_municipality_city.value|default:'' }}">
-            </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.borrower_period_of_staying.id_for_label }}">Period of staying</label>
               <input class="form-control {% if form.borrower_period_of_staying.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_period_of_staying.id_for_label }}" name="{{ form.borrower_period_of_staying.html_name }}" value="{{ form.borrower_period_of_staying.value|default:'' }}">
             </div>
-            <div class="col-12">
-              <label class="form-label d-block">Ownership of dwelling</label>
+            <div class="col-md-6">
+              <label class="form-label d-block">Ownership</label>
               <div class="kap-choice-list">
                 {% for radio in form.borrower_dwelling_ownership %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
@@ -539,38 +531,25 @@
               </div>
             </div>
             <div class="col-12">
-              <label class="form-label" for="{{ form.borrower_permanent_address.id_for_label }}">Permanent address</label>
+              <label class="form-label" for="{{ form.borrower_permanent_address.id_for_label }}">Permanent address (House #, Street, Subd., Brgy., Municipality, Province)</label>
               <input class="form-control {% if form.borrower_permanent_address.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_permanent_address.id_for_label }}" name="{{ form.borrower_permanent_address.html_name }}" value="{{ form.borrower_permanent_address.value|default:'' }}">
             </div>
-            <div class="col-md-8">
-              <label class="form-label" for="{{ form.borrower_permanent_municipality_city.id_for_label }}">Permanent Municipality, Province / City</label>
-              <input class="form-control" type="text" id="{{ form.borrower_permanent_municipality_city.id_for_label }}" name="{{ form.borrower_permanent_municipality_city.html_name }}" value="{{ form.borrower_permanent_municipality_city.value|default:'' }}">
-            </div>
-            <div class="col-md-4 field-required">
-              <label class="form-label label-required" for="{{ form.borrower_tel_mobile.id_for_label }}">Tel or Mobile</label>
-              <input class="form-control {% if form.borrower_tel_mobile.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_tel_mobile.id_for_label }}" name="{{ form.borrower_tel_mobile.html_name }}" value="{{ form.borrower_tel_mobile.value|default:'' }}" required>
-              {% for error in form.borrower_tel_mobile.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.borrower_date_of_birth.id_for_label }}">Date of birth</label>
               {{ form.borrower_date_of_birth }}
               {% for error in form.borrower_date_of_birth.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-md-2">
-              <label class="form-label" for="{{ form.borrower_age.id_for_label }}">Age</label>
-              <input class="form-control" type="number" min="0" max="120" id="{{ form.borrower_age.id_for_label }}" name="{{ form.borrower_age.html_name }}" value="{{ form.borrower_age.value|default:'' }}">
-            </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.borrower_place_of_birth.id_for_label }}">Place of birth</label>
               <input class="form-control" type="text" id="{{ form.borrower_place_of_birth.id_for_label }}" name="{{ form.borrower_place_of_birth.html_name }}" value="{{ form.borrower_place_of_birth.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label d-block">Citizenship</label>
-              <div class="kap-choice-list">
-                {% for radio in form.borrower_citizenship %}
-                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
-                {% endfor %}
-              </div>
+              <label class="form-label" for="{{ form.borrower_id_presented.id_for_label }}">ID Presented</label>
+              <input class="form-control" type="text" id="{{ form.borrower_id_presented.id_for_label }}" name="{{ form.borrower_id_presented.html_name }}" value="{{ form.borrower_id_presented.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_age.id_for_label }}">Age</label>
+              <input class="form-control" type="number" min="0" max="120" id="{{ form.borrower_age.id_for_label }}" name="{{ form.borrower_age.html_name }}" value="{{ form.borrower_age.value|default:'' }}">
             </div>
             <div class="col-md-4">
               <label class="form-label d-block">Gender</label>
@@ -580,7 +559,11 @@
                 {% endfor %}
               </div>
             </div>
-            <div class="col-md-8">
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.borrower_nationality.id_for_label }}">Nationality</label>
+              <input class="form-control" type="text" id="{{ form.borrower_nationality.id_for_label }}" name="{{ form.borrower_nationality.html_name }}" value="{{ form.borrower_nationality.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
               <label class="form-label d-block">Civil status</label>
               <div class="kap-choice-list">
                 {% for radio in form.borrower_civil_status %}
@@ -589,52 +572,34 @@
               </div>
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.borrower_nationality.id_for_label }}">Nationality</label>
-              <input class="form-control" type="text" id="{{ form.borrower_nationality.id_for_label }}" name="{{ form.borrower_nationality.html_name }}" value="{{ form.borrower_nationality.value|default:'' }}">
-            </div>
-            <div class="col-md-4">
               <label class="form-label" for="{{ form.borrower_occupation.id_for_label }}">Occupation</label>
               <input class="form-control" type="text" id="{{ form.borrower_occupation.id_for_label }}" name="{{ form.borrower_occupation.html_name }}" value="{{ form.borrower_occupation.value|default:'' }}">
             </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.borrower_id_presented.id_for_label }}">I.D. Presented</label>
-              <input class="form-control" type="text" id="{{ form.borrower_id_presented.id_for_label }}" name="{{ form.borrower_id_presented.html_name }}" value="{{ form.borrower_id_presented.value|default:'' }}">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.borrower_monthly_income.id_for_label }}">Monthly income</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control {% if form.borrower_monthly_income.errors %}is-invalid{% endif %}" type="number" step="0.01" min="0" id="{{ form.borrower_monthly_income.id_for_label }}" name="{{ form.borrower_monthly_income.html_name }}" value="{{ form.borrower_monthly_income.value|default:'' }}" placeholder="0.00">
+              </div>
+              {% for error in form.borrower_monthly_income.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.borrower_contact_network.id_for_label }}">Contact # / Network</label>
-              <input class="form-control" type="text" id="{{ form.borrower_contact_network.id_for_label }}" name="{{ form.borrower_contact_network.html_name }}" value="{{ form.borrower_contact_network.value|default:'' }}">
+            <div class="col-md-6 field-required">
+              <label class="form-label label-required" for="{{ form.borrower_tel_mobile.id_for_label }}">Contact Number</label>
+              <input class="form-control {% if form.borrower_tel_mobile.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_tel_mobile.id_for_label }}" name="{{ form.borrower_tel_mobile.html_name }}" value="{{ form.borrower_tel_mobile.value|default:'' }}" required>
+              {% for error in form.borrower_tel_mobile.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.borrower_tin_sss.id_for_label }}">TIN or SSS #</label>
-              <input class="form-control" type="text" id="{{ form.borrower_tin_sss.id_for_label }}" name="{{ form.borrower_tin_sss.html_name }}" value="{{ form.borrower_tin_sss.value|default:'' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.borrower_email.id_for_label }}">E-mail address</label>
-              <input class="form-control" type="email" id="{{ form.borrower_email.id_for_label }}" name="{{ form.borrower_email.html_name }}" value="{{ form.borrower_email.value|default:'' }}">
-            </div>
-            <div class="col-12">
-              <label class="form-label" for="{{ form.borrower_spouse_name.id_for_label }}">Name of spouse (if married)</label>
-              <input class="form-control" type="text" id="{{ form.borrower_spouse_name.id_for_label }}" name="{{ form.borrower_spouse_name.html_name }}" value="{{ form.borrower_spouse_name.value|default:'' }}">
-            </div>
+            <input type="hidden" name="{{ form.borrower_contact_network.html_name }}" id="{{ form.borrower_contact_network.id_for_label }}" value="{{ form.borrower_contact_network.value|default:'' }}">
           </div>
         </div>
       </div>
 
       <div class="card-soft mb-4">
         <div class="card-header">
-          <div class="kap-section-title">Co-borrower information</div>
-          <h2 class="card-title mt-1">Co-borrower</h2>
+          <div class="kap-section-title">Co-borrower</div>
+          <h2 class="card-title mt-1">Co-borrower data</h2>
         </div>
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-12">
-              <label class="form-label d-block">Relationship with borrower</label>
-              <div class="kap-choice-list">
-                {% for radio in form.coborrower_relationship %}
-                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
-                {% endfor %}
-              </div>
-            </div>
             <div class="col-md-4">
               <label class="form-label" for="{{ form.coborrower_surname.id_for_label }}">Surname</label>
               <input class="form-control text-uppercase" type="text" id="{{ form.coborrower_surname.id_for_label }}" name="{{ form.coborrower_surname.html_name }}" value="{{ form.coborrower_surname.value|default:'' }}">
@@ -648,19 +613,15 @@
               <input class="form-control text-uppercase" type="text" id="{{ form.coborrower_middle_name.id_for_label }}" name="{{ form.coborrower_middle_name.html_name }}" value="{{ form.coborrower_middle_name.value|default:'' }}">
             </div>
             <div class="col-12">
-              <label class="form-label" for="{{ form.coborrower_present_address.id_for_label }}">Present address</label>
+              <label class="form-label" for="{{ form.coborrower_present_address.id_for_label }}">Present address (House #, Street, Subd., Brgy., Municipality, Province)</label>
               <input class="form-control" type="text" id="{{ form.coborrower_present_address.id_for_label }}" name="{{ form.coborrower_present_address.html_name }}" value="{{ form.coborrower_present_address.value|default:'' }}">
             </div>
-            <div class="col-md-8">
-              <label class="form-label" for="{{ form.coborrower_municipality_city.id_for_label }}">Municipality, Province / City</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_municipality_city.id_for_label }}" name="{{ form.coborrower_municipality_city.html_name }}" value="{{ form.coborrower_municipality_city.value|default:'' }}">
-            </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.coborrower_period_of_staying.id_for_label }}">Period of staying</label>
               <input class="form-control" type="text" id="{{ form.coborrower_period_of_staying.id_for_label }}" name="{{ form.coborrower_period_of_staying.html_name }}" value="{{ form.coborrower_period_of_staying.value|default:'' }}">
             </div>
-            <div class="col-12">
-              <label class="form-label d-block">Ownership of dwelling</label>
+            <div class="col-md-6">
+              <label class="form-label d-block">Ownership</label>
               <div class="kap-choice-list">
                 {% for radio in form.coborrower_dwelling_ownership %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
@@ -668,37 +629,25 @@
               </div>
             </div>
             <div class="col-12">
-              <label class="form-label" for="{{ form.coborrower_permanent_address.id_for_label }}">Permanent address</label>
+              <label class="form-label" for="{{ form.coborrower_permanent_address.id_for_label }}">Permanent address (House #, Street, Subd., Brgy., Municipality, Province)</label>
               <input class="form-control" type="text" id="{{ form.coborrower_permanent_address.id_for_label }}" name="{{ form.coborrower_permanent_address.html_name }}" value="{{ form.coborrower_permanent_address.value|default:'' }}">
             </div>
-            <div class="col-md-8">
-              <label class="form-label" for="{{ form.coborrower_permanent_municipality_city.id_for_label }}">Permanent Municipality, Province / City</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_permanent_municipality_city.id_for_label }}" name="{{ form.coborrower_permanent_municipality_city.html_name }}" value="{{ form.coborrower_permanent_municipality_city.value|default:'' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.coborrower_tel_mobile.id_for_label }}">Tel or Mobile</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_tel_mobile.id_for_label }}" name="{{ form.coborrower_tel_mobile.html_name }}" value="{{ form.coborrower_tel_mobile.value|default:'' }}">
-            </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.coborrower_date_of_birth.id_for_label }}">Date of birth</label>
               {{ form.coborrower_date_of_birth }}
               {% for error in form.coborrower_date_of_birth.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-md-2">
-              <label class="form-label" for="{{ form.coborrower_age.id_for_label }}">Age</label>
-              <input class="form-control" type="number" min="0" max="120" id="{{ form.coborrower_age.id_for_label }}" name="{{ form.coborrower_age.html_name }}" value="{{ form.coborrower_age.value|default:'' }}">
-            </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.coborrower_place_of_birth.id_for_label }}">Place of birth</label>
               <input class="form-control" type="text" id="{{ form.coborrower_place_of_birth.id_for_label }}" name="{{ form.coborrower_place_of_birth.html_name }}" value="{{ form.coborrower_place_of_birth.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label d-block">Citizenship</label>
-              <div class="kap-choice-list">
-                {% for radio in form.coborrower_citizenship %}
-                <label>{{ radio.tag }} {{ radio.choice_label }}</label>
-                {% endfor %}
-              </div>
+              <label class="form-label" for="{{ form.coborrower_id_presented.id_for_label }}">ID Presented</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_id_presented.id_for_label }}" name="{{ form.coborrower_id_presented.html_name }}" value="{{ form.coborrower_id_presented.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_age.id_for_label }}">Age</label>
+              <input class="form-control" type="number" min="0" max="120" id="{{ form.coborrower_age.id_for_label }}" name="{{ form.coborrower_age.html_name }}" value="{{ form.coborrower_age.value|default:'' }}">
             </div>
             <div class="col-md-4">
               <label class="form-label d-block">Gender</label>
@@ -708,7 +657,11 @@
                 {% endfor %}
               </div>
             </div>
-            <div class="col-md-8">
+            <div class="col-md-4">
+              <label class="form-label" for="{{ form.coborrower_nationality.id_for_label }}">Nationality</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_nationality.id_for_label }}" name="{{ form.coborrower_nationality.html_name }}" value="{{ form.coborrower_nationality.value|default:'' }}">
+            </div>
+            <div class="col-md-4">
               <label class="form-label d-block">Civil status</label>
               <div class="kap-choice-list">
                 {% for radio in form.coborrower_civil_status %}
@@ -717,33 +670,22 @@
               </div>
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.coborrower_nationality.id_for_label }}">Nationality</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_nationality.id_for_label }}" name="{{ form.coborrower_nationality.html_name }}" value="{{ form.coborrower_nationality.value|default:'' }}">
-            </div>
-            <div class="col-md-4">
               <label class="form-label" for="{{ form.coborrower_occupation.id_for_label }}">Occupation</label>
               <input class="form-control" type="text" id="{{ form.coborrower_occupation.id_for_label }}" name="{{ form.coborrower_occupation.html_name }}" value="{{ form.coborrower_occupation.value|default:'' }}">
             </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.coborrower_id_presented.id_for_label }}">I.D. Presented</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_id_presented.id_for_label }}" name="{{ form.coborrower_id_presented.html_name }}" value="{{ form.coborrower_id_presented.value|default:'' }}">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.coborrower_monthly_income.id_for_label }}">Monthly income</label>
+              <div class="input-group">
+                <span class="input-group-text">₱</span>
+                <input class="form-control {% if form.coborrower_monthly_income.errors %}is-invalid{% endif %}" type="number" step="0.01" min="0" id="{{ form.coborrower_monthly_income.id_for_label }}" name="{{ form.coborrower_monthly_income.html_name }}" value="{{ form.coborrower_monthly_income.value|default:'' }}" placeholder="0.00">
+              </div>
+              {% for error in form.coborrower_monthly_income.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
             </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.coborrower_contact_network.id_for_label }}">Contact # / Network</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_contact_network.id_for_label }}" name="{{ form.coborrower_contact_network.html_name }}" value="{{ form.coborrower_contact_network.value|default:'' }}">
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.coborrower_tel_mobile.id_for_label }}">Contact Number</label>
+              <input class="form-control" type="text" id="{{ form.coborrower_tel_mobile.id_for_label }}" name="{{ form.coborrower_tel_mobile.html_name }}" value="{{ form.coborrower_tel_mobile.value|default:'' }}">
             </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.coborrower_tin_sss.id_for_label }}">TIN or SSS #</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_tin_sss.id_for_label }}" name="{{ form.coborrower_tin_sss.html_name }}" value="{{ form.coborrower_tin_sss.value|default:'' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label" for="{{ form.coborrower_email.id_for_label }}">E-mail address</label>
-              <input class="form-control" type="email" id="{{ form.coborrower_email.id_for_label }}" name="{{ form.coborrower_email.html_name }}" value="{{ form.coborrower_email.value|default:'' }}">
-            </div>
-            <div class="col-12">
-              <label class="form-label" for="{{ form.coborrower_spouse_name.id_for_label }}">Name of spouse (if married)</label>
-              <input class="form-control" type="text" id="{{ form.coborrower_spouse_name.id_for_label }}" name="{{ form.coborrower_spouse_name.html_name }}" value="{{ form.coborrower_spouse_name.value|default:'' }}">
-            </div>
+            <input type="hidden" name="{{ form.coborrower_contact_network.html_name }}" id="{{ form.coborrower_contact_network.id_for_label }}" value="{{ form.coborrower_contact_network.value|default:'' }}">
           </div>
         </div>
       </div>
@@ -751,7 +693,7 @@
       <div class="card-soft mb-4">
         <div class="card-header">
           <div class="kap-section-title">Enterprise data</div>
-          <h2 class="card-title mt-1">For new borrower</h2>
+          <h2 class="card-title mt-1">For new borrower only</h2>
         </div>
         <div class="card-body">
           <div class="row g-3">
@@ -763,7 +705,7 @@
               <label class="form-label" for="{{ form.business_name.id_for_label }}">Business name</label>
               <input class="form-control" type="text" id="{{ form.business_name.id_for_label }}" name="{{ form.business_name.html_name }}" value="{{ form.business_name.value|default:'' }}">
             </div>
-            <div class="col-12">
+            <div class="col-md-6">
               <label class="form-label d-block">Ownership of business</label>
               <div class="kap-choice-list">
                 {% for radio in form.business_ownership %}
@@ -771,7 +713,7 @@
                 {% endfor %}
               </div>
             </div>
-            <div class="col-12">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.business_address.id_for_label }}">Business address</label>
               <input class="form-control" type="text" id="{{ form.business_address.id_for_label }}" name="{{ form.business_address.html_name }}" value="{{ form.business_address.value|default:'' }}">
             </div>
@@ -782,44 +724,38 @@
                 <label>{{ form.reg_barangay }} Barangay Clearance / Permit</label>
                 <label>{{ form.reg_mayor }} Mayor's Permit</label>
                 <label>{{ form.reg_bir }} BIR</label>
-                <label>{{ form.reg_others }} Others</label>
               </div>
             </div>
             <div class="col-md-6">
-              <label class="form-label" for="{{ form.reg_others_text.id_for_label }}">Other registration details</label>
-              <input class="form-control {% if form.reg_others_text.errors %}is-invalid{% endif %}" type="text" id="{{ form.reg_others_text.id_for_label }}" name="{{ form.reg_others_text.html_name }}" value="{{ form.reg_others_text.value|default:'' }}">
-              {% for error in form.reg_others_text.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-            </div>
-            <div class="col-md-3">
               <label class="form-label" for="{{ form.years_in_operation.id_for_label }}">Years in operation</label>
               <input class="form-control" type="text" id="{{ form.years_in_operation.id_for_label }}" name="{{ form.years_in_operation.html_name }}" value="{{ form.years_in_operation.value|default:'' }}">
             </div>
-            <div class="col-md-3">
+            <div class="col-md-6">
               <label class="form-label" for="{{ form.persons_employed.id_for_label }}">No. of persons employed</label>
               <input class="form-control" type="text" id="{{ form.persons_employed.id_for_label }}" name="{{ form.persons_employed.html_name }}" value="{{ form.persons_employed.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.additional_business_1_type.id_for_label }}">Type of business 1</label>
-              <input class="form-control" type="text" id="{{ form.additional_business_1_type.id_for_label }}" name="{{ form.additional_business_1_type.html_name }}" value="{{ form.additional_business_1_type.value|default:'' }}">
+              <label class="form-label" for="{{ form.additional_business_1_type.id_for_label }}">Business 1</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_1_type.id_for_label }}" name="{{ form.additional_business_1_type.html_name }}" value="{{ form.additional_business_1_type.value|default:'' }}" placeholder="Type of business">
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.additional_business_1_name.id_for_label }}">Business 1 name</label>
+              <label class="form-label" for="{{ form.additional_business_1_name.id_for_label }}">Name</label>
               <input class="form-control" type="text" id="{{ form.additional_business_1_name.id_for_label }}" name="{{ form.additional_business_1_name.html_name }}" value="{{ form.additional_business_1_name.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.additional_business_1_address.id_for_label }}">Business 1 address</label>
+              <label class="form-label" for="{{ form.additional_business_1_address.id_for_label }}">Address</label>
               <input class="form-control" type="text" id="{{ form.additional_business_1_address.id_for_label }}" name="{{ form.additional_business_1_address.html_name }}" value="{{ form.additional_business_1_address.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.additional_business_2_type.id_for_label }}">Type of business 2</label>
-              <input class="form-control" type="text" id="{{ form.additional_business_2_type.id_for_label }}" name="{{ form.additional_business_2_type.html_name }}" value="{{ form.additional_business_2_type.value|default:'' }}">
+              <label class="form-label" for="{{ form.additional_business_2_type.id_for_label }}">Business 2</label>
+              <input class="form-control" type="text" id="{{ form.additional_business_2_type.id_for_label }}" name="{{ form.additional_business_2_type.html_name }}" value="{{ form.additional_business_2_type.value|default:'' }}" placeholder="Type of business">
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.additional_business_2_name.id_for_label }}">Business 2 name</label>
+              <label class="form-label" for="{{ form.additional_business_2_name.id_for_label }}">Name</label>
               <input class="form-control" type="text" id="{{ form.additional_business_2_name.id_for_label }}" name="{{ form.additional_business_2_name.html_name }}" value="{{ form.additional_business_2_name.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label" for="{{ form.additional_business_2_address.id_for_label }}">Business 2 address</label>
+              <label class="form-label" for="{{ form.additional_business_2_address.id_for_label }}">Address</label>
               <input class="form-control" type="text" id="{{ form.additional_business_2_address.id_for_label }}" name="{{ form.additional_business_2_address.html_name }}" value="{{ form.additional_business_2_address.value|default:'' }}">
             </div>
           </div>
@@ -1104,7 +1040,7 @@
   var signaturePads = {};
   var restorePhotoFromDraft = null;
   var formIsBound = {% if form.is_bound %}true{% else %}false{% endif %};
-  var DRAFT_KEY = 'officer_kap_application_draft_v1';
+  var DRAFT_KEY = 'officer_kap_application_draft_v2';
   var restoredFromDraft = false;
   var draftSaveTimer = null;
   var draftEnabled = !isEdit;
@@ -1659,7 +1595,6 @@
   var autofillToken = 0;
   var radioFields = {
     borrower_dwelling_ownership: true,
-    borrower_citizenship: true,
     borrower_gender: true,
     borrower_civil_status: true,
     business_ownership: true,
@@ -1695,7 +1630,7 @@
       if (!borrowerSelect || !borrowerSelect.value) {
         hint.textContent = 'Select a member — this is set automatically from their loan history and cannot be edited.';
       } else if (hasHistory) {
-        hint.textContent = 'Set to ' + (label || 'Renew Application') + ' because this member already has loan history. Not editable.';
+        hint.textContent = 'Set to ' + (label || 'Re-New Application') + ' because this member already has loan history. Not editable.';
       } else {
         hint.textContent = 'Set to ' + (label || 'New Application') + ' — first application for this member. Not editable.';
       }

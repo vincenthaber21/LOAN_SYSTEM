@@ -615,15 +615,12 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             "borrower_first_name",
             "borrower_middle_name",
             "borrower_present_address",
-            "borrower_municipality_city",
             "borrower_period_of_staying",
             "borrower_dwelling_ownership",
             "borrower_permanent_address",
-            "borrower_permanent_municipality_city",
             "borrower_tel_mobile",
             "borrower_date_of_birth",
             "borrower_age",
-            "borrower_citizenship",
             "borrower_place_of_birth",
             "borrower_gender",
             "borrower_civil_status",
@@ -631,23 +628,17 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             "borrower_occupation",
             "borrower_id_presented",
             "borrower_contact_network",
-            "borrower_tin_sss",
-            "borrower_email",
-            "borrower_spouse_name",
-            "coborrower_relationship",
+            "borrower_monthly_income",
             "coborrower_surname",
             "coborrower_first_name",
             "coborrower_middle_name",
             "coborrower_present_address",
-            "coborrower_municipality_city",
             "coborrower_period_of_staying",
             "coborrower_dwelling_ownership",
             "coborrower_permanent_address",
-            "coborrower_permanent_municipality_city",
             "coborrower_tel_mobile",
             "coborrower_date_of_birth",
             "coborrower_age",
-            "coborrower_citizenship",
             "coborrower_place_of_birth",
             "coborrower_gender",
             "coborrower_civil_status",
@@ -655,9 +646,7 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             "coborrower_occupation",
             "coborrower_id_presented",
             "coborrower_contact_network",
-            "coborrower_tin_sss",
-            "coborrower_email",
-            "coborrower_spouse_name",
+            "coborrower_monthly_income",
             "primary_business",
             "business_name",
             "business_ownership",
@@ -666,8 +655,6 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             "reg_barangay",
             "reg_mayor",
             "reg_bir",
-            "reg_others",
-            "reg_others_text",
             "years_in_operation",
             "persons_employed",
             "additional_business_1_type",
@@ -684,7 +671,7 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             "coborrower_signed_place",
         )
         widgets = {
-            "purpose": forms.TextInput(attrs={"placeholder": "Specify if Others"}),
+            "purpose": forms.HiddenInput,
             "amount_requested": forms.NumberInput(attrs={"step": "100", "min": "1000"}),
             "term_months": forms.NumberInput(attrs={"min": "1", "max": "60"}),
             "application_type": forms.RadioSelect,
@@ -692,20 +679,29 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             "payment_frequency": forms.RadioSelect,
             "borrower_dwelling_ownership": forms.RadioSelect,
             "coborrower_dwelling_ownership": forms.RadioSelect,
-            "borrower_citizenship": forms.RadioSelect,
-            "coborrower_citizenship": forms.RadioSelect,
             "borrower_gender": forms.RadioSelect,
             "coborrower_gender": forms.RadioSelect,
             "borrower_civil_status": forms.RadioSelect,
             "coborrower_civil_status": forms.RadioSelect,
-            "coborrower_relationship": forms.RadioSelect,
             "business_ownership": forms.RadioSelect,
             "borrower_date_of_birth": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
             "coborrower_date_of_birth": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
             "borrower_signed_date": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
             "coborrower_signed_date": forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
-            "borrower_present_address": forms.TextInput(attrs={"placeholder": "House #, Street, Subd., Brgy."}),
-            "coborrower_present_address": forms.TextInput(attrs={"placeholder": "House #, Street, Subd., Brgy."}),
+            "borrower_present_address": forms.TextInput(
+                attrs={"placeholder": "House #, Street, Subd., Brgy., Municipality, Province"}
+            ),
+            "coborrower_present_address": forms.TextInput(
+                attrs={"placeholder": "House #, Street, Subd., Brgy., Municipality, Province"}
+            ),
+            "borrower_permanent_address": forms.TextInput(
+                attrs={"placeholder": "House #, Street, Subd., Brgy., Municipality, Province"}
+            ),
+            "coborrower_permanent_address": forms.TextInput(
+                attrs={"placeholder": "House #, Street, Subd., Brgy., Municipality, Province"}
+            ),
+            "borrower_monthly_income": forms.NumberInput(attrs={"step": "0.01", "min": "0", "placeholder": "0.00"}),
+            "coborrower_monthly_income": forms.NumberInput(attrs={"step": "0.01", "min": "0", "placeholder": "0.00"}),
             "borrower_photo": forms.ClearableFileInput(attrs={"accept": "image/*"}),
             "coborrower_photo": forms.ClearableFileInput(attrs={"accept": "image/*"}),
         }
@@ -730,6 +726,19 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         self.fields["borrower_first_name"].required = True
         self.fields["borrower_present_address"].required = True
         self.fields["borrower_tel_mobile"].required = True
+        self.fields["borrower_tel_mobile"].label = "Contact Number"
+        self.fields["coborrower_tel_mobile"].label = "Contact Number"
+        self.fields["payment_frequency"].choices = [
+            c
+            for c in LoanApplication.PaymentFrequency.choices
+            if c[0]
+            in {
+                LoanApplication.PaymentFrequency.DAILY,
+                LoanApplication.PaymentFrequency.WEEKLY,
+                LoanApplication.PaymentFrequency.BIWEEKLY,
+            }
+        ]
+        self.fields["purpose"].required = False
         exclude_pk = self.instance.pk or None
         borrower = self.instance.borrower if exclude_pk else None
         if self.is_bound:
@@ -745,6 +754,8 @@ class OfficerLoanApplicationForm(forms.ModelForm):
         if borrower:
             computed_type = application_type_for_member(borrower, exclude_pk=exclude_pk)
             self.fields["application_type"].initial = computed_type
+            if not self.instance.pk and not self.is_bound and borrower.monthly_income is not None:
+                self.fields["borrower_monthly_income"].initial = borrower.monthly_income
             if self.is_bound:
                 data = self.data.copy()
                 data["application_type"] = computed_type
@@ -753,6 +764,8 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             self.fields["applied_on"].initial = timezone.localdate()
             self.fields["application_type"].initial = self.fields["application_type"].initial or LoanApplication.ApplicationType.NEW
             self.fields["payment_frequency"].initial = LoanApplication.PaymentFrequency.WEEKLY
+            if borrower and borrower.monthly_income is not None:
+                self.fields["borrower_monthly_income"].initial = borrower.monthly_income
         date_fields = (
             "borrower_date_of_birth",
             "coborrower_date_of_birth",
@@ -769,19 +782,15 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             "payment_frequency",
             "borrower_dwelling_ownership",
             "coborrower_dwelling_ownership",
-            "borrower_citizenship",
-            "coborrower_citizenship",
             "borrower_gender",
             "coborrower_gender",
             "borrower_civil_status",
             "coborrower_civil_status",
-            "coborrower_relationship",
             "business_ownership",
             "reg_dti",
             "reg_barangay",
             "reg_mayor",
             "reg_bir",
-            "reg_others",
         ):
             self.fields[name].widget.attrs.pop("class", None)
             if name.startswith("reg_"):
@@ -846,12 +855,12 @@ class OfficerLoanApplicationForm(forms.ModelForm):
                 "term_months",
                 f"Choose a term between {product.min_term_months} and {product.max_term_months} months.",
             )
-        if loan_purpose == LoanApplication.LoanPurpose.OTHERS and not purpose:
-            self.add_error("purpose", "Please specify the loan purpose.")
-        elif loan_purpose and not purpose:
+        if loan_purpose and not purpose:
             cleaned["purpose"] = dict(LoanApplication.LoanPurpose.choices).get(loan_purpose, loan_purpose)
-        if cleaned.get("reg_others") and not (cleaned.get("reg_others_text") or "").strip():
-            self.add_error("reg_others_text", "Describe the other registration type.")
+        if cleaned.get("borrower_tel_mobile") and not cleaned.get("borrower_contact_network"):
+            cleaned["borrower_contact_network"] = cleaned["borrower_tel_mobile"]
+        if cleaned.get("coborrower_tel_mobile") and not cleaned.get("coborrower_contact_network"):
+            cleaned["coborrower_contact_network"] = cleaned["coborrower_tel_mobile"]
         borrower_sig = decode_signature_data_url(cleaned.get("borrower_signature_data"), "borrower-sig")
         coborrower_sig = decode_signature_data_url(cleaned.get("coborrower_signature_data"), "coborrower-sig")
         cleaned["_borrower_signature_file"] = borrower_sig
@@ -887,9 +896,12 @@ class OfficerLoanApplicationForm(forms.ModelForm):
             instance.borrower_signature.save(borrower_sig.name, borrower_sig, save=False)
         if coborrower_sig:
             instance.coborrower_signature.save(coborrower_sig.name, coborrower_sig, save=False)
+        income = self.cleaned_data.get("borrower_monthly_income")
         if commit:
             instance.save()
             self.save_m2m()
+            if income is not None and instance.borrower_id:
+                User.objects.filter(pk=instance.borrower_id).update(monthly_income=income)
         return instance
 
 
@@ -916,6 +928,19 @@ class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
         self.fields["borrower_first_name"].required = True
         self.fields["borrower_present_address"].required = True
         self.fields["borrower_tel_mobile"].required = True
+        self.fields["borrower_tel_mobile"].label = "Contact Number"
+        self.fields["coborrower_tel_mobile"].label = "Contact Number"
+        self.fields["payment_frequency"].choices = [
+            c
+            for c in LoanApplication.PaymentFrequency.choices
+            if c[0]
+            in {
+                LoanApplication.PaymentFrequency.DAILY,
+                LoanApplication.PaymentFrequency.WEEKLY,
+                LoanApplication.PaymentFrequency.BIWEEKLY,
+            }
+        ]
+        self.fields["purpose"].required = False
         self.fields["loan_product"].queryset = available_loan_products_for_borrower(borrower)
         self.fields["loan_product"].empty_label = "Select product…"
         today = timezone.localdate()
@@ -927,6 +952,8 @@ class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
         if borrower:
             computed_type = application_type_for_member(borrower)
             self.fields["application_type"].initial = computed_type
+            if not self.instance.pk and not self.is_bound and borrower.monthly_income is not None:
+                self.fields["borrower_monthly_income"].initial = borrower.monthly_income
             if self.is_bound:
                 data = self.data.copy()
                 data["application_type"] = computed_type
@@ -936,6 +963,8 @@ class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
                 self.fields["application_type"].initial or LoanApplication.ApplicationType.NEW
             )
             self.fields["payment_frequency"].initial = LoanApplication.PaymentFrequency.WEEKLY
+            if borrower and borrower.monthly_income is not None:
+                self.fields["borrower_monthly_income"].initial = borrower.monthly_income
         date_fields = (
             "borrower_date_of_birth",
             "coborrower_date_of_birth",
@@ -952,19 +981,15 @@ class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
             "payment_frequency",
             "borrower_dwelling_ownership",
             "coborrower_dwelling_ownership",
-            "borrower_citizenship",
-            "coborrower_citizenship",
             "borrower_gender",
             "coborrower_gender",
             "borrower_civil_status",
             "coborrower_civil_status",
-            "coborrower_relationship",
             "business_ownership",
             "reg_dti",
             "reg_barangay",
             "reg_mayor",
             "reg_bir",
-            "reg_others",
         ):
             self.fields[name].widget.attrs.pop("class", None)
             if name.startswith("reg_"):
@@ -994,12 +1019,12 @@ class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
                 "term_months",
                 f"Choose a term between {product.min_term_months} and {product.max_term_months} months.",
             )
-        if loan_purpose == LoanApplication.LoanPurpose.OTHERS and not purpose:
-            self.add_error("purpose", "Please specify the loan purpose.")
-        elif loan_purpose and not purpose:
+        if loan_purpose and not purpose:
             cleaned["purpose"] = dict(LoanApplication.LoanPurpose.choices).get(loan_purpose, loan_purpose)
-        if cleaned.get("reg_others") and not (cleaned.get("reg_others_text") or "").strip():
-            self.add_error("reg_others_text", "Describe the other registration type.")
+        if cleaned.get("borrower_tel_mobile") and not cleaned.get("borrower_contact_network"):
+            cleaned["borrower_contact_network"] = cleaned["borrower_tel_mobile"]
+        if cleaned.get("coborrower_tel_mobile") and not cleaned.get("coborrower_contact_network"):
+            cleaned["coborrower_contact_network"] = cleaned["coborrower_tel_mobile"]
         borrower_sig = decode_signature_data_url(cleaned.get("borrower_signature_data"), "borrower-sig")
         coborrower_sig = decode_signature_data_url(cleaned.get("coborrower_signature_data"), "coborrower-sig")
         cleaned["_borrower_signature_file"] = borrower_sig
@@ -1036,9 +1061,12 @@ class BorrowerLoanApplicationForm(OfficerLoanApplicationForm):
         instance = super().save(commit=False)
         if self.fixed_borrower:
             instance.borrower = self.fixed_borrower
+        income = self.cleaned_data.get("borrower_monthly_income")
         if commit:
             instance.save()
             self.save_m2m()
+            if income is not None and instance.borrower_id:
+                User.objects.filter(pk=instance.borrower_id).update(monthly_income=income)
         return instance
 
 

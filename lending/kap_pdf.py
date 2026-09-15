@@ -1,7 +1,7 @@
-"""Fill the original KAP Microfinance loan application form (MPU Form 2015-002 B).
+"""Fill the KAP Microfinance loan application form (MFU Form 2015-002-B, Revised 001).
 
-The original form (converted from the official .docx) is stored as a one-page
-PDF template.  Application values, tick marks, ID photos and digital
+The official form (converted from the KAP-supplied .docx) is stored as a
+one-page PDF template.  Application values, tick marks, ID photos and digital
 signatures are drawn on a transparent overlay that is merged onto the
 template, so the printed hard copy is the genuine KAP form.
 """
@@ -64,7 +64,7 @@ def _file_path(field):
 
 
 def _transparent_signature(path):
-    """Return an in-memory RGBA copy of a signature image: white knocked out, strokes in ink colour."""
+    """Return an in-memory RGBA copy of a signature: white knocked out, cropped to the ink."""
     from PIL import Image, ImageFilter
 
     with Image.open(path) as im:
@@ -74,10 +74,20 @@ def _transparent_signature(path):
     alpha = rgba.getchannel("A")
     mask = Image.eval(grey, lambda v: 255 - v if v < 225 else 0)  # darker -> more opaque
     mask = Image.composite(mask, Image.new("L", mask.size, 0), alpha.point(lambda a: 255 if a > 0 else 0))
-    mask = mask.filter(ImageFilter.MaxFilter(3))  # thicken thin pen strokes slightly
+    mask = mask.filter(ImageFilter.MaxFilter(3))  # slight thicken so thin pad strokes still read
     r, g, b = (int(INK.red * 255), int(INK.green * 255), int(INK.blue * 255))
     out = Image.new("RGBA", rgba.size, (r, g, b, 0))
     out.putalpha(mask)
+    bbox = mask.getbbox()
+    if bbox:
+        pad_x = max(4, int((bbox[2] - bbox[0]) * 0.06))
+        pad_y = max(4, int((bbox[3] - bbox[1]) * 0.12))
+        out = out.crop((
+            max(0, bbox[0] - pad_x),
+            max(0, bbox[1] - pad_y),
+            min(out.width, bbox[2] + pad_x),
+            min(out.height, bbox[3] + pad_y),
+        ))
     buf = io.BytesIO()
     out.save(buf, format="PNG")
     buf.seek(0)
@@ -156,165 +166,152 @@ class _Overlay:
         return self.buffer.getvalue()
 
 
+# Co-borrower column is shifted right by this many points relative to the borrower column.
+_COL_DX = 292.7
+
+
 def _draw_person(ov: _Overlay, app, prefix: str, left: bool):
     """Fill one BORROWER / CO-BORROWER column. `prefix` is 'borrower' or 'coborrower'."""
 
     def g(name):
         return getattr(app, f"{prefix}_{name}", None)
 
-    dx = 0 if left else 288  # co-borrower column is shifted right by 288pt
+    def display(name):
+        getter = getattr(app, f"get_{prefix}_{name}_display", None)
+        return getter() if getter else ""
 
-    ov.text(22 + dx, 317, _surname_first(g("surname"), g("first_name"), g("middle_name")), width=276)
-    ov.text(22 + dx, 338, g("present_address"), width=276)
-    ov.text(22 + dx, 360, g("municipality_city"), width=206)
-    ov.text(236 + dx, 360, g("period_of_staying"), width=63)
+    dx = 0 if left else _COL_DX
 
-    dwelling = {"owned": 109, "rented": 152.5, "mortgaged": 196, "used_free": 252}
-    if g("dwelling_ownership") in dwelling:
-        ov.tick(dwelling[g("dwelling_ownership")] + dx, 374.5)
+    ov.text(18.8 + dx, 351, _surname_first(g("surname"), g("first_name"), g("middle_name")), width=283)
+    ov.text(18.8 + dx, 379, g("present_address"), width=283)
 
-    ov.text(22 + dx, 401, g("permanent_address"), width=76)
-    ov.text(104 + dx, 401, g("permanent_municipality_city"), width=112)
-    ov.text(222 + dx, 401, g("tel_mobile"), width=76)
+    ov.text(89 + dx, 393, g("period_of_staying"), width=29, size=6.5)
+    ov.text(174 + dx, 393, display("dwelling_ownership"), width=129, size=6.5)
 
-    ov.text(85 + dx, 428, _date(g("date_of_birth")), width=92)
-    ov.text(184 + dx, 428, g("age"), width=32)
-    citizenship = {"filipino": 228, "others": 268}
-    if g("citizenship") in citizenship:
-        ov.tick(citizenship[g("citizenship")] + dx, 427.5)
+    ov.text(18.8 + dx, 419, g("permanent_address"), width=283)
 
-    ov.text(85 + dx, 452, g("place_of_birth"), width=92)
-    gender = {"male": 228, "female": 265}
-    if g("gender") in gender:
-        ov.tick(gender[g("gender")] + dx, 449.5)
+    ov.text(74 + dx, 433, _date(g("date_of_birth")), width=44, size=6.5)
+    ov.text(184 + dx, 433, g("place_of_birth"), width=119, size=6.5)
 
-    civil = {"single": 90.5, "married": 129, "widowed": 174.5, "separated": 226}
-    if g("civil_status") in civil:
-        ov.tick(civil[g("civil_status")] + dx, 466.5)
+    ov.text(73 + dx, 447, g("id_presented"), width=45, size=6.5)
+    ov.text(145 + dx, 447, g("age"), width=50, size=6.5)
+    ov.text(238 + dx, 447, display("gender"), width=65, size=6.5)
 
-    ov.text(70 + dx, 488, g("nationality"), width=90)
-    ov.text(208 + dx, 488, g("occupation"), width=90)
-    ov.text(84 + dx, 502, g("id_presented"), width=214)
-    ov.text(90 + dx, 528, g("spouse_name"), width=208)
+    ov.text(67 + dx, 460, g("nationality"), width=51, size=6.5)
+    ov.text(174 + dx, 460, display("civil_status"), width=21, size=5, min_size=3.5)
+    ov.text(252 + dx, 460, g("occupation"), width=51, size=6.5)
+
+    ov.text(87 + dx, 474, _money(g("monthly_income")), width=31, size=5.5, min_size=4)
+    ov.text(195 + dx, 474, g("tel_mobile"), width=108, size=6.5)
 
 
 def _build_overlay(app) -> bytes:
     ov = _Overlay()
 
     # ---- Header ----
-    ov.text(232, 76, app.branch_name, width=72)
-    ov.text(352, 76, app.form_ref_no or app.reference, width=78)
-    ov.text(515, 76, _date(app.applied_on), width=62)
+    ov.text(266, 71, app.branch_name, width=120)
+    ov.text(450, 71, app.form_ref_no or app.reference, width=119)
 
-    # ---- Left column: date, application type, proposed plan payment ----
-    ov.text(118, 109, _date(app.applied_on), width=68)
+    # ---- Left column: date, application type, proposed plan payment, amount, loan purpose ----
+    ov.text(124, 139, _date(app.applied_on), width=92)
     if app.application_type == "new":
-        ov.tick(59, 142.5)
+        ov.tick(51.9, 167.6)
     elif app.application_type == "renew":
-        ov.tick(59, 154.5)
+        ov.tick(51.9, 181.4)
 
-    if app.payment_frequency == "daily":
-        ov.tick(72, 195)
-    elif app.payment_frequency == "weekly":
-        ov.tick(127, 195)
-    elif app.payment_frequency:
-        # The form only prints Daily / Weekly; write other schedules beside them.
-        ov.text(163, 198, app.get_payment_frequency_display(), width=26, size=6.5)
-    ov.text(120, 209, _money(app.amount_requested), width=68)
+    payment = {"daily": (41.15, 216.5), "weekly": (94.2, 216.2), "biweekly": (157.8, 216.2)}
+    if app.payment_frequency in payment:
+        ov.tick(*payment[app.payment_frequency])
+    ov.text(80, 241, _money(app.amount_requested), width=130)
 
-    purpose = {"additional_capital": 234.5, "existing_improvement": 247, "others": 261}
+    purpose = {"general": (51.9, 267.9), "business": (52.2, 283.3), "agricultural": (51.9, 298.9)}
     if app.loan_purpose in purpose:
-        ov.tick(37, purpose[app.loan_purpose])
-    if app.loan_purpose == "others" or (not app.loan_purpose and app.purpose):
-        ov.text(76, 263, app.purpose, width=100)
+        ov.tick(*purpose[app.loan_purpose])
 
     # ---- 2x2 pictures and relationship ----
-    ov.image(_file_path(app.borrower_photo), 230.25, 113.84, 378.59, 257.79)
-    ov.image(_file_path(app.coborrower_photo), 416.71, 113.84, 565.05, 257.79)
-    if app.coborrower_relationship == "spouse":
-        ov.tick(398, 272)
-    elif app.coborrower_relationship == "others":
-        ov.tick(454, 272)
+    ov.image(_file_path(app.borrower_photo), 250.8, 127.8, 405.8, 282.8)
+    ov.image(_file_path(app.coborrower_photo), 429.0, 127.8, 584.0, 282.8)
+    ov.text(393, 301, app.get_coborrower_relationship_display(), width=163, size=6.5)
 
     # ---- Borrower / Co-borrower ----
     _draw_person(ov, app, "borrower", left=True)
     _draw_person(ov, app, "coborrower", left=False)
 
     # ---- Enterprise data ----
-    ov.text(104, 568, app.primary_business, width=195)
-    ov.text(362, 568, app.business_name, width=228)
-    ownership = {"owned": 109, "rented": 149, "mortgaged": 190, "used_free": 242}
+    ov.text(93, 509, app.primary_business, width=255)
+    ov.text(423, 509, app.business_name, width=173)
+
+    ownership = {
+        "owned": (117.3, 517.6),
+        "rented": (159.1, 517.1),
+        "mortgaged": (203.8, 517.5),
+        "used_free": (261.9, 516.9),
+    }
     if app.business_ownership in ownership:
-        ov.tick(ownership[app.business_ownership], 578.5)
-    ov.text(338, 585, app.business_address, width=252)
+        ov.tick(*ownership[app.business_ownership])
+    ov.text(430, 522, app.business_address, width=166, size=6.5)
 
     registrations = (
-        (app.reg_dti, 109),
-        (app.reg_barangay, 135),
-        (app.reg_mayor, 229),
-        (app.reg_bir, 285),
-        (app.reg_others, 311),
+        (app.reg_dti, (104.75, 531.45)),
+        (app.reg_barangay, (134.8, 531.45)),
+        (app.reg_mayor, (251.15, 531.45)),
+        (app.reg_bir, (324.4, 531.45)),
     )
-    for flag, cx in registrations:
+    for flag, center in registrations:
         if flag:
-            ov.tick(cx, 597)
-    ov.text(344, 599, app.reg_others_text, width=40, size=6.5)
-    ov.text(466, 599, app.years_in_operation, width=40)
-    ov.text(514, 606.5, app.persons_employed, width=74, size=5.5)
+            ov.tick(*center)
+    ov.text(432, 535, app.years_in_operation, width=38, size=5.5, min_size=4)
+    ov.text(574, 535, app.persons_employed, width=22, size=5, min_size=3.5)
 
-    for y, n in ((619, 1), (636, 2)):
-        ov.text(104, y, getattr(app, f"additional_business_{n}_type"), width=136)
-        ov.text(272, y, getattr(app, f"additional_business_{n}_name"), width=126)
-        ov.text(435, y, getattr(app, f"additional_business_{n}_address"), width=155)
+    for y, n in ((549, 1), (562, 2)):
+        ov.text(68, y, getattr(app, f"additional_business_{n}_type"), width=118, size=6.5)
+        ov.text(223, y, getattr(app, f"additional_business_{n}_name"), width=125, size=6.5)
+        ov.text(393, y, getattr(app, f"additional_business_{n}_address"), width=203, size=6.5)
 
     # ---- Character references ----
     refs = list(app.character_references.all().order_by("sort_order", "pk")[:2])
-    for y, ref in zip((687, 704), refs):
-        ov.text(49, y, ref.name, width=108)
-        ov.text(200, y, ref.address, width=138)
-        ov.text(394, y, ref.relationship, width=90)
-        ov.text(533, y, ref.contact_number, width=57)
+    for y, ref in zip((611, 627), refs):
+        ov.text(47, y, ref.name, width=116, size=6.5)
+        ov.text(208, y, ref.address, width=126, size=6.5)
+        ov.text(396, y, ref.relationship, width=78, size=6.5)
+        ov.text(524, y, ref.contact_number, width=71, size=6.5)
 
     # ---- Signatures over printed names ----
-    for cx, x_dp, prefix in ((153.5, 72, "borrower"), (457, 370, "coborrower")):
+    for cx, prefix in ((170.65, "borrower"), (440.55, "coborrower")):
         def g(name, _prefix=prefix):
             return getattr(app, f"{_prefix}_{name}", None)
 
-        ov.image(_file_path(g("signature")), cx - 80, 764, cx + 80, 793, pad=0, knockout_white=True)
         printed = g("signed_name") or _full_name(g("first_name"), g("middle_name"), g("surname"))
-        ov.text(cx, 794, printed, width=150, bold=True, align="center")
+        # Signature above the line; printed name on the line (drawn last so it stays clear).
+        ov.image(_file_path(g("signature")), cx - 85, 748, cx + 85, 772, pad=0, knockout_white=True)
+        ov.text(cx, 788, printed, width=200, bold=True, align="center")
         parts = []
         if g("signed_date"):
             parts.append(f"DATE: {_date(g('signed_date'))}")
         if g("signed_place"):
             parts.append(f"PLACE: {_text(g('signed_place'))}")
-        ov.text(x_dp, 813, "   ".join(parts), width=165, size=6.5)
+        ov.text(cx, 814, "   ".join(parts), width=220, size=6.5, align="center")
 
     # ---- Loan recommendation / approval (office use) ----
-    ov.text(78, 841, _money(app.recommended_loan_amount), width=48, size=6.5)
-    ov.text(178, 841, app.recommended_loan_period, width=34, size=6.5)
-    ov.text(30, 869, app.recommended_by_name, width=96, size=6.5)
-    ov.text(157, 862, _date(app.recommended_by_date), width=54, size=6.5)
-    ov.text(30, 892, app.validated_by_name, width=96, size=6.5)
-    ov.text(157, 885, _date(app.validated_by_date), width=54, size=6.5)
+    ov.text(75, 847, _money(app.recommended_loan_amount), width=110, size=6.5)
+    ov.text(245, 847, app.recommended_loan_period, width=43, size=6.5)
+    ov.text(93, 862, app.recommended_by_name, width=92, size=6.5)
+    ov.text(218, 862, _date(app.recommended_by_date), width=70, size=6.5)
+    ov.text(72, 884, app.validated_by_name, width=113, size=6.5)
+    ov.text(218, 884, _date(app.validated_by_date), width=70, size=6.5)
 
-    ov.text(264, 838, _money(app.recommended_loan_amount), width=54, size=6.5)
-    ov.text(286, 850, _money(app.hold_out_amount), width=32, size=6.5)
-    insurance = {"life_3yr": 879, "pog": 889, "none": 899}
-    if app.insurance_proposed in insurance:
-        ov.tick(229, insurance[app.insurance_proposed])
+    ov.text(319, 883, app.branch_manager_name, width=83, size=6.5)
+    ov.text(414, 883, _date(app.branch_manager_date), width=65, size=6.5)
 
-    ov.text(344, 875, app.branch_manager_name, width=100, size=6.5)
-    ov.text(452, 875, _date(app.branch_manager_date), width=52, size=6.5)
-    decision = {"approved": 856, "disapproved": 871, "hold": 885}
+    decision = {"approved": (512.8, 842.3), "disapproved": (513.8, 862.0), "hold": (513.0, 884.1)}
     if app.office_decision in decision:
-        ov.tick(527, decision[app.office_decision])
+        ov.tick(*decision[app.office_decision])
 
     return ov.finish()
 
 
 def build_kap_application_pdf(application) -> bytes:
-    """Return the original KAP form filled with this application's data (single page)."""
+    """Return the official KAP form filled with this application's data (single page)."""
     template = PdfReader(str(_template_path()))
     page = template.pages[0]
     overlay = PdfReader(io.BytesIO(_build_overlay(application))).pages[0]

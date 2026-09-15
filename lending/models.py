@@ -234,17 +234,17 @@ class LoanApplication(models.Model):
     class PaymentFrequency(models.TextChoices):
         DAILY = "daily", "Daily"
         WEEKLY = "weekly", "Weekly"
-        BIWEEKLY = "biweekly", "Biweekly"
+        BIWEEKLY = "biweekly", "Bi-Weekly"
         MONTHLY = "monthly", "Monthly"
 
     class ApplicationType(models.TextChoices):
         NEW = "new", "New Application"
-        RENEW = "renew", "Renew Application"
+        RENEW = "renew", "Re-New Application"
 
     class LoanPurpose(models.TextChoices):
-        ADDITIONAL_CAPITAL = "additional_capital", "Additional Capital / Business Expansion"
-        EXISTING_IMPROVEMENT = "existing_improvement", "Existing Improvement / Repair"
-        OTHERS = "others", "Others"
+        GENERAL = "general", "General Loan"
+        BUSINESS = "business", "Business Loan"
+        AGRICULTURAL = "agricultural", "Agricultural Loan"
 
     class DwellingOwnership(models.TextChoices):
         OWNED = "owned", "Owned"
@@ -351,6 +351,9 @@ class LoanApplication(models.Model):
     borrower_occupation = models.CharField(max_length=120, blank=True)
     borrower_id_presented = models.CharField("I.D. Presented", max_length=120, blank=True)
     borrower_contact_network = models.CharField("Contact # / Network", max_length=80, blank=True)
+    borrower_monthly_income = models.DecimalField(
+        "Monthly income", max_digits=12, decimal_places=2, null=True, blank=True
+    )
     borrower_tin_sss = models.CharField("TIN or SSS #", max_length=60, blank=True)
     borrower_email = models.EmailField(blank=True)
     borrower_spouse_name = models.CharField("Name of Spouse (if married)", max_length=160, blank=True)
@@ -385,6 +388,9 @@ class LoanApplication(models.Model):
     coborrower_occupation = models.CharField(max_length=120, blank=True)
     coborrower_id_presented = models.CharField("I.D. Presented", max_length=120, blank=True)
     coborrower_contact_network = models.CharField("Contact # / Network", max_length=80, blank=True)
+    coborrower_monthly_income = models.DecimalField(
+        "Monthly income", max_digits=12, decimal_places=2, null=True, blank=True
+    )
     coborrower_tin_sss = models.CharField("TIN or SSS #", max_length=60, blank=True)
     coborrower_email = models.EmailField(blank=True)
     coborrower_spouse_name = models.CharField("Name of Spouse (if married)", max_length=160, blank=True)
@@ -452,10 +458,7 @@ class LoanApplication(models.Model):
 
     def save(self, *args, **kwargs):
         if not (self.purpose or "").strip() and self.loan_purpose:
-            if self.loan_purpose == self.LoanPurpose.OTHERS:
-                self.purpose = self.purpose or "Others"
-            else:
-                self.purpose = self.get_loan_purpose_display()
+            self.purpose = self.get_loan_purpose_display()
         if not (self.purpose or "").strip():
             self.purpose = "KAP loan application"
         super().save(*args, **kwargs)
@@ -505,6 +508,8 @@ class LoanApplication(models.Model):
 
     @property
     def monthly_income(self):
+        if self.borrower_monthly_income is not None:
+            return self.borrower_monthly_income
         return self.borrower.monthly_income or Decimal("0.00")
 
     @property
