@@ -1531,11 +1531,13 @@ def disbursement_day_error_message(*, today=None, disbursed_date=None, now=None)
 
 def ensure_disbursement_allowed(disbursed_date=None, *, today=None, now=None):
     """Raise DisbursementDayError unless the weekday/time condition allows the release."""
-    if not is_disbursement_condition_enabled():
-        return
     now = now or timezone.localtime()
     today = today or timezone.localdate()
     release_date = disbursed_date or today
+    if release_date > today:
+        raise DisbursementDayError("Disbursement date cannot be in the future.")
+    if not is_disbursement_condition_enabled():
+        return
     message = disbursement_day_error_message(today=today, disbursed_date=release_date, now=now)
     if message:
         raise DisbursementDayError(message)

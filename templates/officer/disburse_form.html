@@ -74,7 +74,7 @@
           </div>
           <div class="mb-3">
             <label class="form-label" for="disbursed_date">Disbursement date</label>
-            <input class="form-control" id="disbursed_date" name="disbursed_date" type="date" value="{{ form_data.disbursed_date|default:default_disbursed_date }}" {% if not disbursement_allowed_today %}readonly{% endif %}>
+            <input class="form-control" id="disbursed_date" name="disbursed_date" type="date" value="{{ form_data.disbursed_date|default:default_disbursed_date }}"{% if disbursement_allowed_today %} max="{{ max_disbursed_date }}"{% endif %} {% if not disbursement_allowed_today %}readonly{% endif %}>
             <div class="form-text">{% if disbursement_condition_enabled %}Must be a {{ disbursement_day_label }}, and releases unlock at {{ disbursement_start_time_label }}. {% endif %}Interest and the first payment due date are calculated from this date.</div>
           </div>
           <div class="mb-3">

@@ -2404,7 +2404,10 @@ def _disbursement_day_context():
         "next_disbursement_date": next_day,
         "next_disbursement_date_label": next_day.strftime("%A, %b %d, %Y"),
         "disbursement_day_message": disbursement_day_error_message(today=today, now=now) if condition_on and not allowed else "",
-        "default_disbursed_date": (today if is_release_day else next_day).isoformat(),
+        # When release is allowed today, default to today — never a future weekday.
+        # Only show the next release day when the officer cannot release yet.
+        "default_disbursed_date": (today if allowed else next_day).isoformat(),
+        "max_disbursed_date": today.isoformat(),
     }
 
 
@@ -2497,6 +2500,14 @@ def disburse(request, disbursement_id):
         except DisbursementDayError as exc:
             messages.error(request, str(exc))
             return render(request, "officer/disburse_form.html", form_context)
+        except Exception as exc:
+            from mutual_aid.services import MutualAidError
+            from savings.services import SavingsError
+
+            if isinstance(exc, (SavingsError, MutualAidError)):
+                messages.error(request, str(exc))
+                return render(request, "officer/disburse_form.html", form_context)
+            raise
         membership_deposit = next(
             (item["amount"] for item in deductions["line_items"] if item["key"] == "membership_savings"),
             Decimal("0.00"),
