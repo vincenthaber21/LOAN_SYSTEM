@@ -49,6 +49,22 @@
     margin: 0;
     cursor: pointer;
   }
+  .kap-choice-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    margin-bottom: .15rem;
+  }
+  .kap-choice-head .form-label {
+    margin-bottom: 0;
+  }
+  .kap-undo-choice {
+    padding: .1rem .45rem;
+    font-size: .72rem;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
   .kap-section-title {
     font-size: .72rem;
     letter-spacing: .08em;
@@ -523,8 +539,11 @@
               <input class="form-control {% if form.borrower_period_of_staying.errors %}is-invalid{% endif %}" type="text" id="{{ form.borrower_period_of_staying.id_for_label }}" name="{{ form.borrower_period_of_staying.html_name }}" value="{{ form.borrower_period_of_staying.value|default:'' }}">
             </div>
             <div class="col-md-6">
-              <label class="form-label d-block">Ownership</label>
-              <div class="kap-choice-list">
+              <div class="kap-choice-head">
+                <label class="form-label d-block">Ownership</label>
+                <button type="button" class="btn btn-outline-secondary kap-undo-choice" data-undo-radios="{{ form.borrower_dwelling_ownership.html_name }}" hidden>Undo</button>
+              </div>
+              <div class="kap-choice-list" data-choice-group="{{ form.borrower_dwelling_ownership.html_name }}">
                 {% for radio in form.borrower_dwelling_ownership %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
                 {% endfor %}
@@ -564,8 +583,11 @@
               <input class="form-control" type="text" id="{{ form.borrower_nationality.id_for_label }}" name="{{ form.borrower_nationality.html_name }}" value="{{ form.borrower_nationality.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label d-block">Civil status</label>
-              <div class="kap-choice-list">
+              <div class="kap-choice-head">
+                <label class="form-label d-block">Civil status</label>
+                <button type="button" class="btn btn-outline-secondary kap-undo-choice" data-undo-radios="{{ form.borrower_civil_status.html_name }}" hidden>Undo</button>
+              </div>
+              <div class="kap-choice-list" data-choice-group="{{ form.borrower_civil_status.html_name }}">
                 {% for radio in form.borrower_civil_status %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
                 {% endfor %}
@@ -621,8 +643,11 @@
               <input class="form-control" type="text" id="{{ form.coborrower_period_of_staying.id_for_label }}" name="{{ form.coborrower_period_of_staying.html_name }}" value="{{ form.coborrower_period_of_staying.value|default:'' }}">
             </div>
             <div class="col-md-6">
-              <label class="form-label d-block">Ownership</label>
-              <div class="kap-choice-list">
+              <div class="kap-choice-head">
+                <label class="form-label d-block">Ownership</label>
+                <button type="button" class="btn btn-outline-secondary kap-undo-choice" data-undo-radios="{{ form.coborrower_dwelling_ownership.html_name }}" hidden>Undo</button>
+              </div>
+              <div class="kap-choice-list" data-choice-group="{{ form.coborrower_dwelling_ownership.html_name }}">
                 {% for radio in form.coborrower_dwelling_ownership %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
                 {% endfor %}
@@ -662,8 +687,11 @@
               <input class="form-control" type="text" id="{{ form.coborrower_nationality.id_for_label }}" name="{{ form.coborrower_nationality.html_name }}" value="{{ form.coborrower_nationality.value|default:'' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label d-block">Civil status</label>
-              <div class="kap-choice-list">
+              <div class="kap-choice-head">
+                <label class="form-label d-block">Civil status</label>
+                <button type="button" class="btn btn-outline-secondary kap-undo-choice" data-undo-radios="{{ form.coborrower_civil_status.html_name }}" hidden>Undo</button>
+              </div>
+              <div class="kap-choice-list" data-choice-group="{{ form.coborrower_civil_status.html_name }}">
                 {% for radio in form.coborrower_civil_status %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
                 {% endfor %}
@@ -706,8 +734,11 @@
               <input class="form-control" type="text" id="{{ form.business_name.id_for_label }}" name="{{ form.business_name.html_name }}" value="{{ form.business_name.value|default:'' }}">
             </div>
             <div class="col-md-6">
-              <label class="form-label d-block">Ownership of business</label>
-              <div class="kap-choice-list">
+              <div class="kap-choice-head">
+                <label class="form-label d-block">Ownership of business</label>
+                <button type="button" class="btn btn-outline-secondary kap-undo-choice" data-undo-radios="{{ form.business_ownership.html_name }}" hidden>Undo</button>
+              </div>
+              <div class="kap-choice-list" data-choice-group="{{ form.business_ownership.html_name }}">
                 {% for radio in form.business_ownership %}
                 <label>{{ radio.tag }} {{ radio.choice_label }}</label>
                 {% endfor %}
@@ -1423,6 +1454,46 @@
     });
   });
 
+  (function setupUndoableRadios() {
+    function radiosFor(name) {
+      return Array.prototype.slice.call(document.querySelectorAll('input[type="radio"][name="' + name + '"]'));
+    }
+
+    function syncUndoButton(btn) {
+      var name = btn.getAttribute('data-undo-radios');
+      if (!name) return;
+      var selected = radiosFor(name).some(function (r) { return r.checked; });
+      btn.hidden = !selected;
+    }
+
+    function clearRadios(name) {
+      radiosFor(name).forEach(function (radio) {
+        if (!radio.checked) return;
+        radio.checked = false;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+        radio.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    }
+
+    window.refreshKapUndoRadios = function () {
+      document.querySelectorAll('[data-undo-radios]').forEach(syncUndoButton);
+    };
+
+    document.querySelectorAll('[data-undo-radios]').forEach(function (btn) {
+      var name = btn.getAttribute('data-undo-radios');
+      syncUndoButton(btn);
+      btn.addEventListener('click', function () {
+        clearRadios(name);
+        syncUndoButton(btn);
+        updateAllRequiredFields();
+        if (typeof saveDraftSoon === 'function') saveDraftSoon();
+      });
+      radiosFor(name).forEach(function (radio) {
+        radio.addEventListener('change', function () { syncUndoButton(btn); });
+      });
+    });
+  })();
+
   ['borrowerSignaturePad', 'coborrowerSignaturePad'].forEach(function (canvasId) {
     var canvas = document.getElementById(canvasId);
     var pad = signaturePads[canvasId];
@@ -1914,6 +1985,7 @@
     if (restoredFromDraft) {
       skipNextBorrowerChange = true;
       preferredProductId = productSelect.value;
+      if (typeof window.refreshKapUndoRadios === 'function') window.refreshKapUndoRadios();
     }
   }
 
