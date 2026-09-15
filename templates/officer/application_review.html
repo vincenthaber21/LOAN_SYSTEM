@@ -273,10 +273,13 @@
 </script>
 <script>
 (function () {
+  // After Confirm & create, drop the saved new-application draft so the next applicant starts blank.
   try {
     if (sessionStorage.getItem('kap_draft_clear_pending') === '1') {
+      localStorage.removeItem('officer_kap_application_draft_v2');
       localStorage.removeItem('officer_kap_application_draft_v1');
       sessionStorage.removeItem('kap_draft_clear_pending');
+      sessionStorage.setItem('kap_application_created', '1');
     }
   } catch (err) { /* ignore */ }
 })();

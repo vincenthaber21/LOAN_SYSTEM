@@ -1895,6 +1895,20 @@
   var skipNextBorrowerChange = isEdit;
   var preferredProductId = productSelect.value;
 
+  if (draftEnabled) {
+    try {
+      // After a successful create (or confirm), never restore the previous applicant's draft.
+      if (sessionStorage.getItem('kap_application_created') === '1') {
+        clearDraftStorage();
+        sessionStorage.removeItem('kap_application_created');
+        sessionStorage.removeItem('kap_draft_clear_pending');
+      } else if (sessionStorage.getItem('kap_draft_clear_pending') === '1' && !formIsBound) {
+        clearDraftStorage();
+        sessionStorage.removeItem('kap_draft_clear_pending');
+      }
+    } catch (err) { /* ignore */ }
+  }
+
   if (draftEnabled && !formIsBound) {
     restoredFromDraft = restoreDraft();
     if (restoredFromDraft) {
@@ -1935,8 +1949,8 @@
 
   if (draftEnabled) {
     try {
-      if (sessionStorage.getItem('kap_draft_clear_pending') === '1') {
-        // Returned here after a failed submit — keep the draft and drop the pending flag.
+      if (sessionStorage.getItem('kap_draft_clear_pending') === '1' && formIsBound) {
+        // Server validation failed — drop the pending flag; form values come from the POST.
         sessionStorage.removeItem('kap_draft_clear_pending');
       }
     } catch (err) { /* ignore */ }
@@ -2137,6 +2151,8 @@
     appForm.dataset.confirmed = 'true';
     appForm.dataset.submitting = 'true';
     if (draftEnabled) {
+      // Clear saved draft now so the next /applications/new/ is blank for a new applicant.
+      clearDraftStorage();
       try { sessionStorage.setItem('kap_draft_clear_pending', '1'); } catch (err) { /* ignore */ }
     }
     showCreatingState();
