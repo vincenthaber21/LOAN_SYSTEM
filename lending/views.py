@@ -66,7 +66,7 @@ def _validate_document_uploads(document_forms, request):
             if extension not in DocumentForm.ALLOWED_EXTENSIONS:
                 form.add_error(
                     "file",
-                    f"{uploaded.name}: Upload an image (JPG, PNG, GIF, WEBP), PDF, or Word document (DOC, DOCX).",
+                    f"{uploaded.name}: Upload an image (JPG, JFIF, PNG, GIF, WEBP), PDF, or Word document (DOC, DOCX).",
                 )
                 has_errors = True
     return has_errors
@@ -1047,6 +1047,35 @@ def application_document(request, document_id):
     response = FileResponse(file_handle, as_attachment=False, filename=document.filename, content_type=content_type)
     response["Content-Disposition"] = f'inline; filename="{document.filename}"'
     return response
+
+
+@login_required
+@role_required("officer")
+def application_document_delete(request, document_id):
+    """Remove one supporting document from an editable application."""
+    document = get_object_or_404(Document.objects.select_related("application"), pk=document_id)
+    application = document.application
+    if request.method != "POST":
+        return redirect("officer_edit_application", application_id=application.pk)
+    if not application.is_editable:
+        messages.error(request, "This application can no longer be edited, so documents cannot be removed.")
+        return redirect("application_review", application_id=application.pk)
+
+    filename = document.filename or document.name
+    doc_label = document.name
+    file_name = document.file.name if document.file else ""
+    document.delete()
+    if file_name:
+        try:
+            from django.core.files.storage import default_storage
+
+            if default_storage.exists(file_name):
+                default_storage.delete(file_name)
+        except OSError:
+            pass
+
+    messages.success(request, f"Removed {doc_label}: {filename}.")
+    return redirect("officer_edit_application", application_id=application.pk)
 
 
 @login_required

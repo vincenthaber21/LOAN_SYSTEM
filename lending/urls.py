@@ -40,6 +40,7 @@ urlpatterns = [
     path("officer/applications/<int:application_id>/edit/", views.officer_edit_application, name="officer_edit_application"),
     path("officer/applications/<int:application_id>/pdf/", views.application_pdf, name="application_pdf"),
     path("documents/<int:document_id>/", views.application_document, name="application_document"),
+    path("documents/<int:document_id>/delete/", views.application_document_delete, name="application_document_delete"),
     path("officer/borrowers/", views.borrowers, name="borrowers"),
     path("officer/members/", views.all_members, name="all_members"),
     path("officer/borrowers/add/", views.add_member, name="add_member"),

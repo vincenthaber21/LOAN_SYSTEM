@@ -1315,15 +1315,22 @@ class ExpiredMonthSignatureForm(forms.Form):
         return cleaned
 
 
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
 class DocumentForm(forms.ModelForm):
-    ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "pdf", "doc", "docx"}
+    ALLOWED_EXTENSIONS = {"jpg", "jpeg", "jfif", "png", "gif", "webp", "pdf", "doc", "docx"}
 
     class Meta:
         model = Document
         fields = ("doc_type", "file")
         widgets = {
-            "file": forms.ClearableFileInput(
-                attrs={"accept": ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx"}
+            "file": MultipleFileInput(
+                attrs={
+                    "accept": ".jpg,.jpeg,.jfif,.png,.gif,.webp,.pdf,.doc,.docx,image/jpeg,image/pjpeg,image/png,image/gif,image/webp",
+                    "multiple": True,
+                }
             ),
         }
 
@@ -1334,10 +1341,13 @@ class DocumentForm(forms.ModelForm):
 
     def clean_file(self):
         file = self.cleaned_data.get("file")
+        # With allow_multiple_selected, the widget may return a list; saving uses getlist.
+        if isinstance(file, (list, tuple)):
+            file = file[0] if file else None
         if file:
             extension = file.name.rsplit(".", 1)[-1].lower() if "." in file.name else ""
             if extension not in self.ALLOWED_EXTENSIONS:
-                raise forms.ValidationError("Upload an image (JPG, PNG, GIF, WEBP), PDF, or Word document (DOC, DOCX).")
+                raise forms.ValidationError("Upload an image (JPG, JFIF, PNG, GIF, WEBP), PDF, or Word document (DOC, DOCX).")
         return file
 
 

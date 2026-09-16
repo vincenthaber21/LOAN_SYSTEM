@@ -1163,7 +1163,7 @@ class Document(models.Model):
         PROOF_OF_INCOME = "proof_of_income", "Proof of income"
         OTHER = "other", "Other"
 
-    IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+    IMAGE_EXTENSIONS = {"jpg", "jpeg", "jfif", "png", "gif", "webp"}
 
     application = models.ForeignKey(LoanApplication, on_delete=models.CASCADE, related_name="documents")
     doc_type = models.CharField(max_length=30, choices=DocType.choices)
