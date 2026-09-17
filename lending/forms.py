@@ -1,6 +1,7 @@
 import base64
 import re
 import unicodedata
+from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -1296,6 +1297,37 @@ class BalanceExtensionForm(forms.Form):
         widget=forms.RadioSelect(attrs={"class": "form-check-input"}),
         label="Months to pay remaining balance",
     )
+    schedule_start_date = forms.DateField(
+        label="Reschedule start date",
+        help_text="When the new repayment term begins. Must be after the loan’s expired maturity date (not that day).",
+        widget=forms.DateInput(
+            format="%Y-%m-%d",
+            attrs={"type": "date", "class": "form-control form-control-date"},
+        ),
+        input_formats=["%Y-%m-%d"],
+    )
+
+    def __init__(self, *args, maturity_date=None, **kwargs):
+        self.maturity_date = maturity_date
+        super().__init__(*args, **kwargs)
+        today = timezone.localdate()
+        # New term cannot start on the expired/maturity day — earliest is the next calendar day.
+        min_start = (maturity_date + timedelta(days=1)) if maturity_date else today
+        default = min_start if min_start > today else today
+        self.fields["schedule_start_date"].widget.attrs["min"] = min_start.isoformat()
+        if not (self.is_bound or self.initial.get("schedule_start_date")):
+            self.initial["schedule_start_date"] = default
+
+    def clean_schedule_start_date(self):
+        value = self.cleaned_data.get("schedule_start_date")
+        if value is None:
+            return value
+        if self.maturity_date and value <= self.maturity_date:
+            raise forms.ValidationError(
+                "Reschedule start date must be after the loan’s expired maturity date "
+                f"({self.maturity_date:%b %d, %Y}), not on that day."
+            )
+        return value
 
 
 class ExpiredMonthSignatureForm(forms.Form):

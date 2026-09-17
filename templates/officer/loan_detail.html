@@ -97,6 +97,11 @@
   @media (max-width: 575.98px) {
     .expired-banner { flex-direction: column; gap: 10px; }
   }
+  .extension-start-date .form-control-date {
+    display: inline-block;
+    width: 11.5rem;
+    max-width: 100%;
+  }
 </style>
 {% endblock %}
 {% block content %}
@@ -126,7 +131,7 @@
   <div>
     <p class="reschedule-banner__title">Rescheduled on {{ loan.reschedule_date_display }}</p>
     <p class="reschedule-banner__meta">
-      Remaining balance rebuilt into a {{ loan.term_months }}-month term at {{ loan.interest_rate }}%.
+      Remaining balance {{ loan.principal|peso }} is the new principal ({{ loan.term_months }}-month term at {{ loan.reschedule_rate }}%).
       New collections start {{ loan.reschedule_interest_start_display }}
       · principal {{ loan.principal|peso }}
       · original release {{ loan.original_amount|peso }}.
@@ -195,7 +200,7 @@
               <span class="ms-1">(loan exact {{ chosen_pay_amount_exact|peso }})</span>
             </div>
           </div>
-          <div class="col-sm-4"><div class="detail-label">Interest rate</div><div class="detail-value">{{ loan.interest_rate }}% fixed</div></div>
+          <div class="col-sm-4"><div class="detail-label">Interest rate</div><div class="detail-value">{% if loan.is_rescheduled %}{{ loan.reschedule_rate }}% (included in principal){% else %}{{ loan.interest_rate }}% fixed{% endif %}</div></div>
           <div class="col-sm-4"><div class="detail-label">Payments remaining</div><div class="detail-value">{{ loan.payments_remaining }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Origination date</div><div class="detail-value">{{ loan.start_date }}</div></div>
           {% if loan.is_rescheduled %}
@@ -248,7 +253,7 @@
         <h2 class="card-title">Pay remaining balance</h2>
       </div>
       <div class="card-body">
-        <p class="text-muted mb-3">This loan’s term has ended with principal still outstanding. Choose how many months (maximum 3) to repay the remaining principal. Flat interest applies at {{ extension_rate }}% on that principal (same formula as origination).</p>
+        <p class="text-muted mb-3">This loan’s term has ended with a balance still outstanding. Choose how many months (maximum 3) to repay and when the new schedule should start (must be after the expired maturity date). Flat interest at {{ extension_rate }}% is added once to the remaining balance; that total becomes the new principal.</p>
         <form method="post" novalidate>
           {% csrf_token %}
           {% include "includes/form_errors.html" with form=extension_form %}
@@ -263,9 +268,21 @@
               {% endfor %}
             </div>
           </div>
+          <div class="mb-3">
+            <label class="form-label label-required" for="{{ extension_form.schedule_start_date.id_for_label }}">Reschedule start date <span class="text-danger">*</span></label>
+            <div class="extension-start-date">
+              {{ extension_form.schedule_start_date }}
+            </div>
+            {% if extension_form.schedule_start_date.help_text %}
+            <div class="form-text">{{ extension_form.schedule_start_date.help_text }}</div>
+            {% endif %}
+            {% if loan_maturity_date %}
+            <div class="form-text">Expired maturity: {{ loan_maturity_date|date:"M d, Y" }} — start date cannot be that day.</div>
+            {% endif %}
+          </div>
           <div class="row g-3 mb-4" id="extensionPreview" hidden>
             <div class="col-sm-4">
-              <div class="detail-label">Adjusted remaining (principal)</div>
+              <div class="detail-label">Remaining balance</div>
               <div class="detail-value" data-preview="principal">—</div>
             </div>
             <div class="col-sm-4">
@@ -273,7 +290,7 @@
               <div class="detail-value" data-preview="interest">—</div>
             </div>
             <div class="col-sm-4">
-              <div class="detail-label">New total payable</div>
+              <div class="detail-label">New principal</div>
               <div class="detail-value" data-preview="total">—</div>
             </div>
             <div class="col-sm-4">

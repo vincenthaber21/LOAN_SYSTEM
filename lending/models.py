@@ -606,7 +606,10 @@ class Loan(models.Model):
     schedule_start_date = models.DateField(
         null=True,
         blank=True,
-        help_text="When set, the repayment schedule starts from this date instead of disbursed_date.",
+        help_text=(
+            "When set, the repayment schedule starts from this date instead of disbursed_date. "
+            "For balance extensions, must be after the expired maturity date (not that day)."
+        ),
     )
     original_interest_rate = models.DecimalField(
         max_digits=5,
@@ -654,6 +657,15 @@ class Loan(models.Model):
     def is_rescheduled(self):
         """True when remaining balance was restructured into a new term."""
         return self.schedule_start_date is not None
+
+    @property
+    def reschedule_rate(self):
+        """Flat rate applied when the remaining balance was rebuilt (display)."""
+        if not self.schedule_start_date:
+            return self.interest_rate
+        from .services import BALANCE_EXTENSION_RATE
+
+        return BALANCE_EXTENSION_RATE
 
     @property
     def reschedule_date_display(self):

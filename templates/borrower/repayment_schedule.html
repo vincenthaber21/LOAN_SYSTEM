@@ -15,7 +15,7 @@
       · interest started the Monday on or after disbursement.
       {% elif loan.is_rescheduled %}
       Your rescheduled plan from {{ loan.reschedule_date_display }}
-      · {{ loan.term_months }}-month term at {{ loan.interest_rate }}%
+      · {{ loan.term_months }}-month term at {{ loan.reschedule_rate }}%
       · {% if view_mode == "month" %}{{ loan.term_months }} monthly payments of {{ loan.adjusted_monthly_payment|peso }} <span class="text-muted">(exact {{ loan.monthly_payment|peso }})</span>{% elif view_mode == "biweek" %}biweekly payments of {{ loan.adjusted_biweekly_payment|peso }} <span class="text-muted">(exact {{ loan.biweekly_payment|peso }})</span>{% elif view_mode == "week" %}weekly payments of {{ loan.adjusted_weekly_payment|peso }} <span class="text-muted">(exact {{ loan.weekly_payment|peso }})</span>{% else %}{{ loan.working_days }} working-day payments of {{ loan.adjusted_daily_payment|peso }} <span class="text-muted">(exact {{ loan.daily_payment|peso }})</span>{% endif %}
       · interest starts {{ loan.reschedule_interest_start_display }}.
       {% else %}
@@ -35,7 +35,7 @@
   <div>
     <p class="reschedule-banner__title">Rescheduled on {{ loan.reschedule_date_display }}</p>
     <p class="reschedule-banner__meta">
-      Your remaining balance was rebuilt into a {{ loan.term_months }}-month term at {{ loan.interest_rate }}%.
+      Your remaining balance {{ loan.principal|peso }} is the new principal ({{ loan.term_months }}-month term at {{ loan.reschedule_rate }}%).
       New payments start {{ loan.reschedule_interest_start_display }}
       · principal {{ loan.principal|peso }}
       · original release {{ loan.original_amount|peso }}.
@@ -193,7 +193,7 @@
         <div class="text-muted small mb-3">Term starts {{ loan.reschedule_interest_start_display }}</div>
         <div class="detail-label">Original release</div><div class="detail-value mb-3">{{ loan.original_amount|peso }}</div>
         {% endif %}
-        <div class="detail-label">Flat interest ({{ loan.interest_rate }}% × {{ loan.term_months }} mo)</div><div class="detail-value mb-3">{{ loan.total_interest|peso }}</div>
+        <div class="detail-label">{% if loan.is_rescheduled %}Interest ({{ loan.reschedule_rate }}% × {{ loan.term_months }} mo, in principal){% else %}Flat interest ({{ loan.interest_rate }}% × {{ loan.term_months }} mo){% endif %}</div><div class="detail-value mb-3">{% if loan.is_rescheduled %}Included{% else %}{{ loan.total_interest|peso }}{% endif %}</div>
         <div class="detail-label">Term</div><div class="detail-value mb-3">{{ loan.term_months }} months · {{ loan.working_days }} working days</div>
         <div class="detail-label">Payment per day</div>
         <div class="detail-value mb-1">{{ loan.adjusted_daily_payment|peso }}</div>

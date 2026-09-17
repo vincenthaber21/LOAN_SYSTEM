@@ -23,7 +23,7 @@ from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .audit import application_decision_log, browser_label, record_activity, record_staff_auth_event
 from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, LoginLogoutLog, Manager, Notification, Payment, User
-from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
+from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
 
 
 APPLICATION_DOCUMENT_SPECS = (
@@ -2153,14 +2153,23 @@ def officer_loan_detail(request, loan_id):
             messages.error(request, "Capture the borrower signature and printed name for the expired month.")
 
     can_extend = can_extend_loan_balance(loan)
+    maturity_date = loan_maturity_date(loan) if can_extend else None
     is_signature_post = request.method == "POST" and request.POST.get("form_name") == "expired_month_signature"
-    extension_form = BalanceExtensionForm(None if is_signature_post else (request.POST or None)) if can_extend else None
+    extension_form = (
+        BalanceExtensionForm(
+            None if is_signature_post else (request.POST or None),
+            maturity_date=maturity_date,
+        )
+        if can_extend
+        else None
+    )
     extension_previews = [
         {
             "months": row["months"],
             "principal": str(row["principal"]),
             "total_interest": str(row["total_interest"]),
             "total_payable": str(row["total_payable"]),
+            "new_principal": str(row["new_principal"]),
             "per_day": str(row["per_day"]),
             "per_month": str(row["per_month"]),
         }
@@ -2169,16 +2178,22 @@ def officer_loan_detail(request, loan_id):
 
     if request.method == "POST" and can_extend and not is_signature_post and extension_form.is_valid():
         try:
-            loan, quote = extend_loan_balance(loan, extension_form.cleaned_data["months"])
+            loan, quote = extend_loan_balance(
+                loan,
+                extension_form.cleaned_data["months"],
+                start_date=extension_form.cleaned_data["schedule_start_date"],
+            )
         except BalanceExtensionError as exc:
             messages.error(request, str(exc))
         else:
+            start_label = loan.schedule_start_date.strftime("%b %d, %Y") if loan.schedule_start_date else ""
             messages.success(
                 request,
                 (
                     f"Remaining balance restructured over {quote['months']} month"
                     f"{'s' if quote['months'] != 1 else ''} at {BALANCE_EXTENSION_RATE}% interest. "
-                    f"New total due: ₱{quote['total_payable']:,.2f}."
+                    f"New principal (remaining balance): ₱{quote['total_payable']:,.2f}. "
+                    f"Schedule starts {start_label}."
                 ),
             )
             record_activity(
@@ -2188,7 +2203,7 @@ def officer_loan_detail(request, loan_id):
                 title=f"{loan.reference} balance extended",
                 description=(
                     f"Remaining balance restructured over {quote['months']} month"
-                    f"{'s' if quote['months'] != 1 else ''}."
+                    f"{'s' if quote['months'] != 1 else ''} starting {start_label}."
                 ),
                 member=loan.application.borrower,
                 reference=loan.reference,
@@ -2220,6 +2235,7 @@ def officer_loan_detail(request, loan_id):
             "extension_form": extension_form,
             "extension_previews": extension_previews,
             "extension_rate": BALANCE_EXTENSION_RATE,
+            "loan_maturity_date": maturity_date,
             "pay_frequency": pay_freq,
             "pay_frequency_choices": list(LoanApplication.PaymentFrequency.choices),
             "chosen_pay_amount": loan_adjusted,

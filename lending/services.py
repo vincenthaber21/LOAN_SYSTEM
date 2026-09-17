@@ -403,16 +403,25 @@ def credit_payment_mutual_aid(loan, amount, *, payment=None, recorded_by=None, p
 
 
 def loan_term_months(loan):
-    """Approved term for schedule generation (application term when loan can still be rebuilt)."""
-    application_term = loan.application.final_term_months or loan.application.term_months
-    if loan.payments.exists():
+    """Term used for schedule generation and flat-interest recalculation.
+
+    After a remaining-balance reschedule (`schedule_start_date` set), always use
+    `loan.term_months` (the 1–3 month extension). Same after payments have begun —
+    unpaid periods shrink and term tracks the rebuilt schedule. Otherwise prefer
+    the approved application term so pre-disbursement edits stay in sync.
+    """
+    if loan.schedule_start_date is not None or loan.payments.exists():
         return loan.term_months
-    return application_term
+    return loan.application.final_term_months or loan.application.term_months
 
 
 def sync_loan_term_from_application(loan):
-    """Keep loan.term_months aligned with the application before any payments are recorded."""
-    if loan.payments.exists():
+    """Keep loan.term_months aligned with the application before any payments are recorded.
+
+    Never overwrite a remaining-balance reschedule — that term is the extension length
+    chosen for the outstanding principal, not the original application term.
+    """
+    if loan.payments.exists() or loan.schedule_start_date is not None:
         return False
     term = loan.application.final_term_months or loan.application.term_months
     if loan.term_months == term:
@@ -537,10 +546,8 @@ def loan_term_expired(loan):
 
 
 def can_extend_loan_balance(loan):
-    """Expired-term loans with remaining principal can be restructured (1–3 months @ 5%)."""
+    """Expired-term loans with a remaining balance can be restructured (1–3 months @ 5%)."""
     if loan.status == Loan.Status.PAID:
-        return False
-    if (loan.principal or Decimal("0.00")) <= 0:
         return False
     if (loan.outstanding_balance or Decimal("0.00")) <= 0:
         return False
@@ -548,18 +555,20 @@ def can_extend_loan_balance(loan):
 
 
 def balance_extension_principal(loan):
-    """Remaining capital used as principal for balance extensions.
+    """Remaining balance used as the base for balance extensions.
 
-    Payments reduce principal directly (e.g. ₱20,000 − ₱3,000 = ₱17,000), then the
-    same flat formula is applied on that new principal. Cash-adjusted for remittance.
+    Matches the cash-adjusted Remaining balance on the loan page (not bare principal).
+    Flat 5% is then applied on that amount for the chosen months; the total becomes
+    the new principal.
     """
-    return adjust_payment(loan.principal or Decimal("0.00"))
+    return adjust_payment(loan.outstanding_balance or Decimal("0.00"))
 
 
 def balance_extension_quote(principal, months):
     """Flat-interest quote for paying a remaining balance over `months` at 5%.
 
-    Principal of ₱1,000 or less is quoted with no interest.
+    Returns total_payable as the new principal (remaining balance + interest).
+    Amounts of ₱1,000 or less are quoted with no interest.
     """
     months = int(months)
     amounts = calculate_flat_loan_amounts(principal, BALANCE_EXTENSION_RATE, months)
@@ -567,9 +576,11 @@ def balance_extension_quote(principal, months):
     return {
         "months": months,
         "principal": amounts["principal"],
+        "capital": amounts["principal"],
         "interest_rate": rate,
         "total_interest": amounts["total_interest"],
         "total_payable": amounts["total_payable"],
+        "new_principal": amounts["total_payable"],
         "per_day": amounts["per_day"],
         "per_month": amounts["per_month"],
         "periods": amounts["periods"],
@@ -578,7 +589,7 @@ def balance_extension_quote(principal, months):
 
 
 def balance_extension_previews(loan):
-    """Quotes for 1–3 month balance extensions on the remaining capital (principal)."""
+    """Quotes for 1–3 month balance extensions on the remaining balance."""
     remaining = balance_extension_principal(loan)
     return [balance_extension_quote(remaining, months) for months in range(1, MAX_BALANCE_EXTENSION_MONTHS + 1)]
 
@@ -672,10 +683,13 @@ def _credit_installments_for_payment(unpaid_installments, loan_amount, paid_date
 
 
 def _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due_date, periods):
-    """Replace unpaid installments with a flat schedule on the reduced principal."""
+    """Replace unpaid installments with a flat schedule on the reduced principal.
+
+    Each day's amount_due is principal_component + interest_component so the schedule
+    always sums exactly to the flat formula total (remaining principal + interest).
+    """
     loan.installments.exclude(status=Installment.Status.PAID).delete()
     amounts = _flat_amounts_for_periods(new_principal, loan.interest_rate, periods)
-    payment = amounts["per_day"]
     principal_per = (new_principal / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     interest_per = (amounts["total_interest"] / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -691,11 +705,10 @@ def _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due_dat
         if offset == periods - 1:
             principal = principal_remaining
             interest = interest_remaining
-            payment_for_period = principal + interest
         else:
             principal = principal_per
             interest = interest_per
-            payment_for_period = payment
+        payment_for_period = (principal + interest).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         rows.append(
             Installment(
                 loan=loan,
@@ -713,14 +726,19 @@ def _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due_dat
 
 
 @transaction.atomic
-def extend_loan_balance(loan, months):
-    """Restructure an expired loan's remaining capital over 1–3 months at 5% flat interest.
+def extend_loan_balance(loan, months, start_date=None):
+    """Restructure an expired loan's remaining balance over 1–3 months at 5% flat interest.
 
-    Uses remaining principal (after payments) and the same working-day flat formula:
-        total_interest = adjusted_principal * 0.05 * months
-        total_payable  = adjusted_principal + total_interest
+    Formula on the remaining balance (same cash-adjusted figure shown on the loan page):
+        total_interest = remaining_balance * 0.05 * months
+        new_principal  = remaining_balance + total_interest
 
-    Example: principal ₱20,000 with ₱3,000 paid → new principal ₱17,000, then 5% flat.
+    Example: remaining balance ₱8,945 × 5% × 1 month → new principal ₱9,392.25.
+    Interest is rolled into principal once at reschedule; the new schedule collects
+    that balance with no further interest added on top.
+
+    `start_date` is when the new term begins (schedule_start_date). It must be after
+    the expired maturity date — not on that day. Defaults to today when omitted.
     """
     months = int(months)
     if months < 1 or months > MAX_BALANCE_EXTENSION_MONTHS:
@@ -732,11 +750,24 @@ def extend_loan_balance(loan, months):
             "Balance extension is only available when the loan term has expired and a balance remains."
         )
 
+    maturity = loan_maturity_date(loan)
+    schedule_start = start_date or timezone.localdate()
+    if maturity and schedule_start <= maturity:
+        raise BalanceExtensionError(
+            "Reschedule start date must be after the loan’s expired maturity date, not on that day."
+        )
+
     remaining = balance_extension_principal(loan)
     if remaining <= 0:
-        raise BalanceExtensionError("Adjusted remaining principal must be greater than zero.")
+        raise BalanceExtensionError("Adjusted remaining balance must be greater than zero.")
     quote = balance_extension_quote(remaining, months)
-    payments_sum = sum((payment.amount for payment in loan.payments.all()), Decimal("0.00"))
+    # Remaining balance + 5% flat — this total is the new principal.
+    new_principal = quote["total_payable"]
+    # Historical loan remittances only (exclude mutual aid / savings top-ups).
+    payments_sum = sum(
+        (payment.loan_amount_applied for payment in loan.payments.all()),
+        Decimal("0.00"),
+    )
 
     if loan.disbursed_principal is None:
         loan.disbursed_principal = loan.principal
@@ -745,12 +776,13 @@ def extend_loan_balance(loan, months):
     if loan.original_term_months is None:
         loan.original_term_months = loan.term_months
 
-    loan.principal = remaining
-    loan.interest_rate = BALANCE_EXTENSION_RATE
+    loan.principal = new_principal
+    # Interest already included in new_principal; later payments only reduce this balance.
+    loan.interest_rate = Decimal("0.00")
     loan.term_months = months
-    loan.schedule_start_date = timezone.localdate()
-    loan.total_payable = (payments_sum + quote["total_payable"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    loan.outstanding_balance = quote["total_payable"]
+    loan.schedule_start_date = schedule_start
+    loan.outstanding_balance = new_principal
+    loan.total_payable = (payments_sum + new_principal).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     loan.status = Loan.Status.ACTIVE
     loan.save(
         update_fields=[
@@ -766,7 +798,20 @@ def extend_loan_balance(loan, months):
             "status",
         ]
     )
+    # Schedule collects the new principal (remaining balance + interest) evenly.
     generate_schedule(loan)
+    actual_total = sum((item.amount_due for item in loan.installments.all()), Decimal("0.00"))
+    if actual_total != loan.outstanding_balance:
+        loan.principal = actual_total
+        loan.outstanding_balance = actual_total
+        loan.total_payable = (payments_sum + actual_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        loan.save(update_fields=["principal", "outstanding_balance", "total_payable"])
+        quote = dict(quote)
+        quote["total_payable"] = actual_total
+        quote["total_interest"] = (actual_total - remaining).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    quote = dict(quote)
+    quote["new_principal"] = loan.principal
+    quote["capital"] = remaining
     return loan, quote
 
 
@@ -803,14 +848,13 @@ def generate_schedule(loan):
 
     Interest begins on the Monday on/after `schedule_start_date` (or disbursement).
     That total is then split evenly across `term_months * 22` working-day payments.
-    The final row absorbs rounding so the schedule sums exactly to principal and
-    total interest.
+    Each day's amount_due equals its principal + interest components so the schedule
+    sums exactly to total_payable; the final row absorbs component rounding.
     """
     Installment.objects.filter(loan=loan).delete()
     term = loan_term_months(loan)
     amounts = calculate_flat_loan_amounts(loan.principal, loan.interest_rate, term)
     periods = amounts["periods"]
-    payment = amounts["per_day"]
     principal_per = (loan.principal / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     interest_per = (amounts["total_interest"] / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -824,11 +868,10 @@ def generate_schedule(loan):
         if number == periods:
             principal = principal_remaining
             interest = interest_remaining
-            payment_for_period = principal + interest
         else:
             principal = principal_per
             interest = interest_per
-            payment_for_period = payment
+        payment_for_period = (principal + interest).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         installments.append(
             Installment(
                 loan=loan,
@@ -850,18 +893,137 @@ def rebuild_loan_schedule(loan):
         return False
     generate_schedule(loan)
     actual_total = sum((item.amount_due for item in loan.installments.all()), Decimal("0.00"))
-    loan.total_payable = actual_total
+    payments_sum = sum(
+        (item.loan_amount_applied for item in loan.payments.all()),
+        Decimal("0.00"),
+    )
     loan.outstanding_balance = actual_total
+    loan.total_payable = (payments_sum + actual_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     loan.save(update_fields=["total_payable", "outstanding_balance"])
+    return True
+
+
+def _repair_rescheduled_flat_balances(loan):
+    """Keep rescheduled loans on the remaining-balance-as-principal model.
+
+    After reschedule:
+        new_principal = capital + capital * 0.05 * months   # e.g. ₱11,500
+        outstanding   = new_principal
+        interest_rate = 0  (interest already rolled into principal)
+
+    Legacy rows that still store capital as principal with 5% on top are migrated
+    so principal equals the remaining balance.
+    """
+    if loan.schedule_start_date is None:
+        return False
+
+    payments_sum = sum(
+        (item.loan_amount_applied for item in loan.payments.all()),
+        Decimal("0.00"),
+    )
+    principal = Decimal(str(loan.principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    outstanding = (loan.outstanding_balance or Decimal("0.00")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    rate = Decimal(str(loan.interest_rate or 0))
+
+    if loan.payments.exists():
+        unpaid = list(
+            loan.installments.exclude(status=Installment.Status.PAID).order_by(
+                "installment_number", "due_date"
+            )
+        )
+        if not unpaid:
+            return False
+        periods = len(unpaid)
+        # Legacy: interest still separate from principal — roll into principal once.
+        if outstanding > principal and rate > 0:
+            loan.principal = outstanding
+            loan.interest_rate = Decimal("0.00")
+            loan.save(update_fields=["principal", "interest_rate"])
+            principal = outstanding
+            rate = Decimal("0.00")
+        amounts = _flat_amounts_for_periods(principal, rate, periods)
+        expected = amounts["total_payable"]
+        if outstanding == expected and rate == 0:
+            # Still rebuild if unpaid rows carry leftover interest components.
+            unpaid_interest = sum((row.interest_component for row in unpaid), Decimal("0.00"))
+            if unpaid_interest <= 0 and outstanding == sum(
+                (row.amount_due for row in unpaid), Decimal("0.00")
+            ):
+                return False
+        start_due = unpaid[0].due_date
+        amounts = _rebuild_schedule_for_remaining_principal(loan, principal, start_due, periods)
+        loan.outstanding_balance = amounts["total_payable"]
+        if loan.principal != amounts["total_payable"] and rate == 0:
+            loan.principal = amounts["total_payable"]
+        loan.total_payable = (payments_sum + amounts["total_payable"]).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        loan.save(update_fields=["principal", "outstanding_balance", "total_payable"])
+        return True
+
+    # No payments yet — migrate capital+interest rows to remaining-balance principal.
+    changed = False
+    if outstanding > principal and rate > 0:
+        for months in range(1, MAX_BALANCE_EXTENSION_MONTHS + 1):
+            quote_total = calculate_flat_loan_amounts(
+                principal, BALANCE_EXTENSION_RATE, months
+            )["total_payable"]
+            if quote_total == outstanding:
+                if loan.term_months != months:
+                    loan.term_months = months
+                    changed = True
+                break
+        loan.principal = outstanding
+        loan.interest_rate = Decimal("0.00")
+        loan.save(
+            update_fields=["principal", "interest_rate"]
+            + (["term_months"] if changed else [])
+        )
+        principal = outstanding
+        rate = Decimal("0.00")
+        changed = True
+    elif rate > 0 and principal == outstanding:
+        # Principal already equals remaining balance; stop charging interest again.
+        loan.interest_rate = Decimal("0.00")
+        loan.save(update_fields=["interest_rate"])
+        rate = Decimal("0.00")
+        changed = True
+
+    amounts = calculate_flat_loan_amounts(principal, rate, loan.term_months)
+    expected = amounts["total_payable"]
+    expected_periods = amounts["periods"]
+    schedule_total = sum((item.amount_due for item in loan.installments.all()), Decimal("0.00"))
+    schedule_count = loan.installments.count()
+    needs_rebuild = (
+        changed
+        or schedule_count != expected_periods
+        or schedule_total != expected
+        or outstanding != expected
+        or schedule_is_stale(loan)
+    )
+    if not needs_rebuild:
+        return False
+
+    generate_schedule(loan)
+    actual_total = sum((item.amount_due for item in loan.installments.all()), Decimal("0.00"))
+    loan.principal = actual_total
+    loan.outstanding_balance = actual_total
+    loan.total_payable = (payments_sum + actual_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    loan.save(update_fields=["principal", "outstanding_balance", "total_payable"])
     return True
 
 
 def ensure_schedule_current(loan):
     """Regenerate the schedule when it is out of sync with loan terms or disbursement date.
 
-    Also strips interest from unpaid rows when remaining principal is ₱1,000 or less.
+    Also strips interest from unpaid rows when remaining principal is ₱1,000 or less,
+    and keeps rescheduled loans aligned with the remaining-balance flat formula.
     """
     sync_loan_term_from_application(loan)
+    if loan.schedule_start_date is not None and _repair_rescheduled_flat_balances(loan):
+        return True
     if schedule_is_stale(loan):
         return rebuild_loan_schedule(loan)
     if _waive_interest_on_small_remaining_principal(loan):
@@ -1290,7 +1452,6 @@ def build_virtual_installments(principal, interest_rate, term_months, start_date
     """Generate working-day installments in memory (does not touch the database)."""
     amounts = calculate_flat_loan_amounts(principal, interest_rate, term_months)
     periods = amounts["periods"]
-    payment = amounts["per_day"]
     principal_per = (Decimal(str(principal)) / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     interest_per = (amounts["total_interest"] / Decimal(periods)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     principal_remaining = Decimal(str(principal))
@@ -1303,11 +1464,10 @@ def build_virtual_installments(principal, interest_rate, term_months, start_date
         if number == periods:
             principal_part = principal_remaining
             interest_part = interest_remaining
-            payment_for_period = principal_part + interest_part
         else:
             principal_part = principal_per
             interest_part = interest_per
-            payment_for_period = payment
+        payment_for_period = (principal_part + interest_part).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         rows.append(
             _VirtualInstallment(
                 number,
