@@ -1490,6 +1490,14 @@ def _enrich_members(qs):
         member.expired_month_count = len(expired_rows)
         member.expired_unsigned_count = sum(1 for row in expired_rows if not row["is_signed"])
         member.has_expired_months = member.expired_month_count > 0
+        rescheduled_loans = [loan for loan in loan_balances if loan.is_rescheduled]
+        member.has_rescheduled_loans = bool(rescheduled_loans)
+        member.rescheduled_loan_count = len(rescheduled_loans)
+        reschedule_dates = [loan.schedule_start_date for loan in rescheduled_loans if loan.schedule_start_date]
+        member.reschedule_date = max(reschedule_dates) if reschedule_dates else None
+        member.reschedule_date_display = (
+            member.reschedule_date.strftime("%b %d, %Y") if member.reschedule_date else None
+        )
         # Primary list display: cash-adjusted (₱5 remittance) outstanding
         member.total_balance = member.total_adjusted_outstanding
         member.last_activity = member.joined_at

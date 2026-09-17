@@ -61,9 +61,14 @@
               </td>
               <td>
                 {% include "includes/status_badge.html" with status=loan.status label=loan.status_label %}
-                {% if loan.has_expired_months %}
-                <div class="mt-1">
+                {% if loan.has_expired_months or loan.is_rescheduled %}
+                <div class="mt-1 d-flex flex-wrap gap-1">
+                  {% if loan.has_expired_months %}
                   <span class="badge status-overdue" title="{{ loan.expired_month_count }} expired loan month{{ loan.expired_month_count|pluralize }}{% if loan.expired_unsigned_count %} · {{ loan.expired_unsigned_count }} awaiting signature{% else %} · all signed{% endif %}"><i class="bi bi-exclamation-triangle-fill me-1"></i>Expired{% if loan.expired_unsigned_count %} · {{ loan.expired_unsigned_count }} to sign{% endif %}</span>
+                  {% endif %}
+                  {% if loan.is_rescheduled %}
+                  <span class="badge status-rescheduled" title="Remaining balance was rescheduled on {{ loan.reschedule_date_display }}"><i class="bi bi-arrow-repeat me-1"></i>Rescheduled {{ loan.reschedule_date_display }}</span>
+                  {% endif %}
                 </div>
                 {% endif %}
               </td>
