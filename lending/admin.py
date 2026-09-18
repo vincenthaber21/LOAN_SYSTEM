@@ -1,5 +1,5 @@
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django import forms
@@ -27,7 +27,13 @@ from .backup import (
     restore_backup_file,
 )
 from .forms import DisbursementAdminForm
-from .services import disbursement_start_time_label, normalize_credit_score
+from .services import (
+    BalanceExtensionError,
+    disbursement_start_time_label,
+    normalize_credit_score,
+    pre_reschedule_maturity_date,
+    update_reschedule_start_date,
+)
 from .models import (
     ActivityLog,
     Administrator,
@@ -47,6 +53,7 @@ from .models import (
     Member,
     Notification,
     Payment,
+    RescheduledLoan,
     User,
 )
 
@@ -506,6 +513,203 @@ class LoanAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         # Loans are created through the disbursement workflow (Disbursement admin),
         # which generates the installment schedule — raw admin "add" would skip that.
         return False
+
+
+class RescheduledLoanAdminForm(forms.ModelForm):
+    """Allows editing the reschedule start date from Django admin."""
+
+    class Meta:
+        model = RescheduledLoan
+        fields = "__all__"
+        widgets = {
+            "schedule_start_date": forms.DateInput(
+                format="%Y-%m-%d",
+                attrs={"type": "date"},
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.maturity_date = None
+        if self.instance and self.instance.pk and self.instance.schedule_start_date:
+            self.maturity_date = pre_reschedule_maturity_date(self.instance)
+            if self.maturity_date:
+                min_start = self.maturity_date + timedelta(days=1)
+                self.fields["schedule_start_date"].widget.attrs["min"] = min_start.isoformat()
+                self.fields["schedule_start_date"].help_text = (
+                    "When set, the repayment schedule starts from this date instead of "
+                    "disbursed_date. Must be after the expired maturity date "
+                    f"({self.maturity_date:%b %d, %Y}), not on that day."
+                )
+
+    def clean_schedule_start_date(self):
+        value = self.cleaned_data.get("schedule_start_date")
+        if value is None:
+            raise forms.ValidationError("Schedule start date is required for a rescheduled loan.")
+        if self.maturity_date and value <= self.maturity_date:
+            raise forms.ValidationError(
+                "Reschedule start date must be after the loan’s expired maturity date "
+                f"({self.maturity_date:%b %d, %Y}), not on that day."
+            )
+        return value
+
+
+@admin.register(RescheduledLoan)
+class RescheduledLoanAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    """Admin table of loans whose remaining balance was rescheduled into a new term."""
+
+    form = RescheduledLoanAdminForm
+    list_display = (
+        "reference",
+        "borrower_name",
+        "product_name",
+        "original_principal",
+        "rescheduled_principal",
+        "reschedule_date",
+        "interest_start",
+        "term_months",
+        "reschedule_rate_display",
+        "status",
+        "outstanding_balance",
+    )
+    list_filter = ("status", "schedule_start_date", "term_months")
+    search_fields = (
+        "application__borrower__full_name",
+        "application__borrower__email",
+        "application__borrower__username",
+        "disbursement_reference",
+    )
+    date_hierarchy = "schedule_start_date"
+    ordering = ("-schedule_start_date", "-id")
+    actions = ("delete_selected",)
+    readonly_fields = (
+        "application",
+        "principal",
+        "interest_rate",
+        "term_months",
+        "disbursed_date",
+        "total_payable",
+        "outstanding_balance",
+        "status",
+        "disbursement_method",
+        "disbursement_reference",
+        "processing_fee",
+        "other_fees",
+        "other_fees_description",
+        "disbursed_by",
+        "grace_period_days",
+        "disbursed_principal",
+        "original_interest_rate",
+        "original_term_months",
+    )
+    fieldsets = (
+        ("Loan", {
+            "fields": (
+                "application",
+                "status",
+                "disbursed_date",
+                "disbursement_method",
+                "disbursement_reference",
+                "disbursed_by",
+            ),
+        }),
+        ("Reschedule", {
+            "fields": (
+                "schedule_start_date",
+                "disbursed_principal",
+                "principal",
+                "original_interest_rate",
+                "original_term_months",
+                "interest_rate",
+                "term_months",
+                "total_payable",
+                "outstanding_balance",
+            ),
+            "description": (
+                "Edit the schedule start date to move when the new term begins. "
+                "Saving updates installment due dates to match."
+            ),
+        }),
+        ("Fees", {
+            "fields": ("processing_fee", "other_fees", "other_fees_description", "grace_period_days"),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Borrower", ordering="application__borrower__full_name")
+    def borrower_name(self, obj):
+        return obj.application.borrower_name
+
+    @admin.display(description="Product")
+    def product_name(self, obj):
+        return obj.product_name
+
+    @admin.display(description="Original principal", ordering="disbursed_principal")
+    def original_principal(self, obj):
+        return obj.original_amount
+
+    @admin.display(description="New principal", ordering="principal")
+    def rescheduled_principal(self, obj):
+        return obj.principal
+
+    @admin.display(description="Rescheduled on", ordering="schedule_start_date")
+    def reschedule_date(self, obj):
+        return obj.reschedule_date_display or "—"
+
+    @admin.display(description="Interest starts")
+    def interest_start(self, obj):
+        return obj.reschedule_interest_start_display or "—"
+
+    @admin.display(description="Rate")
+    def reschedule_rate_display(self, obj):
+        return f"{obj.reschedule_rate}%"
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .filter(schedule_start_date__isnull=False)
+            .select_related("application", "application__borrower", "application__loan_product")
+        )
+
+    def has_add_permission(self, request):
+        return False
+
+    def save_model(self, request, obj, form, change):
+        old_date = form.initial.get("schedule_start_date") if change else None
+        new_date = form.cleaned_data.get("schedule_start_date") if change else None
+        if change and old_date is not None and new_date and new_date != old_date:
+            # Keep the stored date until the shared correction helper updates it.
+            obj.schedule_start_date = old_date
+            super().save_model(request, obj, form, change)
+            try:
+                obj, result = update_reschedule_start_date(obj, new_date)
+            except BalanceExtensionError as exc:
+                messages.error(request, str(exc))
+                return
+            start_label = obj.reschedule_date_display or ""
+            interest_label = obj.reschedule_interest_start_display or ""
+            if result["mode"] == "rebuilt":
+                messages.success(
+                    request,
+                    f"Schedule start date updated to {start_label}. "
+                    f"Repayment schedule rebuilt (interest starts {interest_label}).",
+                )
+            elif result["mode"] == "shifted":
+                messages.success(
+                    request,
+                    f"Schedule start date updated to {start_label}. "
+                    f"Moved {result['moved_count']} installment due date(s) by {result['delta_days']} day(s) "
+                    f"(interest starts {interest_label}).",
+                )
+            else:
+                messages.success(
+                    request,
+                    f"Schedule start date updated to {start_label}. "
+                    f"Interest starts {interest_label}.",
+                )
+            return
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Disbursement)

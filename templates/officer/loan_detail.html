@@ -128,7 +128,7 @@
 {% if loan.is_rescheduled %}
 <div class="reschedule-banner" role="status">
   <span class="reschedule-banner__icon" aria-hidden="true"><i class="bi bi-arrow-repeat"></i></span>
-  <div>
+  <div class="flex-grow-1">
     <p class="reschedule-banner__title">Rescheduled on {{ loan.reschedule_date_display }}</p>
     <p class="reschedule-banner__meta">
       Remaining balance {{ loan.principal|peso }} is the new principal ({{ loan.term_months }}-month term at {{ loan.reschedule_rate }}%).
@@ -137,6 +137,30 @@
       · original release {{ loan.original_amount|peso }}.
       <a class="ms-1" href="{% url 'officer_repayment_schedule' loan_id=loan.id %}">View schedule</a>
     </p>
+    {% if can_edit_reschedule_date and reschedule_date_form %}
+    <form method="post" class="reschedule-date-edit mt-3" novalidate>
+      {% csrf_token %}
+      <input type="hidden" name="form_name" value="reschedule_start_date">
+      {% include "includes/form_errors.html" with form=reschedule_date_form %}
+      <div class="d-flex flex-wrap align-items-end gap-2">
+        <div>
+          <label class="form-label label-required mb-1" for="{{ reschedule_date_form.schedule_start_date.id_for_label }}">Correct reschedule date</label>
+          <div class="extension-start-date">
+            {{ reschedule_date_form.schedule_start_date }}
+          </div>
+        </div>
+        <button type="submit" class="btn btn-outline-primary btn-sm">
+          <i class="bi bi-pencil-square me-1"></i>Update date
+        </button>
+      </div>
+      {% if reschedule_date_form.schedule_start_date.help_text %}
+      <div class="form-text mt-1">{{ reschedule_date_form.schedule_start_date.help_text }}</div>
+      {% endif %}
+      {% if reschedule_maturity_date %}
+      <div class="form-text">Expired maturity: {{ reschedule_maturity_date|date:"M d, Y" }} — start date cannot be that day or earlier.</div>
+      {% endif %}
+    </form>
+    {% endif %}
   </div>
 </div>
 {% endif %}

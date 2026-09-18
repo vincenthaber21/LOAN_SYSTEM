@@ -508,6 +508,14 @@ body.auth-body .app-footer { background: var(--paper); }
   margin: 0;
   opacity: .92;
 }
+.reschedule-date-edit .form-label {
+  color: #8b5b2d;
+  font-size: .8rem;
+  font-weight: 600;
+}
+.reschedule-date-edit .form-text {
+  color: #9b5b21;
+}
 .badge.status-rescheduled { background: #ffe7c2; color: #9b5b21; }
 .table-hover tbody tr.schedule-reschedule-start {
   --bs-table-bg: #fff8ee;

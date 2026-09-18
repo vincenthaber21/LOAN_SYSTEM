@@ -20,10 +20,10 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from .audit_export import build_audit_workbook
 from .cashflow_reports import cashflow_report_context, resolve_loan_product, resolve_report_period, resolve_staff_user, write_audit_csv
 from .decorators import role_required
-from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
+from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, RescheduleStartDateForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .audit import application_decision_log, browser_label, record_activity, record_staff_auth_event
 from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, LoginLogoutLog, Manager, Notification, Payment, User
-from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount
+from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, pre_reschedule_maturity_date, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount, update_reschedule_start_date
 
 
 APPLICATION_DOCUMENT_SPECS = (
@@ -2154,10 +2154,84 @@ def officer_loan_detail(request, loan_id):
 
     can_extend = can_extend_loan_balance(loan)
     maturity_date = loan_maturity_date(loan) if can_extend else None
-    is_signature_post = request.method == "POST" and request.POST.get("form_name") == "expired_month_signature"
+    form_name = request.POST.get("form_name") if request.method == "POST" else None
+    is_signature_post = form_name == "expired_month_signature"
+    is_reschedule_date_post = form_name == "reschedule_start_date"
+
+    reschedule_date_form = None
+    reschedule_maturity_date = None
+    can_edit_reschedule_date = bool(loan.is_rescheduled and request.user.is_manager)
+    if can_edit_reschedule_date:
+        reschedule_maturity_date = pre_reschedule_maturity_date(loan)
+        reschedule_date_form = RescheduleStartDateForm(
+            request.POST if is_reschedule_date_post else None,
+            initial_date=loan.schedule_start_date,
+            maturity_date=reschedule_maturity_date,
+        )
+        if is_reschedule_date_post:
+            if reschedule_date_form.is_valid():
+                try:
+                    loan, result = update_reschedule_start_date(
+                        loan,
+                        reschedule_date_form.cleaned_data["schedule_start_date"],
+                    )
+                except BalanceExtensionError as exc:
+                    messages.error(request, str(exc))
+                else:
+                    start_label = loan.reschedule_date_display or ""
+                    interest_label = loan.reschedule_interest_start_display or ""
+                    if not result["changed"]:
+                        messages.info(request, f"Reschedule start date is already {start_label}.")
+                    elif result["mode"] == "rebuilt":
+                        messages.success(
+                            request,
+                            f"Reschedule start date updated to {start_label}. "
+                            f"Repayment schedule rebuilt (interest starts {interest_label}).",
+                        )
+                    elif result["mode"] == "shifted":
+                        messages.success(
+                            request,
+                            f"Reschedule start date updated to {start_label}. "
+                            f"Moved {result['moved_count']} installment due date(s) by "
+                            f"{result['delta_days']} day(s) (interest starts {interest_label}).",
+                        )
+                    else:
+                        messages.success(
+                            request,
+                            f"Reschedule start date updated to {start_label}. "
+                            f"Interest starts {interest_label}.",
+                        )
+                    if result["changed"]:
+                        old_label = result["old_date"].strftime("%b %d, %Y")
+                        record_activity(
+                            request.user,
+                            action=ActivityLog.Action.BALANCE_EXTENDED,
+                            kind=ActivityLog.Kind.DISBURSEMENT,
+                            title=f"{loan.reference} reschedule date corrected",
+                            description=(
+                                f"Reschedule start date changed from {old_label} to {start_label}."
+                            ),
+                            member=loan.application.borrower,
+                            reference=loan.reference,
+                            status="active",
+                            status_label="Corrected",
+                            url_name="officer_loan_detail",
+                            url_kwargs={"loan_id": loan.pk},
+                            request=request,
+                        )
+                    return redirect("officer_loan_detail", loan_id=loan.id)
+            else:
+                messages.error(
+                    request,
+                    "Enter a valid reschedule start date after the expired maturity date.",
+                )
+    elif is_reschedule_date_post:
+        messages.error(request, "Only managers and administrators can correct the reschedule date.")
+        return redirect("officer_loan_detail", loan_id=loan.id)
+
     extension_form = (
         BalanceExtensionForm(
-            None if is_signature_post else (request.POST or None),
+            None if (is_signature_post or is_reschedule_date_post) else (request.POST or None),
             maturity_date=maturity_date,
         )
         if can_extend
@@ -2176,7 +2250,13 @@ def officer_loan_detail(request, loan_id):
         for row in (balance_extension_previews(loan) if can_extend else [])
     ]
 
-    if request.method == "POST" and can_extend and not is_signature_post and extension_form.is_valid():
+    if (
+        request.method == "POST"
+        and can_extend
+        and not is_signature_post
+        and not is_reschedule_date_post
+        and extension_form.is_valid()
+    ):
         try:
             loan, quote = extend_loan_balance(
                 loan,
@@ -2236,6 +2316,9 @@ def officer_loan_detail(request, loan_id):
             "extension_previews": extension_previews,
             "extension_rate": BALANCE_EXTENSION_RATE,
             "loan_maturity_date": maturity_date,
+            "reschedule_date_form": reschedule_date_form,
+            "reschedule_maturity_date": reschedule_maturity_date,
+            "can_edit_reschedule_date": can_edit_reschedule_date,
             "pay_frequency": pay_freq,
             "pay_frequency_choices": list(LoanApplication.PaymentFrequency.choices),
             "chosen_pay_amount": loan_adjusted,

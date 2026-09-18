@@ -929,6 +929,15 @@ class Disbursement(Loan):
         verbose_name_plural = "Disbursements"
 
 
+class RescheduledLoan(Loan):
+    """Proxy for Django admin — loans whose remaining balance was rescheduled."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "Rescheduled loan"
+        verbose_name_plural = "Rescheduled loans"
+
+
 class DisbursementSetting(models.Model):
     """Singleton — which weekday/time fund releases are allowed, and whether the rule is on."""
 

@@ -537,6 +537,26 @@ def loan_maturity_date(loan):
     return last
 
 
+def pre_reschedule_maturity_date(loan):
+    """Last due date of the original (pre-reschedule) plan.
+
+    Used to enforce the same rule as the first balance extension: the reschedule
+    start date must be after that expired maturity day, not on it.
+    """
+    if loan.schedule_start_date is None:
+        return loan_maturity_date(loan)
+    terms = loan.original_schedule_terms()
+    rows = build_virtual_installments(
+        terms["principal"],
+        terms["interest_rate"],
+        terms["term_months"],
+        terms["start_date"],
+    )
+    if not rows:
+        return None
+    return rows[-1].due_date
+
+
 def loan_term_expired(loan):
     """True when the scheduled term has ended (last due date is before today)."""
     maturity = loan_maturity_date(loan)
@@ -813,6 +833,74 @@ def extend_loan_balance(loan, months, start_date=None):
     quote["new_principal"] = loan.principal
     quote["capital"] = remaining
     return loan, quote
+
+
+@transaction.atomic
+def update_reschedule_start_date(loan, start_date):
+    """Correct the reschedule start date and realign installment due dates.
+
+    Used when an officer mistyped the date after a balance-extension reschedule.
+    The new date must still be after the original expired maturity date (not that
+    day). If the loan has no payments yet, the schedule is rebuilt. Otherwise
+    installment due dates are shifted by the change in interest-start Monday.
+    """
+    if start_date is None:
+        raise BalanceExtensionError("Reschedule start date is required.")
+    if loan.schedule_start_date is None:
+        raise BalanceExtensionError("This loan has not been rescheduled.")
+
+    loan = Loan.objects.select_for_update().get(pk=loan.pk)
+    maturity = pre_reschedule_maturity_date(loan)
+    if maturity and start_date <= maturity:
+        raise BalanceExtensionError(
+            "Reschedule start date must be after the loan’s expired maturity date, not on that day."
+        )
+
+    old_date = loan.schedule_start_date
+    if old_date == start_date:
+        return loan, {
+            "changed": False,
+            "old_date": old_date,
+            "new_date": start_date,
+            "interest_start": _interest_start_monday(start_date),
+            "mode": "unchanged",
+            "moved_count": 0,
+            "delta_days": 0,
+        }
+
+    loan.schedule_start_date = start_date
+    loan.save(update_fields=["schedule_start_date"])
+
+    if not loan.payments.exists():
+        generate_schedule(loan)
+        return loan, {
+            "changed": True,
+            "old_date": old_date,
+            "new_date": start_date,
+            "interest_start": _interest_start_monday(start_date),
+            "mode": "rebuilt",
+            "moved_count": loan.installments.count(),
+            "delta_days": (
+                _interest_start_monday(start_date) - _interest_start_monday(old_date)
+            ).days,
+        }
+
+    delta = _interest_start_monday(start_date) - _interest_start_monday(old_date)
+    installments = list(loan.installments.all())
+    if delta.days != 0 and installments:
+        for item in installments:
+            item.due_date = item.due_date + delta
+        Installment.objects.bulk_update(installments, ["due_date"])
+
+    return loan, {
+        "changed": True,
+        "old_date": old_date,
+        "new_date": start_date,
+        "interest_start": _interest_start_monday(start_date),
+        "mode": "shifted" if delta.days else "aligned",
+        "moved_count": len(installments) if delta.days else 0,
+        "delta_days": delta.days,
+    }
 
 
 def schedule_is_stale(loan):

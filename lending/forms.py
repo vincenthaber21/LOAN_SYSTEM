@@ -1330,6 +1330,43 @@ class BalanceExtensionForm(forms.Form):
         return value
 
 
+class RescheduleStartDateForm(forms.Form):
+    """Correct a mistyped reschedule start date on an already-rescheduled loan."""
+
+    schedule_start_date = forms.DateField(
+        label="Reschedule start date",
+        help_text=(
+            "Correct this if the wrong date was entered. "
+            "Must be after the loan’s expired maturity date (not that day)."
+        ),
+        widget=forms.DateInput(
+            format="%Y-%m-%d",
+            attrs={"type": "date", "class": "form-control form-control-date"},
+        ),
+        input_formats=["%Y-%m-%d"],
+    )
+
+    def __init__(self, *args, initial_date=None, maturity_date=None, **kwargs):
+        self.maturity_date = maturity_date
+        super().__init__(*args, **kwargs)
+        if maturity_date:
+            min_start = maturity_date + timedelta(days=1)
+            self.fields["schedule_start_date"].widget.attrs["min"] = min_start.isoformat()
+        if not (self.is_bound or self.initial.get("schedule_start_date")):
+            self.initial["schedule_start_date"] = initial_date
+
+    def clean_schedule_start_date(self):
+        value = self.cleaned_data.get("schedule_start_date")
+        if value is None:
+            return value
+        if self.maturity_date and value <= self.maturity_date:
+            raise forms.ValidationError(
+                "Reschedule start date must be after the loan’s expired maturity date "
+                f"({self.maturity_date:%b %d, %Y}), not on that day."
+            )
+        return value
+
+
 class ExpiredMonthSignatureForm(forms.Form):
     month_number = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     start_date = forms.DateField(widget=forms.HiddenInput)
