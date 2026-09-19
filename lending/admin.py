@@ -5,6 +5,7 @@ from decimal import Decimal
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
+from django.contrib.admin.actions import delete_selected as django_delete_selected
 from django.contrib.auth.admin import UserAdmin
 from django.core.exceptions import PermissionDenied
 from django.db.models import Sum
@@ -17,7 +18,7 @@ try:  # Django 5.1+ splits the admin-facing creation form out
 except ImportError:  # pragma: no cover - older Django
     from django.contrib.auth.forms import UserCreationForm as BaseUserCreationForm
 
-from .audit import record_activity
+from .audit import application_decision_log, record_activity
 from .backup import (
     BackupError,
     backup_summary_lines,
@@ -32,6 +33,7 @@ from .services import (
     disbursement_start_time_label,
     normalize_credit_score,
     pre_reschedule_maturity_date,
+    reject_superseded_applications,
     update_reschedule_start_date,
 )
 from .models import (
@@ -98,13 +100,14 @@ class HarborlineAdminPermissionMixin:
         return self._is_harborline_admin(request) or super().has_delete_permission(request, obj)
 
 
-class RoleScopedUserAdmin(UserAdmin):
+class RoleScopedUserAdmin(HarborlineAdminPermissionMixin, UserAdmin):
     """Shared admin for the per-role user sections."""
 
     list_display = ("username", "full_name", "email", "role", "is_active", "date_joined")
     list_filter = ("is_active", "date_joined")
     search_fields = ("username", "email", "full_name", "phone")
     ordering = ("full_name", "username")
+    actions = ("delete_selected",)
     fieldsets = (
         (None, {"fields": ("username", "password")}),
         ("Profile", {"fields": PROFILE_FIELDS}),
@@ -149,6 +152,8 @@ class MemberCreationForm(BaseUserCreationForm):
 @admin.register(Member)
 class MemberAdmin(RoleScopedUserAdmin):
     list_display = ("username", "full_name", "email", "phone", "monthly_income", "credit_score_display", "is_active", "date_joined")
+    actions = ("delete_selected", "delete_all_members")
+    change_list_template = "admin/lending/member/change_list.html"
     add_form = MemberCreationForm
     add_form_template = "admin/lending/member/add_form.html"
     fieldsets = (
@@ -200,6 +205,29 @@ class MemberAdmin(RoleScopedUserAdmin):
         from .services import format_credit_score
 
         return format_credit_score(obj.credit_score)
+
+    def changelist_view(self, request, extra_context=None):
+        if request.method == "POST" and request.POST.get("_delete_all_members"):
+            if not self.has_delete_permission(request):
+                raise PermissionDenied
+            all_members = self.get_queryset(request)
+            if not all_members.exists():
+                self.message_user(request, "There are no members to delete.", messages.WARNING)
+                return HttpResponseRedirect(request.path)
+            return django_delete_selected(self, request, all_members)
+        return super().changelist_view(request, extra_context)
+
+    @admin.action(description="Delete all members")
+    def delete_all_members(self, request, queryset):
+        """Delete every member account (ignores checkbox selection)."""
+        if not self.has_delete_permission(request):
+            raise PermissionDenied
+        all_members = self.get_queryset(request)
+        if not all_members.exists():
+            self.message_user(request, "There are no members to delete.", messages.WARNING)
+            return None
+        # Reuse Django's confirmation + cascade summary for the full member set.
+        return django_delete_selected(self, request, all_members)
 
 
 @admin.register(LoanOfficer)
@@ -327,6 +355,8 @@ class DocumentInline(admin.TabularInline):
 
 @admin.register(LoanApplication)
 class LoanApplicationAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
+    change_list_template = "admin/lending/loanapplication/change_list.html"
+    change_form_template = "admin/lending/loanapplication/change_form.html"
     list_display = (
         "reference",
         "borrower_name",
@@ -355,7 +385,7 @@ class LoanApplicationAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         "branch_name",
         "business_name",
     )
-    actions = ("delete_selected",)
+    actions = ("delete_selected", "approve_selected", "reject_selected")
     readonly_fields = ("created_at",)
     date_hierarchy = "applied_on"
     inlines = (CharacterReferenceInline, DocumentInline)
@@ -465,9 +495,152 @@ class LoanApplicationAdmin(HarborlineAdminPermissionMixin, admin.ModelAdmin):
         }),
     )
 
+    DECIDABLE_STATUSES = {
+        LoanApplication.Status.DRAFT,
+        LoanApplication.Status.SUBMITTED,
+        LoanApplication.Status.UNDER_REVIEW,
+    }
+
     @admin.display(description="Borrower", ordering="borrower_surname")
     def borrower_name(self, obj):
         return obj.borrower_name
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            "borrower",
+            "loan_product",
+            "reviewed_by",
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        pending = LoanApplication.objects.filter(
+            status__in=[
+                LoanApplication.Status.SUBMITTED,
+                LoanApplication.Status.UNDER_REVIEW,
+            ],
+        ).select_related("borrower", "loan_product").order_by("created_at")
+        approved = LoanApplication.objects.filter(
+            status=LoanApplication.Status.APPROVED,
+        ).select_related("borrower", "loan_product").order_by("-decision_date", "-created_at")
+        for item in approved:
+            item.approved_at = item.decision_date.strftime("%b %d, %Y") if item.decision_date else "Recently"
+        pending_total = sum((item.amount_requested for item in pending), Decimal("0.00"))
+        approved_total = sum((item.amount_requested for item in approved), Decimal("0.00"))
+        extra_context.update({
+            "pending_queue": pending,
+            "pending_count": pending.count(),
+            "approved_queue": approved,
+            "approved_count": approved.count(),
+            "approval_metrics": [
+                {"label": "Awaiting approval", "value": pending.count(), "note": "Submitted / under review"},
+                {"label": "Pending principal", "value": f"₱{pending_total:,.0f}", "note": "Requested amount"},
+                {"label": "Approved to release", "value": f"₱{approved_total:,.0f}", "note": f"{approved.count()} application(s)"},
+            ],
+        })
+        return super().changelist_view(request, extra_context)
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        if (
+            object_id
+            and request.method == "POST"
+            and request.POST.get("_approve_loan_action")
+            and self.has_change_permission(request)
+        ):
+            application = self.get_object(request, object_id)
+            if application is None:
+                raise PermissionDenied
+            decision = request.POST.get("decision")
+            notes = (request.POST.get("decision_reason") or "").strip()
+            if not notes:
+                messages.error(request, "A decision note is required.")
+                return HttpResponseRedirect(request.path)
+            if application.status not in self.DECIDABLE_STATUSES:
+                messages.error(request, "This application is no longer awaiting a decision.")
+                return HttpResponseRedirect(request.path)
+            ok, message = self._apply_decision(application, request.user, decision, notes, request=request)
+            if ok:
+                messages.success(request, message)
+            else:
+                messages.error(request, message)
+            return HttpResponseRedirect(request.path)
+
+        extra_context = extra_context or {}
+        if object_id:
+            application = self.get_object(request, object_id)
+            extra_context["can_decide"] = bool(
+                application and application.status in self.DECIDABLE_STATUSES
+            )
+        else:
+            extra_context["can_decide"] = False
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def _apply_decision(self, application, user, decision, notes, request=None):
+        application.reviewed_by = user
+        application.review_notes = notes
+        application.decision_date = timezone.now()
+        if decision == "approve":
+            application.status = LoanApplication.Status.APPROVED
+            application.office_decision = LoanApplication.OfficeDecision.APPROVED
+            application.save()
+            application_decision_log(user, application, request=request)
+            reject_superseded_applications(application, user)
+            return True, f"{application.reference} approved and added to the disbursement queue."
+        if decision == "request_info":
+            application.status = LoanApplication.Status.UNDER_REVIEW
+            application.office_decision = LoanApplication.OfficeDecision.HOLD
+            application.save()
+            application_decision_log(user, application, request=request)
+            return True, f"{application.reference} marked for more information."
+        if decision == "reject":
+            application.status = LoanApplication.Status.REJECTED
+            application.office_decision = LoanApplication.OfficeDecision.DISAPPROVED
+            application.save()
+            application_decision_log(user, application, request=request)
+            return True, f"{application.reference} declined."
+        return False, "Choose approve, request more information, or decline."
+
+    @admin.action(description="Approve selected applications")
+    def approve_selected(self, request, queryset):
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        count = 0
+        for application in queryset.filter(status__in=self.DECIDABLE_STATUSES):
+            ok, _ = self._apply_decision(
+                application,
+                request.user,
+                "approve",
+                application.review_notes or "Approved from admin bulk action.",
+                request=request,
+            )
+            if ok:
+                count += 1
+        self.message_user(
+            request,
+            f"Approved {count} application(s)." if count else "No decidable applications were selected.",
+            messages.SUCCESS if count else messages.WARNING,
+        )
+
+    @admin.action(description="Decline selected applications")
+    def reject_selected(self, request, queryset):
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        count = 0
+        for application in queryset.filter(status__in=self.DECIDABLE_STATUSES):
+            ok, _ = self._apply_decision(
+                application,
+                request.user,
+                "reject",
+                application.review_notes or "Declined from admin bulk action.",
+                request=request,
+            )
+            if ok:
+                count += 1
+        self.message_user(
+            request,
+            f"Declined {count} application(s)." if count else "No decidable applications were selected.",
+            messages.SUCCESS if count else messages.WARNING,
+        )
 
 
 class InstallmentInline(admin.TabularInline):

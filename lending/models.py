@@ -720,7 +720,7 @@ class Loan(models.Model):
     @property
     def deduction_line_items(self):
         """Prefer the standard fee breakdown when amounts match; otherwise show stored fees."""
-        from .services import standard_disbursement_deductions
+        from .services import STANDARD_DISBURSEMENT_DEDUCTIONS, standard_disbursement_deductions
 
         standard = standard_disbursement_deductions()
         if (
@@ -728,6 +728,34 @@ class Loan(models.Model):
             and self.other_fees == standard["other_fees"]
         ):
             return standard["line_items"]
+
+        # Match a subset of standard fees when the officer removed some before release.
+        matched = []
+        processing_total = Decimal("0.00")
+        other_total = Decimal("0.00")
+        for item in STANDARD_DISBURSEMENT_DEDUCTIONS:
+            if item["is_processing_fee"]:
+                if self.processing_fee and processing_total + item["amount"] <= self.processing_fee:
+                    matched.append({
+                        "key": item["key"],
+                        "label": item["label"],
+                        "amount": item["amount"],
+                        "is_processing_fee": True,
+                    })
+                    processing_total += item["amount"]
+            elif self.other_fees and other_total + item["amount"] <= self.other_fees:
+                # Only include when the stored description still mentions this fee.
+                if not self.other_fees_description or item["label"] in self.other_fees_description:
+                    matched.append({
+                        "key": item["key"],
+                        "label": item["label"],
+                        "amount": item["amount"],
+                        "is_processing_fee": False,
+                    })
+                    other_total += item["amount"]
+        if matched and processing_total == self.processing_fee and other_total == self.other_fees:
+            return matched
+
         items = []
         if self.processing_fee:
             items.append({"label": "Processing fee", "amount": self.processing_fee})
@@ -1420,6 +1448,7 @@ class ActivityLog(models.Model):
     class Action(models.TextChoices):
         MEMBER_CREATED = "member_created", "Member created"
         MEMBER_UPDATED = "member_updated", "Member updated"
+        MEMBER_DELETED = "member_deleted", "Member deleted"
         APPLICATION_CREATED = "application_created", "Application created"
         APPLICATION_UPDATED = "application_updated", "Application updated"
         APPLICATION_APPROVED = "application_approved", "Application approved"

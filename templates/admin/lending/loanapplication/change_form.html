@@ -1,0 +1,211 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static lending_tags %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .hl-wrap { max-width: 980px; }
+  .hl-hero {
+    background: linear-gradient(135deg, #0f2e0c 0%, #186010 65%, #40c080 100%);
+    border-radius: 14px; padding: 26px 28px; color: #f5faf7; margin-bottom: 24px;
+  }
+  .hl-hero .hl-eyebrow { font-size: .68rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: rgba(223,241,235,.75); }
+  .hl-hero h1 { margin: 6px 0 8px; font-size: 1.7rem; color: #fff; font-weight: 700; }
+  .hl-hero p { margin: 0; max-width: 62ch; color: rgba(245,250,247,.85); font-size: .92rem; line-height: 1.5; }
+  .hl-chip { display: inline-block; margin-top: 12px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; padding: 4px 12px; font-size: .75rem; font-weight: 600; }
+  .hl-card { background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #e0e0e0); border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+  .hl-card-head { padding: 15px 20px; border-bottom: 1px solid var(--hairline-color, #e0e0e0); background: var(--darkened-bg, #f8f8f8); }
+  .hl-card-head h2 { margin: 0; font-size: 1rem; font-weight: 650; }
+  .hl-card-body { padding: 20px; }
+  .hl-card-desc { margin: 0; padding: 0 20px 14px; font-size: .78rem; color: var(--body-quiet-color, #666); }
+  .hl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+  .hl-field.hl-full { grid-column: 1 / -1; }
+  .hl-field label { display: block; font-weight: 600; font-size: .82rem; margin-bottom: 5px; color: var(--body-quiet-color, #666); }
+  .hl-field .hl-value { font-size: .95rem; font-weight: 600; color: var(--body-fg, #111); }
+  .hl-field .help, .hl-field .readonly { font-size: .9rem; }
+  .hl-field input, .hl-field select, .hl-field textarea {
+    width: 100%; box-sizing: border-box; padding: 8px 10px;
+    border: 1px solid var(--border-color, #ccc); border-radius: 8px; font-size: .9rem;
+    background: var(--body-bg, #fff); color: var(--body-fg, #333);
+  }
+  .hl-field input:focus, .hl-field select:focus, .hl-field textarea:focus {
+    border-color: #186010; outline: 0; box-shadow: 0 0 0 3px rgba(24,96,16,.16);
+  }
+  .hl-field.hl-readonly .hl-value { padding: 8px 0; }
+  .hl-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .hl-summary-item { background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #e0e0e0); border-radius: 12px; padding: 14px 16px; }
+  .hl-summary-label { font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--body-quiet-color, #666); }
+  .hl-summary-value { margin-top: 6px; font-size: 1.05rem; font-weight: 700; color: var(--body-fg, #111); }
+  .hl-decision { border-color: #cfe8d8; }
+  .hl-decision .hl-card-head { background: #eef8f1; }
+  .hl-decision-note { width: 100%; min-height: 90px; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border-color, #ccc); border-radius: 8px; font-size: .9rem; margin-bottom: 14px; }
+  .hl-decision-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .hl-btn { display: inline-block; border-radius: 8px; padding: 9px 16px; font-size: .87rem; font-weight: 600; text-decoration: none; border: 0; cursor: pointer; }
+  .hl-btn-primary { background: #186010; color: #fff !important; }
+  .hl-btn-primary:hover { background: #12480c; }
+  .hl-btn-secondary { background: var(--darkened-bg, #f3f3f3); color: var(--body-fg, #333) !important; border: 1px solid var(--hairline-color, #ddd); }
+  .hl-btn-danger { background: #8a1f1f; color: #fff !important; }
+  .hl-btn-danger:hover { background: #6e1818; }
+  .hl-recorded { font-size: .9rem; color: var(--body-fg, #222); line-height: 1.5; }
+  .hl-recorded .hl-sub { display: block; font-size: .78rem; color: var(--body-quiet-color, #666); margin-top: 4px; }
+  .hl-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 16px 20px; border-radius: 12px; border: 1px solid var(--hairline-color, #e0e0e0); background: var(--darkened-bg, #f8f8f8); }
+  .hl-actions input[type=submit], .hl-actions .deletelink-box a, .hl-actions .hl-link {
+    border-radius: 8px; padding: 9px 18px; font-size: .87rem; font-weight: 600; text-decoration: none;
+  }
+  .hl-actions input[type=submit].default { background: #186010; color: #fff; border: 0; cursor: pointer; }
+  .hl-actions input[type=submit].default:hover { background: #12480c; }
+  .hl-actions .hl-link { background: transparent; color: #12480c; border: 1px solid #40c080; }
+  .hl-actions .hl-link:hover { background: #e0f6eb; }
+  .inline-group { margin-bottom: 20px; }
+  @media (max-width: 900px) {
+    .hl-summary { grid-template-columns: 1fr 1fr; }
+    .hl-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) { .hl-summary { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {% if add %}{% translate 'Add' %} {{ opts.verbose_name }}{% else %}{{ original.reference }}{% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="hl-wrap">
+
+  {% if original %}
+  <div class="hl-hero">
+    <div class="hl-eyebrow">{{ app_name }} Lending · Approve loan</div>
+    <h1>{{ original.borrower_name }}</h1>
+    <p>{{ original.product_name }} · {{ original.amount_requested|peso }} over {{ original.term_months }} months · {{ original.get_payment_frequency_display }}</p>
+    <span class="hl-chip">{{ original.reference }} · {{ original.status_label }}</span>
+  </div>
+
+  <div class="hl-summary">
+    <div class="hl-summary-item">
+      <div class="hl-summary-label">Requested</div>
+      <div class="hl-summary-value">{{ original.amount_requested|peso }}</div>
+    </div>
+    <div class="hl-summary-item">
+      <div class="hl-summary-label">Purpose</div>
+      <div class="hl-summary-value">{{ original.get_loan_purpose_display|default:"—" }}</div>
+    </div>
+    <div class="hl-summary-item">
+      <div class="hl-summary-label">Type</div>
+      <div class="hl-summary-value">{{ original.get_application_type_display }}</div>
+    </div>
+    <div class="hl-summary-item">
+      <div class="hl-summary-label">Applied</div>
+      <div class="hl-summary-value">{{ original.submitted_at }}</div>
+    </div>
+  </div>
+
+  <div class="hl-card hl-decision">
+    <div class="hl-card-head"><h2>Loan decision</h2></div>
+    <div class="hl-card-body">
+      {% if can_decide %}
+        <form method="post" action="">
+          {% csrf_token %}
+          <input type="hidden" name="_approve_loan_action" value="1">
+          <label class="hl-field" for="id_decision_reason" style="display:block;margin-bottom:6px;">
+            <span style="font-weight:600;font-size:.82rem;color:var(--body-quiet-color,#666);">Decision note</span>
+          </label>
+          <textarea class="hl-decision-note" id="id_decision_reason" name="decision_reason" rows="4" placeholder="Explain the approve or decline decision in plain language." required>{{ original.review_notes }}</textarea>
+          <div class="hl-decision-actions">
+            <button class="hl-btn hl-btn-primary" type="submit" name="decision" value="approve">Approve application</button>
+            <button class="hl-btn hl-btn-secondary" type="submit" name="decision" value="request_info">Request more information</button>
+            <button class="hl-btn hl-btn-danger" type="submit" name="decision" value="reject">Decline application</button>
+          </div>
+        </form>
+      {% else %}
+        <div class="hl-recorded">
+          <strong>{{ original.status_label }}</strong>
+          {% if original.reviewed_by %}
+            <span class="hl-sub">Recorded by {{ original.reviewed_by.display_name }}{% if original.decision_date %} · {{ original.decision_date }}{% endif %}</span>
+          {% elif original.decision_date %}
+            <span class="hl-sub">{{ original.decision_date }}</span>
+          {% endif %}
+          {% if original.review_notes %}
+            <p style="margin:12px 0 0;">{{ original.review_notes }}</p>
+          {% endif %}
+          {% if original.status == "approved" and original.is_ready_for_disbursement %}
+            <p style="margin:14px 0 0;">
+              <a class="hl-btn hl-btn-primary" href="{% url 'admin:lending_disbursement_changelist' %}">Go to disbursements</a>
+            </p>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="hl-hero">
+    <div class="hl-eyebrow">{{ app_name }} Lending</div>
+    <h1>New loan application</h1>
+    <p>Create a KAP microfinance loan application from Django admin.</p>
+  </div>
+  {% endif %}
+
+  <form {% if has_file_field %}enctype="multipart/form-data" {% endif %}method="post" id="{{ opts.model_name }}_form" novalidate>
+    {% csrf_token %}
+    {% block form_top %}{% endblock %}
+
+    {% if errors %}
+      <div class="errornote">{% blocktranslate count counter=errors|length %}Please correct the error below.{% plural %}Please correct the errors below.{% endblocktranslate %}</div>
+      {{ adminform.form.non_field_errors }}
+    {% endif %}
+
+    {% for fieldset in adminform %}
+      <div class="hl-card">
+        <div class="hl-card-head"><h2>{{ fieldset.name|default:"Details" }}</h2></div>
+        {% if fieldset.description %}<p class="hl-card-desc">{{ fieldset.description }}</p>{% endif %}
+        <div class="hl-card-body">
+          <div class="hl-grid">
+            {% for line in fieldset %}
+              {% for field in line %}
+                <div class="hl-field {% if field.is_readonly %}hl-readonly{% endif %} {% if field.field.name in 'purpose,borrower_present_address,borrower_permanent_address,coborrower_present_address,coborrower_permanent_address,business_address,review_notes,additional_business_1_address,additional_business_2_address' %}hl-full{% endif %}">
+                  {% if field.is_checkbox %}
+                    {{ field.field }}{{ field.label_tag }}
+                  {% else %}
+                    {{ field.label_tag }}
+                    {% if field.is_readonly %}
+                      <div class="hl-value">{{ field.contents }}</div>
+                    {% else %}
+                      {{ field.field }}
+                    {% endif %}
+                  {% endif %}
+                  {% if field.field.help_text %}<p class="help">{{ field.field.help_text|safe }}</p>{% endif %}
+                  {{ field.errors }}
+                </div>
+              {% endfor %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+
+    {% block after_field_sets %}{% endblock %}
+    {% block after_related_objects %}{% endblock %}
+
+    {% if inline_admin_formsets %}
+      {% for inline_admin_formset in inline_admin_formsets %}
+        {% include inline_admin_formset.opts.template %}
+      {% endfor %}
+    {% endif %}
+
+    <div class="hl-actions">
+      {% if has_change_permission %}
+        <input type="submit" value="{% translate 'Save' %}" class="default" name="_save">
+      {% endif %}
+      <a class="hl-link" href="{% url opts|admin_urlname:'changelist' %}">Back to approve loans</a>
+      {% if has_delete_permission and original %}
+        {% url opts|admin_urlname:'delete' original.pk|admin_urlquote as delete_url %}
+        <a class="deletelink" href="{% add_preserved_filters delete_url %}">{% translate "Delete" %}</a>
+      {% endif %}
+    </div>
+  </form>
+
+</div>
+{% endblock %}

@@ -202,8 +202,24 @@ STANDARD_DISBURSEMENT_DEDUCTIONS = (
 )
 
 
-def standard_disbursement_deductions():
-    """Return the fixed fee breakdown applied on every disbursement."""
+def standard_deduction_keys():
+    """Return the ordered keys for the fixed disbursement fee list."""
+    return [item["key"] for item in STANDARD_DISBURSEMENT_DEDUCTIONS]
+
+
+def standard_disbursement_deductions(include_keys=None):
+    """Return the fixed fee breakdown applied on disbursement.
+
+    When ``include_keys`` is provided, only those deduction keys are included
+    (order preserved). Use this when an officer removes individual fees before release.
+    """
+    allowed = set(standard_deduction_keys())
+    if include_keys is None:
+        selected = list(STANDARD_DISBURSEMENT_DEDUCTIONS)
+    else:
+        selected_keys = [key for key in include_keys if key in allowed]
+        by_key = {item["key"]: item for item in STANDARD_DISBURSEMENT_DEDUCTIONS}
+        selected = [by_key[key] for key in selected_keys if key in by_key]
     line_items = [
         {
             "key": item["key"],
@@ -211,7 +227,7 @@ def standard_disbursement_deductions():
             "amount": item["amount"],
             "is_processing_fee": item["is_processing_fee"],
         }
-        for item in STANDARD_DISBURSEMENT_DEDUCTIONS
+        for item in selected
     ]
     processing_fee = sum(
         (item["amount"] for item in line_items if item["is_processing_fee"]),
@@ -233,6 +249,14 @@ def standard_disbursement_deductions():
         "other_fees_description": other_fees_description,
         "total": total,
     }
+
+
+def deduction_amount_for_key(deductions, key):
+    """Return the amount for a deduction key from a deductions payload, else 0."""
+    return next(
+        (item["amount"] for item in deductions["line_items"] if item["key"] == key),
+        Decimal("0.00"),
+    )
 
 
 def normalize_credit_score(score):
@@ -1802,6 +1826,8 @@ def disburse_application(
     other_fees=Decimal("0.00"),
     other_fees_description="",
     disbursed_by=None,
+    membership_deposit=None,
+    kap_contribution=None,
 ):
     if hasattr(application, "loan"):
         return application.loan
@@ -1839,8 +1865,11 @@ def disburse_application(
     application.decision_date = application.decision_date or timezone.now()
     application.save(update_fields=["status", "decision_date"])
 
-    # Credit compulsory deductions into savings / mutual aid for the member.
-    membership_deposit = _membership_savings_deposit_amount()
+    # Credit selected deductions into savings / mutual aid for the member.
+    # None means "use the standard amount"; Decimal("0") skips the credit
+    # (e.g. when the officer removed that deduction before release).
+    if membership_deposit is None:
+        membership_deposit = _membership_savings_deposit_amount()
     if membership_deposit > 0:
         from savings.services import credit_membership_savings_from_disbursement
 
@@ -1852,7 +1881,8 @@ def disburse_application(
             disbursed_date=loan.disbursed_date,
         )
 
-    kap_contribution = _kap_mutual_aid_contribution_amount()
+    if kap_contribution is None:
+        kap_contribution = _kap_mutual_aid_contribution_amount()
     if kap_contribution > 0:
         from mutual_aid.services import credit_kap_mutual_aid_from_disbursement
 

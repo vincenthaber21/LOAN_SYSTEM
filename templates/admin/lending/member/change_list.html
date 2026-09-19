@@ -1,0 +1,17 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+  {% if has_delete_permission and cl.full_result_count %}
+  <li>
+    <form method="post" action="" style="display:inline;" onsubmit="return confirm('Delete ALL {{ cl.full_result_count }} member{{ cl.full_result_count|pluralize }}? Related loans and applications may also be removed. This cannot be undone.');">
+      {% csrf_token %}
+      <input type="hidden" name="_delete_all_members" value="1">
+      <button type="submit" class="deletelink" style="border:0;cursor:pointer;font:inherit;">
+        {% translate "Delete all members" %}
+      </button>
+    </form>
+  </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

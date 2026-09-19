@@ -23,7 +23,7 @@ from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, RescheduleStartDateForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .audit import application_decision_log, browser_label, record_activity, record_staff_auth_event
 from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, LoginLogoutLog, Manager, Notification, Payment, User
-from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, pre_reschedule_maturity_date, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount, update_reschedule_start_date
+from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, deduction_amount_for_key, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, pre_reschedule_maturity_date, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_deduction_keys, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount, update_reschedule_start_date
 
 
 APPLICATION_DOCUMENT_SPECS = (
@@ -1628,6 +1628,56 @@ def edit_member(request, borrower_id):
 
 @login_required
 @role_required("admin")
+def delete_member(request, borrower_id):
+    """Delete this member's loan applications and loans only — keep the account, savings, and mutual aid."""
+    borrower = get_object_or_404(User.member_accounts(), pk=borrower_id)
+    next_name = request.POST.get("next") or request.GET.get("next") or "all_members"
+    if next_name not in {"all_members", "borrowers"}:
+        next_name = "all_members"
+    if request.method != "POST":
+        return redirect(next_name)
+
+    display_name = borrower.display_name()
+    reference = borrower.reference
+    applications = list(
+        LoanApplication.objects.filter(borrower=borrower).select_related("loan_product")
+    )
+    if not applications:
+        messages.info(request, f"{display_name} has no loan applications to delete.")
+        return redirect(next_name)
+
+    loan_count = Loan.objects.filter(application__borrower=borrower).count()
+    app_count = len(applications)
+    for application in applications:
+        application.delete()
+
+    record_activity(
+        request.user,
+        action=ActivityLog.Action.APPLICATION_DELETED,
+        kind=ActivityLog.Kind.MEMBER,
+        title=f"Loans deleted for {display_name}",
+        description=(
+            f"Removed {app_count} application(s) and {loan_count} loan(s) for {reference}. "
+            "Member account, savings, and mutual aid were left unchanged."
+        ),
+        member=borrower,
+        reference=reference,
+        status="active" if borrower.is_active else "inactive",
+        status_label="Loans deleted",
+        url_name="borrower_detail",
+        url_kwargs={"borrower_id": borrower.pk},
+        request=request,
+    )
+    messages.success(
+        request,
+        f"Deleted {app_count} loan application(s) and {loan_count} loan(s) for {display_name}. "
+        "Savings and mutual aid were not changed.",
+    )
+    return redirect(next_name)
+
+
+@login_required
+@role_required("admin")
 def loan_officers(request):
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
@@ -2592,8 +2642,8 @@ def disburse(request, disbursement_id):
         status__in=[LoanApplication.Status.APPROVED, LoanApplication.Status.ACTIVE, LoanApplication.Status.DISBURSED],
     )
     existing_loan = getattr(application, "loan", None)
-    deductions = standard_disbursement_deductions()
     day_ctx = _disbursement_day_context()
+    default_deductions = standard_disbursement_deductions()
     if existing_loan:
         return render(
             request,
@@ -2601,18 +2651,27 @@ def disburse(request, disbursement_id):
             {
                 "application": application,
                 "existing_loan": existing_loan,
-                "standard_deductions": deductions,
+                "standard_deductions": default_deductions,
+                "default_deductions": default_deductions,
                 **day_ctx,
             },
         )
     amount = application.amount_requested
     if request.method == "POST":
+        selected_keys = request.POST.getlist("deduction_key")
+        # Keep only known keys, in the standard display order.
+        allowed = set(standard_deduction_keys())
+        selected_keys = [key for key in standard_deduction_keys() if key in selected_keys and key in allowed]
+        deductions = standard_disbursement_deductions(include_keys=selected_keys)
         processing_fee = deductions["processing_fee"]
         other_fees = deductions["other_fees"]
+        membership_deposit = deduction_amount_for_key(deductions, "membership_savings")
+        kap_contribution = deduction_amount_for_key(deductions, "kap_mutual_aid")
         form_context = {
             "application": application,
             "form_data": request.POST,
             "standard_deductions": deductions,
+            "default_deductions": default_deductions,
             "net_release_preview": amount - deductions["total"],
             **day_ctx,
         }
@@ -2620,8 +2679,8 @@ def disburse(request, disbursement_id):
             messages.error(request, day_ctx["disbursement_day_message"])
             return render(request, "officer/disburse_form.html", form_context)
         if deductions["total"] > amount:
-            messages.error(request, "Standard deductions exceed the amount to release.")
-            form_context["processing_fee_error"] = "Standard deductions exceed the amount to release."
+            messages.error(request, "Selected deductions exceed the amount to release.")
+            form_context["processing_fee_error"] = "Selected deductions exceed the amount to release."
             return render(request, "officer/disburse_form.html", form_context)
         try:
             loan = disburse_application(
@@ -2634,6 +2693,8 @@ def disburse(request, disbursement_id):
                 other_fees=other_fees,
                 other_fees_description=deductions["other_fees_description"],
                 disbursed_by=request.user,
+                membership_deposit=membership_deposit,
+                kap_contribution=kap_contribution,
             )
         except DisbursementDayError as exc:
             messages.error(request, str(exc))
@@ -2646,14 +2707,6 @@ def disburse(request, disbursement_id):
                 messages.error(request, str(exc))
                 return render(request, "officer/disburse_form.html", form_context)
             raise
-        membership_deposit = next(
-            (item["amount"] for item in deductions["line_items"] if item["key"] == "membership_savings"),
-            Decimal("0.00"),
-        )
-        kap_contribution = next(
-            (item["amount"] for item in deductions["line_items"] if item["key"] == "kap_mutual_aid"),
-            Decimal("0.00"),
-        )
         extras = []
         if membership_deposit > 0:
             extras.append(f"₱{membership_deposit:,.2f} credited to Membership/Savings Deposit")
@@ -2684,10 +2737,12 @@ def disburse(request, disbursement_id):
         else:
             messages.success(request, f"{loan.reference} is now active and its repayment schedule has been generated.")
         return redirect("disbursement_receipt", disbursement_id=application.pk)
+    deductions = standard_disbursement_deductions()
     return render(request, "officer/disburse_form.html", {
         "application": application,
         "form_data": {},
         "standard_deductions": deductions,
+        "default_deductions": default_deductions,
         "net_release_preview": amount - deductions["total"],
         **day_ctx,
     })

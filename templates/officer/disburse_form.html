@@ -90,21 +90,35 @@
             <input class="form-control" id="reference" name="reference" placeholder="e.g. LUMEN-240617" value="{{ form_data.reference|default:'' }}" {% if not disbursement_allowed_today %}readonly{% endif %}>
           </div>
           <hr class="my-4">
-          <h3 class="h6 mb-1">Automatic deductions</h3>
-          <p class="text-muted small mb-3">These standard fees are deducted from the amount released for every application. Loan principal and interest are still based on the full approved amount above.</p>
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+            <h3 class="h6 mb-0">Automatic deductions</h3>
+            <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 d-none" id="restoreDeductionsBtn">Restore all</button>
+          </div>
+          <p class="text-muted small mb-3">These standard fees are deducted from the amount released. Remove any fee that should not apply to this release. Loan principal and interest are still based on the full approved amount above.</p>
           {% if processing_fee_error %}<div class="alert alert-danger py-2">{{ processing_fee_error }}</div>{% endif %}
           <div class="table-responsive mb-3">
-            <table class="table table-sm align-middle mb-0">
-              <tbody>
+            <table class="table table-sm align-middle mb-0" id="deductionsTable">
+              <tbody id="deductionsBody">
                 {% for item in standard_deductions.line_items %}
-                <tr>
-                  <td>{{ item.label }}</td>
-                  <td class="text-end fw-semibold">{{ item.amount|peso }}</td>
+                <tr class="deduction-row" data-key="{{ item.key }}" data-label="{{ item.label }}" data-amount="{{ item.amount }}" data-processing="{% if item.is_processing_fee %}1{% else %}0{% endif %}">
+                  <td>
+                    <input type="hidden" name="deduction_key" value="{{ item.key }}">
+                    {{ item.label }}
+                  </td>
+                  <td class="text-end fw-semibold text-nowrap">{{ item.amount|peso }}</td>
+                  <td class="text-end" style="width:2.5rem;">
+                    <button type="button" class="btn btn-sm btn-link text-danger p-0 remove-deduction-btn" title="Remove {{ item.label }}" aria-label="Remove {{ item.label }}">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </td>
                 </tr>
                 {% endfor %}
-                <tr class="border-top">
+                <tr id="deductionsEmptyRow" class="d-none">
+                  <td colspan="3" class="text-muted small py-3">No automatic deductions. The full approved amount will be released.</td>
+                </tr>
+                <tr class="border-top" id="deductionsTotalRow">
                   <td class="text-muted">Total deductions</td>
-                  <td class="text-end fw-semibold" id="totalDeductions">{{ standard_deductions.total|peso }}</td>
+                  <td class="text-end fw-semibold" id="totalDeductions" colspan="2">{{ standard_deductions.total|peso }}</td>
                 </tr>
               </tbody>
             </table>
@@ -134,8 +148,8 @@
         <div class="detail-label">Rate</div><div class="detail-value mb-3">{{ application.final_interest_rate|default:application.loan_product.interest_rate }}% flat / month</div>
         <div class="detail-label">Term</div><div class="detail-value mb-3">{{ application.final_term_months|default:application.term_months }} months</div>
         <div class="detail-label">Approved amount</div><div class="detail-value mb-3">{{ application.amount|peso }}</div>
-        <div class="detail-label">Standard deductions</div><div class="detail-value mb-3">{{ standard_deductions.total|peso }}</div>
-        <div class="detail-label">Net to release</div><div class="detail-value">{{ net_release_preview|peso }}</div>
+        <div class="detail-label">Standard deductions</div><div class="detail-value mb-3" id="sidebarDeductionsTotal">{{ standard_deductions.total|peso }}</div>
+        <div class="detail-label">Net to release</div><div class="detail-value" id="sidebarNetRelease">{{ net_release_preview|peso }}</div>
       </div>
     </div>
   </div>
@@ -168,13 +182,38 @@
   </div>
 </div>
 {% endif %}
+{% if default_deductions %}
+<script type="application/json" id="defaultDeductionsData">
+[
+{% for item in default_deductions.line_items %}
+  {"key": "{{ item.key|escapejs }}", "label": "{{ item.label|escapejs }}", "amount": "{{ item.amount }}", "is_processing_fee": {% if item.is_processing_fee %}true{% else %}false{% endif %}}{% if not forloop.last %},{% endif %}
+{% endfor %}
+]
+</script>
+{% endif %}
 <script>
 (function () {
   var amountInput = document.getElementById('amount');
   if (!amountInput) { return; }
   var processingFeeInput = document.getElementById('processing_fee');
   var otherFeesInput = document.getElementById('other_fees');
+  var otherFeesDescInput = document.getElementById('other_fees_description');
   var netAmountEl = document.getElementById('netAmount');
+  var totalDeductionsEl = document.getElementById('totalDeductions');
+  var sidebarDeductionsEl = document.getElementById('sidebarDeductionsTotal');
+  var sidebarNetEl = document.getElementById('sidebarNetRelease');
+  var confirmDeductionsEl = document.getElementById('confirmDisburseDeductions');
+  var deductionsBody = document.getElementById('deductionsBody');
+  var emptyRow = document.getElementById('deductionsEmptyRow');
+  var totalRow = document.getElementById('deductionsTotalRow');
+  var restoreBtn = document.getElementById('restoreDeductionsBtn');
+  var defaultDeductions = [];
+  try {
+    var dataEl = document.getElementById('defaultDeductionsData');
+    defaultDeductions = dataEl ? JSON.parse(dataEl.textContent) : [];
+  } catch (err) {
+    defaultDeductions = [];
+  }
 
   function formatAmount(raw) {
     var clean = String(raw).replace(/[^\d.]/g, '');
@@ -189,16 +228,106 @@
     return formattedInt + decPart;
   }
 
+  function peso(value) {
+    return '₱' + formatAmount(Number(value).toFixed(2));
+  }
+
   function toNumber(input) {
     if (!input) { return 0; }
-    return parseFloat(String(input.value).replace(/,/g, '')) || 0;
+    return parseFloat(String(input.value != null ? input.value : input).replace(/,/g, '')) || 0;
+  }
+
+  function activeRows() {
+    return deductionsBody ? Array.prototype.slice.call(deductionsBody.querySelectorAll('tr.deduction-row')) : [];
+  }
+
+  function syncFeeInputs() {
+    var processing = 0;
+    var other = 0;
+    var otherParts = [];
+    activeRows().forEach(function (row) {
+      var amount = parseFloat(row.getAttribute('data-amount')) || 0;
+      var label = row.getAttribute('data-label') || '';
+      if (row.getAttribute('data-processing') === '1') {
+        processing += amount;
+      } else {
+        other += amount;
+        otherParts.push(label + ' (' + Math.round(amount) + ')');
+      }
+    });
+    if (processingFeeInput) { processingFeeInput.value = processing.toFixed(2); }
+    if (otherFeesInput) { otherFeesInput.value = other.toFixed(2); }
+    if (otherFeesDescInput) {
+      var desc = otherParts.join('; ');
+      if (desc.length > 120) { desc = desc.slice(0, 117) + '...'; }
+      otherFeesDescInput.value = desc;
+    }
   }
 
   function updateNetAmount() {
-    if (!netAmountEl) { return; }
-    var net = toNumber(amountInput) - toNumber(processingFeeInput) - toNumber(otherFeesInput);
-    netAmountEl.textContent = '₱' + formatAmount(net.toFixed(2));
+    syncFeeInputs();
+    var total = toNumber(processingFeeInput) + toNumber(otherFeesInput);
+    var net = toNumber(amountInput) - total;
+    var totalText = peso(total);
+    var netText = peso(net);
+    if (netAmountEl) { netAmountEl.textContent = netText; }
+    if (totalDeductionsEl) { totalDeductionsEl.textContent = totalText; }
+    if (sidebarDeductionsEl) { sidebarDeductionsEl.textContent = totalText; }
+    if (sidebarNetEl) { sidebarNetEl.textContent = netText; }
+    if (confirmDeductionsEl) { confirmDeductionsEl.textContent = totalText; }
+    var hasRows = activeRows().length > 0;
+    if (emptyRow) { emptyRow.classList.toggle('d-none', hasRows); }
+    if (restoreBtn) {
+      restoreBtn.classList.toggle('d-none', activeRows().length >= defaultDeductions.length);
+    }
   }
+
+  function bindRemoveButtons(scope) {
+    (scope || document).querySelectorAll('.remove-deduction-btn').forEach(function (btn) {
+      if (btn.dataset.bound === '1') { return; }
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', function () {
+        var row = btn.closest('tr.deduction-row');
+        if (row) { row.remove(); }
+        updateNetAmount();
+      });
+    });
+  }
+
+  function buildDeductionRow(item) {
+    var tr = document.createElement('tr');
+    tr.className = 'deduction-row';
+    tr.setAttribute('data-key', item.key);
+    tr.setAttribute('data-label', item.label);
+    tr.setAttribute('data-amount', item.amount);
+    tr.setAttribute('data-processing', item.is_processing_fee ? '1' : '0');
+    var amountNum = parseFloat(item.amount) || 0;
+    var safeKey = String(item.key).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    var safeLabel = String(item.label).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    tr.innerHTML =
+      '<td><input type="hidden" name="deduction_key" value="' + safeKey + '">' + safeLabel + '</td>' +
+      '<td class="text-end fw-semibold text-nowrap">' + peso(amountNum) + '</td>' +
+      '<td class="text-end" style="width:2.5rem;">' +
+      '<button type="button" class="btn btn-sm btn-link text-danger p-0 remove-deduction-btn" title="Remove ' +
+      safeLabel + '" aria-label="Remove ' + safeLabel + '">' +
+      '<i class="bi bi-trash"></i></button></td>';
+    return tr;
+  }
+
+  function restoreAllDeductions() {
+    if (!deductionsBody || !totalRow) { return; }
+    activeRows().forEach(function (row) { row.remove(); });
+    defaultDeductions.forEach(function (item) {
+      deductionsBody.insertBefore(buildDeductionRow(item), emptyRow || totalRow);
+    });
+    bindRemoveButtons(deductionsBody);
+    updateNetAmount();
+  }
+
+  if (restoreBtn) {
+    restoreBtn.addEventListener('click', restoreAllDeductions);
+  }
+  bindRemoveButtons();
 
   if (amountInput.value) {
     amountInput.value = formatAmount(amountInput.value);
@@ -250,6 +379,9 @@
       document.getElementById('confirmDisburseDate').textContent = (disbursedDateInput && disbursedDateInput.value) || '—';
       document.getElementById('confirmDisburseMethod').textContent = methodSelect ? selectedText(methodSelect) : '—';
       document.getElementById('confirmDisburseReference').textContent = (referenceInput && referenceInput.value.trim()) || '—';
+      if (confirmDeductionsEl) {
+        confirmDeductionsEl.textContent = totalDeductionsEl ? totalDeductionsEl.textContent : '—';
+      }
       document.getElementById('confirmDisburseNet').textContent = netAmountEl ? netAmountEl.textContent : '—';
 
       bootstrap.Modal.getOrCreateInstance(confirmModalEl).show();

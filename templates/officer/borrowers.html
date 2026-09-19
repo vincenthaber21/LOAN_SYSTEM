@@ -121,6 +121,14 @@
             <td class="table-actions">
               <div class="table-row-actions">
                 <a class="btn btn-sm btn-light" href="{% url 'borrower_detail' borrower_id=member.id %}">{% if member.active_loan_count > 1 %}View loans{% else %}View loan{% endif %}</a>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'edit_member' borrower_id=member.id %}" aria-label="Edit member"><i class="bi bi-pencil"></i></a>
+                {% if request.user.is_admin %}
+                <form method="post" action="{% url 'delete_member' borrower_id=member.id %}" onsubmit="return confirm('Delete all loans and loan applications for {{ member.full_name|default:member.email }}? The member account, savings, and mutual aid will not be removed.');">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="borrowers">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete loans"><i class="bi bi-trash"></i></button>
+                </form>
+                {% endif %}
               </div>
             </td>
           </tr>
