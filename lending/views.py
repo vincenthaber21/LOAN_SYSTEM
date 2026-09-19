@@ -1678,6 +1678,54 @@ def delete_member(request, borrower_id):
 
 @login_required
 @role_required("admin")
+def delete_all_borrower_loans(request):
+    """Delete loan applications/loans for every member on the borrowers list (one click)."""
+    if request.method != "POST":
+        return redirect("borrowers")
+
+    query = (request.POST.get("q") or "").strip()
+    status = (request.POST.get("status") or "").strip()
+    members = list(_members_queryset(query, status, active_loans_only=True))
+    if not members:
+        messages.info(request, "No members with loans match the current filters.")
+        return redirect("borrowers")
+
+    member_ids = [member.pk for member in members]
+    applications = LoanApplication.objects.filter(borrower_id__in=member_ids)
+    app_count = applications.count()
+    loan_count = Loan.objects.filter(application__borrower_id__in=member_ids).count()
+    if app_count == 0:
+        messages.info(request, "No loan applications to delete.")
+        return redirect("borrowers")
+
+    applications.delete()
+    member_count = len(member_ids)
+    record_activity(
+        request.user,
+        action=ActivityLog.Action.APPLICATION_DELETED,
+        kind=ActivityLog.Kind.MEMBER,
+        title="Bulk loan delete",
+        description=(
+            f"Removed {app_count} application(s) and {loan_count} loan(s) "
+            f"across {member_count} member(s). "
+            "Member accounts, savings, and mutual aid were left unchanged."
+        ),
+        status="completed",
+        status_label="Loans deleted",
+        url_name="borrowers",
+        request=request,
+        source_key=f"bulk_loan_delete:{timezone.now().isoformat()}",
+    )
+    messages.success(
+        request,
+        f"Deleted {app_count} loan application(s) and {loan_count} loan(s) "
+        f"for {member_count} member(s). Savings and mutual aid were not changed.",
+    )
+    return redirect("borrowers")
+
+
+@login_required
+@role_required("admin")
 def loan_officers(request):
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()

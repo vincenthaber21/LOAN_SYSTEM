@@ -15,6 +15,14 @@
     <a class="btn btn-outline-secondary" href="{% url 'all_members' %}"><i class="bi bi-people me-1"></i>All members</a>
     <a class="btn btn-primary" href="{% url 'add_member' %}"><i class="bi bi-person-plus me-1"></i>Add member</a>
     <a class="btn btn-outline-primary csv-link" href="{% url 'export_borrowers_csv' %}?q={{ filters.q }}&status={{ filters.status }}"><i class="bi bi-download"></i>Export CSV</a>
+    {% if request.user.is_admin and member_count %}
+    <form method="post" action="{% url 'delete_all_borrower_loans' %}" class="d-inline" onsubmit="return confirm('Delete all loans and loan applications for the {{ member_count }} member{{ member_count|pluralize }} shown here? Member accounts, savings, and mutual aid will not be removed.');">
+      {% csrf_token %}
+      <input type="hidden" name="q" value="{{ filters.q|default:'' }}">
+      <input type="hidden" name="status" value="{{ filters.status|default:'' }}">
+      <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash3 me-1"></i>Delete all loans</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 
