@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django import forms
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import SavingsAccount, SavingsProduct, SavingsTransaction
@@ -309,6 +310,68 @@ class OfficerOpenAccountForm(forms.Form):
                 "initial_deposit",
                 f"Initial deposit must be at least ₱{product.min_deposit:,.2f}.",
             )
+        opened_on = cleaned.get("opened_on")
+        if opened_on and opened_on > timezone.localdate():
+            self.add_error("opened_on", "Account open date cannot be in the future.")
+        return cleaned
+
+
+class OfficerEditSavingsAccountForm(forms.Form):
+    member = forms.ModelChoiceField(
+        queryset=None,
+        label="Member",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    product = forms.ModelChoiceField(
+        queryset=SavingsProduct.objects.none(),
+        label="Savings product",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    opened_on = forms.DateField(
+        label="Account open date",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+        help_text="The date this account is considered opened.",
+    )
+
+    def __init__(self, *args, account=None, **kwargs):
+        from lending.models import User
+
+        self.account = account
+        super().__init__(*args, **kwargs)
+        self.fields["member"].queryset = User.member_accounts().filter(is_active=True).order_by(
+            "full_name", "username"
+        )
+        self.fields["opened_on"].widget.attrs["max"] = timezone.localdate().isoformat()
+        products = SavingsProduct.objects.filter(is_active=True)
+        if account and account.product_id:
+            products = SavingsProduct.objects.filter(
+                Q(is_active=True) | Q(pk=account.product_id)
+            )
+        self.fields["product"].queryset = products.order_by("name")
+        if account and not self.is_bound:
+            self.fields["member"].initial = account.member_id
+            self.fields["product"].initial = account.product_id
+            self.fields["opened_on"].initial = timezone.localtime(account.opened_at).date()
+
+    def clean(self):
+        cleaned = super().clean()
+        member = cleaned.get("member")
+        product = cleaned.get("product")
+        if member and product and self.account:
+            conflict = (
+                SavingsAccount.objects.filter(
+                    member=member,
+                    product=product,
+                    status=SavingsAccount.Status.ACTIVE,
+                )
+                .exclude(pk=self.account.pk)
+                .exists()
+            )
+            if conflict:
+                self.add_error(
+                    "product",
+                    f"{member.display_name()} already has an active {product.name} account.",
+                )
         opened_on = cleaned.get("opened_on")
         if opened_on and opened_on > timezone.localdate():
             self.add_error("opened_on", "Account open date cannot be in the future.")

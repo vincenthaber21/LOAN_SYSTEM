@@ -50,7 +50,7 @@
     {% if memberships %}
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
-        <thead><tr><th>Membership</th><th>Member</th><th>Plan</th><th>Status</th><th class="text-end">Contributed</th><th class="text-end">Benefits claimed</th><th></th></tr></thead>
+        <thead><tr><th>Membership</th><th>Member</th><th>Plan</th><th>Status</th><th class="text-end">Contributed</th><th class="text-end">Benefits claimed</th><th class="table-actions"><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {% for membership in memberships %}
           <tr>
@@ -60,7 +60,18 @@
             <td><span class="badge status-{{ membership.status }}">{{ membership.status_label }}</span></td>
             <td class="text-end fw-semibold">{{ membership.total_contributed|peso }}</td>
             <td class="text-end fw-semibold text-success">{{ membership.benefits_claimed|peso }}</td>
-            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{% url 'officer_mutual_aid_membership_detail' membership_id=membership.id %}">Manage</a></td>
+            <td class="table-actions">
+              <div class="table-row-actions">
+                <a class="btn btn-sm btn-light" href="{% url 'officer_mutual_aid_membership_detail' membership_id=membership.id %}">Manage</a>
+                {% if is_manager %}
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_edit_mutual_aid_membership' membership_id=membership.id %}" aria-label="Edit membership" title="Edit membership"><i class="bi bi-pencil"></i></a>
+                <form method="post" action="{% url 'officer_delete_mutual_aid_membership' membership_id=membership.id %}" onsubmit="return confirm('Delete membership {{ membership.reference }} for {{ membership.member.display_name }}? All contributions and claims on this membership will also be deleted. This cannot be undone.');">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete membership" title="Delete membership"><i class="bi bi-trash"></i></button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>

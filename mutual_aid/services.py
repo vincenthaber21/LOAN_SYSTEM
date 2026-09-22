@@ -192,6 +192,70 @@ def enroll_member(member, plan, enrolled_by=None, notes="", enrolled_on=None):
 
 
 @transaction.atomic
+def update_membership(membership, *, member, plan, notes="", enrolled_on=None):
+    """Correct mistaken membership details (member, plan, notes, or enroll date)."""
+    membership = (
+        MutualAidMembership.objects.select_for_update()
+        .select_related("member", "plan")
+        .get(pk=membership.pk)
+    )
+
+    if membership.status == MutualAidMembership.Status.ACTIVE:
+        conflict = (
+            MutualAidMembership.objects.filter(
+                member=member,
+                plan=plan,
+                status=MutualAidMembership.Status.ACTIVE,
+            )
+            .exclude(pk=membership.pk)
+            .exists()
+        )
+        if conflict:
+            raise MutualAidError(
+                f"{member.display_name()} already has an active {plan.name} membership."
+            )
+
+    plan_changed = membership.plan_id != plan.pk
+    if enrolled_on is not None:
+        if enrolled_on > timezone.localdate():
+            raise MutualAidError("Enrollment date cannot be in the future.")
+        membership.enrolled_at = _datetime_on_date(enrolled_on)
+
+    membership.member = member
+    membership.plan = plan
+    membership.notes = notes or ""
+    membership.save(update_fields=["member", "plan", "notes", "enrolled_at"])
+
+    if plan_changed:
+        membership.contributions.filter(period__isnull=False).update(period=None)
+
+    return membership
+
+
+@transaction.atomic
+def delete_membership(membership):
+    """Remove a mistaken membership and all related contributions and claims."""
+    membership = (
+        MutualAidMembership.objects.select_for_update()
+        .select_related("member", "plan")
+        .get(pk=membership.pk)
+    )
+    reference = membership.membership_number
+    member = membership.member
+    plan_name = membership.plan_name
+    total_contributed = membership.total_contributed
+    membership.contributions.all().delete()
+    membership.claims.all().delete()
+    membership.delete()
+    return {
+        "reference": reference,
+        "member": member,
+        "plan_name": plan_name,
+        "total_contributed": total_contributed,
+    }
+
+
+@transaction.atomic
 def create_period(plan, date_from, date_to, label=""):
     if date_to < date_from:
         raise MutualAidError("End date must be on or after the start date.")

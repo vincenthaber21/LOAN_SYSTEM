@@ -17,6 +17,16 @@ urlpatterns = [
         views.officer_mutual_aid_membership_detail,
         name="officer_mutual_aid_membership_detail",
     ),
+    path(
+        "officer/mutual-aid/<int:membership_id>/edit/",
+        views.officer_edit_mutual_aid_membership,
+        name="officer_edit_mutual_aid_membership",
+    ),
+    path(
+        "officer/mutual-aid/<int:membership_id>/delete/",
+        views.officer_delete_mutual_aid_membership,
+        name="officer_delete_mutual_aid_membership",
+    ),
     path("officer/mutual-aid/plans/", views.officer_mutual_aid_plans, name="officer_mutual_aid_plans"),
     path("officer/mutual-aid/plans/add/", views.officer_add_mutual_aid_plan, name="officer_add_mutual_aid_plan"),
     path(

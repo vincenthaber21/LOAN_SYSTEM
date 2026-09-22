@@ -348,7 +348,7 @@ body.auth-body .app-footer { background: var(--paper); }
 .status-approved, .status-funded, .status-paid, .status-active, .status-disbursed, .status-online { background: #d8f0e4; color: #186010; }
 .status-pending, .status-review, .status-processing, .status-submitted, .status-under_review { background: #fff0dc; color: #9b5b21; }
 .status-draft, .status-upcoming, .status-closed, .status-inactive, .status-suspended, .status-terminated { background: #e7efe8; color: #527058; }
-.status-declined, .status-overdue, .status-error, .status-rejected, .status-defaulted { background: #f8e1df; color: #994a4c; }
+.status-declined, .status-overdue, .status-error, .status-rejected, .status-defaulted, .status-deleted { background: #f8e1df; color: #994a4c; }
 .status-neutral { background: #e9ece8; color: #62716a; }
 .table { --bs-table-bg: transparent; color: var(--ink); margin-bottom: 0; width: 100%; }
 .table thead th {

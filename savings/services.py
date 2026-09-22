@@ -269,6 +269,63 @@ def close_account(account, closed_by=None):
     return account
 
 
+@transaction.atomic
+def update_account(account, *, member, product, opened_on=None):
+    """Correct mistaken account details (member, product, or open date)."""
+    account = (
+        SavingsAccount.objects.select_for_update()
+        .select_related("member", "product")
+        .get(pk=account.pk)
+    )
+
+    if account.status == SavingsAccount.Status.ACTIVE:
+        conflict = (
+            SavingsAccount.objects.filter(
+                member=member,
+                product=product,
+                status=SavingsAccount.Status.ACTIVE,
+            )
+            .exclude(pk=account.pk)
+            .exists()
+        )
+        if conflict:
+            raise SavingsError(
+                f"{member.display_name()} already has an active {product.name} account."
+            )
+
+    if opened_on is not None:
+        if opened_on > timezone.localdate():
+            raise SavingsError("Account open date cannot be in the future.")
+        account.opened_at = _opened_at_from_date(opened_on)
+
+    account.member = member
+    account.product = product
+    account.save(update_fields=["member", "product", "opened_at"])
+    return account
+
+
+@transaction.atomic
+def delete_account(account):
+    """Remove a mistaken savings account and all of its ledger entries."""
+    account = (
+        SavingsAccount.objects.select_for_update()
+        .select_related("member", "product")
+        .get(pk=account.pk)
+    )
+    reference = account.reference
+    member = account.member
+    product_name = account.product_name
+    balance = account.balance
+    account.transactions.all().delete()
+    account.delete()
+    return {
+        "reference": reference,
+        "member": member,
+        "product_name": product_name,
+        "balance": balance,
+    }
+
+
 def _rebuild_ledger_balances(account):
     """Recompute balance_after for every row and sync account.balance."""
     running = Decimal("0.00")

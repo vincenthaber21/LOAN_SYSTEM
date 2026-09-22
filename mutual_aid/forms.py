@@ -97,6 +97,71 @@ class OfficerEnrollForm(forms.Form):
         return cleaned
 
 
+class OfficerEditMembershipForm(forms.Form):
+    member = forms.ModelChoiceField(
+        queryset=None,
+        label="Member",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    plan = forms.ModelChoiceField(
+        queryset=MutualAidPlan.objects.none(),
+        label="Mutual aid plan",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    enrolled_on = forms.DateField(
+        label="Enrollment date",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+        help_text="The date this membership is considered enrolled.",
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Optional enrollment notes"}),
+    )
+
+    def __init__(self, *args, membership=None, **kwargs):
+        self.membership = membership
+        super().__init__(*args, **kwargs)
+        self.fields["member"].queryset = User.member_accounts().filter(is_active=True).order_by(
+            "full_name", "username"
+        )
+        self.fields["enrolled_on"].widget.attrs["max"] = timezone.localdate().isoformat()
+        plans = MutualAidPlan.objects.filter(is_active=True)
+        if membership and membership.plan_id:
+            from django.db.models import Q
+
+            plans = MutualAidPlan.objects.filter(Q(is_active=True) | Q(pk=membership.plan_id))
+        self.fields["plan"].queryset = plans.order_by("name")
+        if membership and not self.is_bound:
+            self.fields["member"].initial = membership.member_id
+            self.fields["plan"].initial = membership.plan_id
+            self.fields["enrolled_on"].initial = timezone.localtime(membership.enrolled_at).date()
+            self.fields["notes"].initial = membership.notes
+
+    def clean(self):
+        cleaned = super().clean()
+        member = cleaned.get("member")
+        plan = cleaned.get("plan")
+        if member and plan and self.membership:
+            conflict = (
+                MutualAidMembership.objects.filter(
+                    member=member,
+                    plan=plan,
+                    status=MutualAidMembership.Status.ACTIVE,
+                )
+                .exclude(pk=self.membership.pk)
+                .exists()
+            )
+            if conflict:
+                self.add_error(
+                    "plan",
+                    f"{member.display_name()} already has an active {plan.name} membership.",
+                )
+        enrolled_on = cleaned.get("enrolled_on")
+        if enrolled_on and enrolled_on > timezone.localdate():
+            self.add_error("enrolled_on", "Enrollment date cannot be in the future.")
+        return cleaned
+
+
 class MutualAidPeriodForm(forms.ModelForm):
     class Meta:
         model = MutualAidPeriod

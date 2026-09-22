@@ -14,6 +14,7 @@ from lending.audit import record_activity
 from lending.models import ActivityLog, User
 
 from .forms import (
+    OfficerEditSavingsAccountForm,
     OfficerEditSavingsTransactionForm,
     OfficerOpenAccountForm,
     OfficerSavingsTransactionForm,
@@ -30,12 +31,14 @@ from .services import (
     SavingsError,
     apply_due_interest,
     close_account,
+    delete_account,
     delete_transaction,
     interest_schedule_state,
     open_account,
     record_deposit,
     record_withdrawal,
     resolve_membership_savings_product,
+    update_account,
     update_transaction,
 )
 
@@ -550,6 +553,95 @@ def officer_open_savings_account(request):
             messages.error(request, str(exc))
     products = SavingsProduct.objects.filter(is_active=True).order_by("name")
     return render(request, "officer/open_savings_account.html", {"form": form, "products": products})
+
+
+@login_required
+@role_required("manager")
+def officer_edit_savings_account(request, account_id):
+    account = get_object_or_404(
+        SavingsAccount.objects.select_related("member", "product"),
+        pk=account_id,
+    )
+    form = OfficerEditSavingsAccountForm(
+        request.POST or None,
+        account=account,
+        initial={
+            "member": account.member_id,
+            "product": account.product_id,
+            "opened_on": timezone.localtime(account.opened_at).date(),
+        },
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            update_account(
+                account,
+                member=form.cleaned_data["member"],
+                product=form.cleaned_data["product"],
+                opened_on=form.cleaned_data.get("opened_on"),
+            )
+            account.refresh_from_db()
+            record_activity(
+                request.user,
+                action=ActivityLog.Action.SAVINGS_ACCOUNT_UPDATED,
+                kind=ActivityLog.Kind.SAVINGS,
+                title=f"Savings account {account.reference} updated",
+                description=(
+                    f"Corrected account details for {account.member.display_name()} "
+                    f"· {account.product_name}."
+                ),
+                member=account.member,
+                reference=account.reference,
+                amount=account.balance,
+                status="updated",
+                status_label="Updated",
+                url_name="officer_savings_account_detail",
+                url_kwargs={"account_id": account.pk},
+                request=request,
+            )
+            messages.success(request, f"Savings account {account.reference} updated.")
+            return redirect("officer_savings_accounts")
+        except SavingsError as exc:
+            messages.error(request, str(exc))
+    return render(request, "officer/edit_savings_account.html", {
+        "account": account,
+        "form": form,
+    })
+
+
+@login_required
+@role_required("manager")
+def officer_delete_savings_account(request, account_id):
+    account = get_object_or_404(
+        SavingsAccount.objects.select_related("member", "product"),
+        pk=account_id,
+    )
+    if request.method != "POST":
+        return redirect("officer_savings_accounts")
+    try:
+        deleted = delete_account(account)
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.SAVINGS_ACCOUNT_DELETED,
+            kind=ActivityLog.Kind.SAVINGS,
+            title=f"Savings account {deleted['reference']} deleted",
+            description=(
+                f"Removed mistaken {deleted['product_name']} account "
+                f"for {deleted['member'].display_name()}."
+            ),
+            member=deleted["member"],
+            reference=deleted["reference"],
+            amount=deleted["balance"],
+            status="deleted",
+            status_label="Deleted",
+            request=request,
+        )
+        messages.success(
+            request,
+            f"Savings account {deleted['reference']} and its ledger entries were deleted.",
+        )
+    except SavingsError as exc:
+        messages.error(request, str(exc))
+    return redirect("officer_savings_accounts")
 
 
 @login_required

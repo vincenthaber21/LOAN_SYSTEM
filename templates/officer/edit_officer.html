@@ -68,6 +68,14 @@
                 {% if form.is_active.errors %}<div class="invalid-feedback d-block">{{ form.is_active.errors|join:", " }}</div>{% endif %}
               </div>
             </div>
+            <div class="col-12">
+              <div class="d-flex flex-wrap align-items-center gap-2 pt-1">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#changePasswordModal">
+                  <i class="bi bi-key me-1"></i>Change password
+                </button>
+                <span class="helptext mb-0">Sets a new sign-in password for this officer.</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -77,6 +85,47 @@
         <a href="{% url 'loan_officers' %}" class="btn btn-outline-secondary">Cancel</a>
       </div>
     </form>
+  </div>
+</div>
+
+<div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="action" value="change_password">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5" id="changePasswordModalLabel"><i class="bi bi-key me-2"></i>Change password</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted mb-3" style="font-size:.88rem;">Set a new password for <strong>{{ officer.display_name }}</strong>. Share it with them securely — they can sign in with it right away.</p>
+          {% if password_form.non_field_errors %}
+            <div class="alert-box mb-3">{{ password_form.non_field_errors|join:", " }}</div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ password_form.new_password1.id_for_label }}">New password<span class="req">*</span></label>
+            <div class="input-group">
+              <input type="password" id="{{ password_form.new_password1.id_for_label }}" name="{{ password_form.new_password1.html_name }}" class="form-control {% if password_form.new_password1.errors %}is-invalid{% endif %}" autocomplete="new-password" required>
+              <button class="btn btn-outline-secondary" type="button" data-password-toggle data-target="{{ password_form.new_password1.id_for_label }}" aria-label="Show password"><i class="bi bi-eye"></i></button>
+            </div>
+            {% if password_form.new_password1.errors %}<div class="invalid-feedback d-block">{{ password_form.new_password1.errors|join:", " }}</div>{% else %}<span class="helptext">At least 8 characters, not too common.</span>{% endif %}
+          </div>
+          <div class="mb-1">
+            <label class="form-label" for="{{ password_form.new_password2.id_for_label }}">Confirm new password<span class="req">*</span></label>
+            <div class="input-group">
+              <input type="password" id="{{ password_form.new_password2.id_for_label }}" name="{{ password_form.new_password2.html_name }}" class="form-control {% if password_form.new_password2.errors %}is-invalid{% endif %}" autocomplete="new-password" required>
+              <button class="btn btn-outline-secondary" type="button" data-password-toggle data-target="{{ password_form.new_password2.id_for_label }}" aria-label="Show password"><i class="bi bi-eye"></i></button>
+            </div>
+            {% if password_form.new_password2.errors %}<div class="invalid-feedback d-block">{{ password_form.new_password2.errors|join:", " }}</div>{% endif %}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Update password</button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -91,4 +140,15 @@
 .btn-outline-secondary:hover { background: var(--canvas); border-color: var(--ink-soft); color: var(--ink); }
 .alert-box { background: var(--apricot-soft); border: 1px solid var(--apricot); color: var(--warning); border-radius: 9px; padding: 11px 14px; font-size: .84rem; }
 </style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  {% if show_password_modal %}
+  var modalEl = document.getElementById("changePasswordModal");
+  if (modalEl && window.bootstrap) {
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+  {% endif %}
+});
+</script>
 {% endblock %}

@@ -20,7 +20,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from .audit_export import build_audit_workbook
 from .cashflow_reports import cashflow_report_context, resolve_loan_product, resolve_report_period, resolve_staff_user, write_audit_csv
 from .decorators import role_required
-from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, PaymentForm, ProfileForm, RegistrationForm, RescheduleStartDateForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
+from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, OfficerPasswordChangeForm, PaymentForm, ProfileForm, RegistrationForm, RescheduleStartDateForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .audit import application_decision_log, browser_label, record_activity, record_staff_auth_event
 from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, LoginLogoutLog, Manager, Notification, Payment, User
 from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, deduction_amount_for_key, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, pre_reschedule_maturity_date, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_deduction_keys, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount, update_reschedule_start_date
@@ -1793,27 +1793,65 @@ def add_officer(request):
 @role_required("admin")
 def edit_officer(request, officer_id):
     officer = get_object_or_404(User, pk=officer_id, role=User.Role.OFFICER)
-    form = OfficerAccountEditForm(request.POST or None, instance=officer)
-    if request.method == "POST" and form.is_valid():
-        member = form.save()
-        record_activity(
-            request.user,
-            action=ActivityLog.Action.OFFICER_UPDATED,
-            kind=ActivityLog.Kind.ACCOUNT,
-            title=f"{member.display_name()} updated",
-            description="Loan officer profile was changed.",
-            member=member,
-            member_name=member.display_name(),
-            reference=member.username,
-            status="active" if member.is_active else "inactive",
-            status_label="Updated",
-            url_name="officer_activity_log",
-            url_kwargs={"officer_id": member.pk},
-            request=request,
-        )
-        messages.success(request, f"{member.display_name()}'s profile was updated.")
-        return redirect("loan_officers")
-    return render(request, "officer/edit_officer.html", {"form": form, "officer": officer})
+    form = OfficerAccountEditForm(instance=officer)
+    password_form = OfficerPasswordChangeForm(officer)
+    show_password_modal = False
+
+    if request.method == "POST":
+        if request.POST.get("action") == "change_password":
+            password_form = OfficerPasswordChangeForm(officer, request.POST)
+            if password_form.is_valid():
+                password_form.save()
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.OFFICER_UPDATED,
+                    kind=ActivityLog.Kind.SECURITY,
+                    title=f"{officer.display_name()} password changed",
+                    description="Loan officer password was reset by an administrator.",
+                    member=officer,
+                    member_name=officer.display_name(),
+                    reference=officer.username,
+                    status="active" if officer.is_active else "inactive",
+                    status_label="Password reset",
+                    url_name="officer_activity_log",
+                    url_kwargs={"officer_id": officer.pk},
+                    request=request,
+                )
+                messages.success(request, f"{officer.display_name()}'s password was updated.")
+                return redirect("edit_officer", officer_id=officer.pk)
+            show_password_modal = True
+        else:
+            form = OfficerAccountEditForm(request.POST, instance=officer)
+            if form.is_valid():
+                member = form.save()
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.OFFICER_UPDATED,
+                    kind=ActivityLog.Kind.ACCOUNT,
+                    title=f"{member.display_name()} updated",
+                    description="Loan officer profile was changed.",
+                    member=member,
+                    member_name=member.display_name(),
+                    reference=member.username,
+                    status="active" if member.is_active else "inactive",
+                    status_label="Updated",
+                    url_name="officer_activity_log",
+                    url_kwargs={"officer_id": member.pk},
+                    request=request,
+                )
+                messages.success(request, f"{member.display_name()}'s profile was updated.")
+                return redirect("loan_officers")
+
+    return render(
+        request,
+        "officer/edit_officer.html",
+        {
+            "form": form,
+            "password_form": password_form,
+            "officer": officer,
+            "show_password_modal": show_password_modal,
+        },
+    )
 
 
 @login_required

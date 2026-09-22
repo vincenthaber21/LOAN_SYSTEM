@@ -102,7 +102,14 @@
             <td class="text-end fw-semibold text-success num text-nowrap d-none d-md-table-cell">{{ account.total_interest_earned|peso }}</td>
             <td class="table-actions">
               <div class="table-row-actions">
-                <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_savings_account_detail' account_id=account.id %}">Manage</a>
+                <a class="btn btn-sm btn-light" href="{% url 'officer_savings_account_detail' account_id=account.id %}">Manage</a>
+                {% if is_manager %}
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'officer_edit_savings_account' account_id=account.id %}" aria-label="Edit account" title="Edit account"><i class="bi bi-pencil"></i></a>
+                <form method="post" action="{% url 'officer_delete_savings_account' account_id=account.id %}" onsubmit="return confirm('Delete savings account {{ account.reference }} for {{ account.member.display_name }}? All ledger entries on this account will also be deleted. This cannot be undone.');">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Delete account" title="Delete account"><i class="bi bi-trash"></i></button>
+                </form>
+                {% endif %}
               </div>
             </td>
           </tr>

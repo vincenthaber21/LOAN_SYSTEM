@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load lending_tags %}
+{% block title %}Edit {{ account.reference }}{% endblock %}
+{% block topbar_title %}Edit savings account{% endblock %}
+{% block topbar_context %}Correct mistaken account details.{% endblock %}
+{% block content %}
+<div class="page-heading fade-up">
+  <div>
+    <a class="small" href="{% url 'officer_savings_accounts' %}"><i class="bi bi-arrow-left me-1"></i>Back to savings accounts</a>
+    <h1 class="mt-3 mb-2">Edit {{ account.reference }}</h1>
+    <p>Fix the member, product, or open date if this account was opened incorrectly.</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-7">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "includes/form_errors.html" %}
+
+      <div class="card-soft mb-4">
+        <div class="card-header"><h2 class="card-title">Account details</h2></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label" for="{{ form.member.id_for_label }}">Member</label>
+              {{ form.member }}
+              {% for error in form.member.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="{{ form.product.id_for_label }}">Savings product</label>
+              {{ form.product }}
+              {% for error in form.product.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="{{ form.opened_on.id_for_label }}">{{ form.opened_on.label }}</label>
+              {{ form.opened_on }}
+              {% for error in form.opened_on.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+              <div class="form-text">{{ form.opened_on.help_text }}</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Account number</label>
+              <input class="form-control" type="text" value="{{ account.reference }}" readonly disabled>
+              <div class="form-text">Account number cannot be changed.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-primary" type="submit">Save changes</button>
+        <a class="btn btn-outline-secondary" href="{% url 'officer_savings_accounts' %}">Cancel</a>
+        <a class="btn btn-outline-primary" href="{% url 'officer_savings_account_detail' account_id=account.id %}">Manage ledger</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-xl-5">
+    <div class="card-soft">
+      <div class="card-header"><h2 class="card-title">Current summary</h2></div>
+      <div class="card-body">
+        <dl class="row mb-0 small g-2">
+          <dt class="col-5 text-muted">Member</dt>
+          <dd class="col-7">{{ account.member.display_name }}</dd>
+          <dt class="col-5 text-muted">Product</dt>
+          <dd class="col-7">{{ account.product_name }}</dd>
+          <dt class="col-5 text-muted">Status</dt>
+          <dd class="col-7">{{ account.status_label }}</dd>
+          <dt class="col-5 text-muted">Balance</dt>
+          <dd class="col-7">{{ account.balance|peso }}</dd>
+          <dt class="col-5 text-muted">Opened</dt>
+          <dd class="col-7">{{ account.opened_at|date:"M d, Y" }}</dd>
+        </dl>
+        <p class="text-muted small mt-3 mb-0">
+          Ledger entries stay with this account. Use Manage ledger to edit or delete mistaken deposits and withdrawals.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

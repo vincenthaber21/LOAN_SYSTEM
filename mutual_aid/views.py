@@ -5,6 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from lending.decorators import role_required
 from lending.audit import record_activity
@@ -18,6 +19,7 @@ from .forms import (
     OfficerClaimForm,
     OfficerContributionForm,
     OfficerEditContributionForm,
+    OfficerEditMembershipForm,
     OfficerEnrollForm,
     unavailable_mutual_aid_plan_ids_for_member,
 )
@@ -26,6 +28,7 @@ from .services import (
     MutualAidError,
     create_period,
     delete_contribution,
+    delete_membership,
     disburse_claim,
     enroll_member,
     reactivate_membership,
@@ -36,6 +39,7 @@ from .services import (
     suspend_membership,
     terminate_membership,
     update_contribution,
+    update_membership,
 )
 
 
@@ -144,6 +148,97 @@ def officer_enroll_mutual_aid(request):
             messages.error(request, str(exc))
     plans = MutualAidPlan.objects.filter(is_active=True).order_by("name")
     return render(request, "officer/enroll_mutual_aid.html", {"form": form, "plans": plans})
+
+
+@login_required
+@role_required("manager")
+def officer_edit_mutual_aid_membership(request, membership_id):
+    membership = get_object_or_404(
+        MutualAidMembership.objects.select_related("member", "plan"),
+        pk=membership_id,
+    )
+    form = OfficerEditMembershipForm(
+        request.POST or None,
+        membership=membership,
+        initial={
+            "member": membership.member_id,
+            "plan": membership.plan_id,
+            "enrolled_on": timezone.localtime(membership.enrolled_at).date(),
+            "notes": membership.notes,
+        },
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            update_membership(
+                membership,
+                member=form.cleaned_data["member"],
+                plan=form.cleaned_data["plan"],
+                notes=form.cleaned_data.get("notes", ""),
+                enrolled_on=form.cleaned_data.get("enrolled_on"),
+            )
+            membership.refresh_from_db()
+            record_activity(
+                request.user,
+                action=ActivityLog.Action.MUTUAL_AID_MEMBERSHIP_UPDATED,
+                kind=ActivityLog.Kind.MUTUAL_AID,
+                title=f"Mutual aid {membership.membership_number} updated",
+                description=(
+                    f"Corrected membership for {membership.member.display_name()} "
+                    f"· {membership.plan_name}."
+                ),
+                member=membership.member,
+                reference=membership.membership_number,
+                amount=membership.total_contributed,
+                status="updated",
+                status_label="Updated",
+                url_name="officer_mutual_aid_membership_detail",
+                url_kwargs={"membership_id": membership.pk},
+                request=request,
+            )
+            messages.success(request, f"Membership {membership.membership_number} updated.")
+            return redirect("officer_mutual_aid_memberships")
+        except MutualAidError as exc:
+            messages.error(request, str(exc))
+    return render(request, "officer/edit_mutual_aid_membership.html", {
+        "membership": membership,
+        "form": form,
+    })
+
+
+@login_required
+@role_required("manager")
+def officer_delete_mutual_aid_membership(request, membership_id):
+    membership = get_object_or_404(
+        MutualAidMembership.objects.select_related("member", "plan"),
+        pk=membership_id,
+    )
+    if request.method != "POST":
+        return redirect("officer_mutual_aid_memberships")
+    try:
+        deleted = delete_membership(membership)
+        record_activity(
+            request.user,
+            action=ActivityLog.Action.MUTUAL_AID_MEMBERSHIP_DELETED,
+            kind=ActivityLog.Kind.MUTUAL_AID,
+            title=f"Mutual aid {deleted['reference']} deleted",
+            description=(
+                f"Removed mistaken {deleted['plan_name']} membership "
+                f"for {deleted['member'].display_name()}."
+            ),
+            member=deleted["member"],
+            reference=deleted["reference"],
+            amount=deleted["total_contributed"],
+            status="deleted",
+            status_label="Deleted",
+            request=request,
+        )
+        messages.success(
+            request,
+            f"Membership {deleted['reference']} and related contributions/claims were deleted.",
+        )
+    except MutualAidError as exc:
+        messages.error(request, str(exc))
+    return redirect("officer_mutual_aid_memberships")
 
 
 def _membership_period_rows(membership):

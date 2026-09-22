@@ -6,7 +6,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django import forms
-from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, SetPasswordForm, UserCreationForm
 from django.core.files.base import ContentFile
 from django.utils import timezone
 
@@ -391,6 +391,16 @@ class OfficerAccountEditForm(forms.ModelForm):
         if commit:
             user.save()
         return user
+
+
+class OfficerPasswordChangeForm(SetPasswordForm):
+    """Lets an admin set a new password for a loan officer without knowing the old one."""
+
+    def __init__(self, user, *args, **kwargs):
+        super().__init__(user, *args, **kwargs)
+        self.fields["new_password1"].label = "New password"
+        self.fields["new_password2"].label = "Confirm new password"
+        self.fields["new_password1"].help_text = "At least 8 characters, not too common."
 
 
 class ManagerAccountForm(BaseAccountCreationForm):
