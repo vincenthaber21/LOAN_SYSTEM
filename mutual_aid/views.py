@@ -17,6 +17,7 @@ from .forms import (
     MutualAidPlanForm,
     OfficerClaimForm,
     OfficerContributionForm,
+    OfficerEditContributionForm,
     OfficerEnrollForm,
     unavailable_mutual_aid_plan_ids_for_member,
 )
@@ -24,6 +25,7 @@ from .models import MutualAidClaim, MutualAidContribution, MutualAidMembership, 
 from .services import (
     MutualAidError,
     create_period,
+    delete_contribution,
     disburse_claim,
     enroll_member,
     reactivate_membership,
@@ -33,6 +35,7 @@ from .services import (
     submit_claim,
     suspend_membership,
     terminate_membership,
+    update_contribution,
 )
 
 
@@ -206,6 +209,87 @@ def officer_mutual_aid_membership_detail(request, membership_id):
                     return redirect("officer_mutual_aid_membership_detail", membership_id=membership.pk)
                 except MutualAidError as exc:
                     messages.error(request, str(exc))
+        elif action == "edit_contribution":
+            contribution = get_object_or_404(
+                MutualAidContribution,
+                pk=request.POST.get("tx_id"),
+                membership=membership,
+            )
+            edit_form = OfficerEditContributionForm(
+                request.POST,
+                membership=membership,
+                contribution=contribution,
+            )
+            if edit_form.is_valid():
+                data = edit_form.cleaned_data
+                try:
+                    update_contribution(
+                        contribution,
+                        amount=data["amount"],
+                        method=data["method"],
+                        reference=data.get("reference_number", ""),
+                        notes=data.get("notes", ""),
+                        period=data.get("period"),
+                        occurred_on=data.get("contribution_date"),
+                    )
+                    record_activity(
+                        request.user,
+                        action=ActivityLog.Action.MUTUAL_AID_CONTRIBUTION_UPDATED,
+                        kind=ActivityLog.Kind.MUTUAL_AID,
+                        title=f"Mutual aid contribution updated · {membership.membership_number}",
+                        description=(
+                            f"Corrected contribution to ₱{data['amount']:,.2f} "
+                            f"for {membership.member.display_name()}."
+                        ),
+                        member=membership.member,
+                        reference=data.get("reference_number") or membership.membership_number,
+                        amount=data["amount"],
+                        status="updated",
+                        status_label="Updated",
+                        url_name="officer_mutual_aid_membership_detail",
+                        url_kwargs={"membership_id": membership.pk},
+                        request=request,
+                    )
+                    messages.success(request, "Contribution updated.")
+                    return redirect("officer_mutual_aid_membership_detail", membership_id=membership.pk)
+                except MutualAidError as exc:
+                    messages.error(request, str(exc))
+            else:
+                for field_errors in edit_form.errors.values():
+                    for error in field_errors:
+                        messages.error(request, error)
+        elif action == "delete_contribution":
+            contribution = get_object_or_404(
+                MutualAidContribution,
+                pk=request.POST.get("tx_id"),
+                membership=membership,
+            )
+            amount = contribution.amount
+            reference = contribution.reference_number or membership.membership_number
+            try:
+                delete_contribution(contribution)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.MUTUAL_AID_CONTRIBUTION_DELETED,
+                    kind=ActivityLog.Kind.MUTUAL_AID,
+                    title=f"Mutual aid contribution deleted · {membership.membership_number}",
+                    description=(
+                        f"Removed mistaken contribution of ₱{amount:,.2f} "
+                        f"for {membership.member.display_name()}."
+                    ),
+                    member=membership.member,
+                    reference=reference,
+                    amount=amount,
+                    status="deleted",
+                    status_label="Deleted",
+                    url_name="officer_mutual_aid_membership_detail",
+                    url_kwargs={"membership_id": membership.pk},
+                    request=request,
+                )
+                messages.success(request, "Contribution deleted.")
+                return redirect("officer_mutual_aid_membership_detail", membership_id=membership.pk)
+            except MutualAidError as exc:
+                messages.error(request, str(exc))
         elif action == "add_period":
             period_form = MutualAidPeriodForm(request.POST, plan=membership.plan)
             if period_form.is_valid():

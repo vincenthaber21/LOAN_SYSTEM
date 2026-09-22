@@ -251,6 +251,94 @@ def record_contribution(
 
 
 @transaction.atomic
+def delete_contribution(contribution):
+    """Remove a mistaken contribution and adjust membership totals."""
+    membership = (
+        MutualAidMembership.objects.select_for_update()
+        .select_related("plan")
+        .get(pk=contribution.membership_id)
+    )
+    if not membership.is_operational:
+        raise MutualAidError("Cannot delete contributions on an inactive membership.")
+
+    amount = contribution.amount
+    if membership.total_contributed - amount < 0:
+        raise MutualAidError(
+            "Cannot delete this contribution: total contributed would become negative."
+        )
+
+    contribution.delete()
+    membership.total_contributed -= amount
+    membership.save(update_fields=["total_contributed"])
+    return membership
+
+
+@transaction.atomic
+def update_contribution(
+    contribution,
+    *,
+    amount,
+    method,
+    reference="",
+    notes="",
+    period=None,
+    occurred_on=None,
+):
+    """Correct a mistaken contribution and adjust membership totals."""
+    membership = (
+        MutualAidMembership.objects.select_for_update()
+        .select_related("plan")
+        .get(pk=contribution.membership_id)
+    )
+    if not membership.is_operational:
+        raise MutualAidError("Cannot edit contributions on an inactive membership.")
+
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        raise MutualAidError("Contribution amount must be greater than zero.")
+    if occurred_on and occurred_on > timezone.localdate():
+        raise MutualAidError("Contribution date cannot be in the future.")
+
+    if period and period.plan_id != membership.plan_id:
+        raise MutualAidError("Selected period does not belong to this membership's plan.")
+    if period and membership.contributions.filter(period=period).exclude(pk=contribution.pk).exists():
+        raise MutualAidError(f"A contribution for {period.display_label} has already been recorded.")
+
+    delta = amount - contribution.amount
+    new_total = membership.total_contributed + delta
+    if new_total < 0:
+        raise MutualAidError(
+            "Cannot update this contribution: total contributed would become negative."
+        )
+
+    contribution.amount = amount
+    contribution.method = method
+    contribution.reference_number = reference or ""
+    contribution.notes = notes or ""
+    contribution.period = period
+    if occurred_on is not None:
+        current_date = timezone.localtime(contribution.created_at).date()
+        if occurred_on != current_date:
+            contribution.created_at = _datetime_on_date(occurred_on)
+    contribution.save(
+        update_fields=[
+            "amount",
+            "method",
+            "reference_number",
+            "notes",
+            "period",
+            "created_at",
+        ]
+    )
+
+    if delta != 0:
+        membership.total_contributed = new_total
+        membership.save(update_fields=["total_contributed"])
+
+    return contribution
+
+
+@transaction.atomic
 def suspend_membership(membership):
     if membership.status != MutualAidMembership.Status.ACTIVE:
         raise MutualAidError("Only active memberships can be suspended.")

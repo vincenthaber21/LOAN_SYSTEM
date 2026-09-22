@@ -1476,6 +1476,8 @@ class ActivityLog(models.Model):
         SAVINGS_CLOSED = "savings_closed", "Savings account closed"
         MUTUAL_AID_ENROLLED = "mutual_aid_enrolled", "Mutual aid enrolled"
         MUTUAL_AID_CONTRIBUTION = "mutual_aid_contribution", "Mutual aid contribution"
+        MUTUAL_AID_CONTRIBUTION_UPDATED = "mutual_aid_contribution_updated", "Mutual aid contribution updated"
+        MUTUAL_AID_CONTRIBUTION_DELETED = "mutual_aid_contribution_deleted", "Mutual aid contribution deleted"
         MUTUAL_AID_CLAIM = "mutual_aid_claim", "Mutual aid claim submitted"
         MUTUAL_AID_CLAIM_REVIEWED = "mutual_aid_claim_reviewed", "Mutual aid claim reviewed"
         MUTUAL_AID_CLAIM_DISBURSED = "mutual_aid_claim_disbursed", "Mutual aid claim disbursed"
