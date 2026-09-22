@@ -802,21 +802,23 @@ class Loan(models.Model):
         return self.application.get_payment_frequency_display()
 
     def _flat_amounts(self):
-        from .services import _flat_amounts_for_periods, calculate_flat_loan_amounts, loan_term_months
+        from .services import calculate_flat_loan_amounts, loan_term_months
 
-        # After payments, unpaid rows are re-priced over the remaining period count
-        # (which can be shorter than term×22 once leading days are marked Paid).
-        # Prefer that unpaid count so sidebar daily/weekly figures match the schedule.
-        if self.payments.exists():
-            unpaid = self.installments.exclude(status="paid").count()
-            if unpaid > 0:
-                return _flat_amounts_for_periods(self.principal, self.interest_rate, unpaid)
+        # Rescheduled plans use the remaining-balance principal / rate / term.
+        if self.schedule_start_date is not None:
+            return calculate_flat_loan_amounts(
+                self.principal,
+                self.interest_rate,
+                loan_term_months(self),
+            )
 
-        return calculate_flat_loan_amounts(
-            self.principal,
-            self.interest_rate,
-            loan_term_months(self),
-        )
+        # Ordinary loans: one-time flat formula on disbursed capital so daily/weekly
+        # sidebar figures stay on the origination schedule (e.g. ₱178.79), not a
+        # post-payment reprice.
+        capital = self.disbursed_principal if self.disbursed_principal is not None else self.principal
+        rate = self.original_interest_rate if self.original_interest_rate is not None else self.interest_rate
+        term = self.original_term_months or loan_term_months(self)
+        return calculate_flat_loan_amounts(capital, rate, term)
 
     @property
     def periodic_payment(self):
@@ -1469,6 +1471,8 @@ class ActivityLog(models.Model):
         SAVINGS_OPENED = "savings_opened", "Savings account opened"
         SAVINGS_DEPOSIT = "savings_deposit", "Savings deposit"
         SAVINGS_WITHDRAWAL = "savings_withdrawal", "Savings withdrawal"
+        SAVINGS_TRANSACTION_DELETED = "savings_transaction_deleted", "Savings transaction deleted"
+        SAVINGS_TRANSACTION_UPDATED = "savings_transaction_updated", "Savings transaction updated"
         SAVINGS_CLOSED = "savings_closed", "Savings account closed"
         MUTUAL_AID_ENROLLED = "mutual_aid_enrolled", "Mutual aid enrolled"
         MUTUAL_AID_CONTRIBUTION = "mutual_aid_contribution", "Mutual aid contribution"

@@ -2,14 +2,18 @@
 {% load lending_tags %}
 {% block title %}Members with loans{% endblock %}
 {% block topbar_title %}Members with loans{% endblock %}
-{% block topbar_context %}Members who currently have active loans.{% endblock %}
+{% block topbar_context %}{% if filters.status == "completed" %}Members who fully paid off their loans.{% else %}Members who currently have active loans.{% endif %}{% endblock %}
 {% block content %}
 
 <div class="page-heading fade-up">
   <div>
     <div class="eyebrow">Officer workspace</div>
-    <h1>Members with loans.</h1>
+    <h1>{% if filters.status == "completed" %}Completed loans.{% else %}Members with loans.{% endif %}</h1>
+    {% if filters.status == "completed" %}
+    <p>{{ member_count }} member{{ member_count|pluralize }} with completed loan{{ member_count|pluralize }} · {{ total_adjusted_outstanding|peso }} outstanding.</p>
+    {% else %}
     <p>{{ member_count }} member{{ member_count|pluralize }} with active loan{{ member_count|pluralize }} · {{ total_active_loans }} active loan{{ total_active_loans|pluralize }} · {{ total_adjusted_outstanding|peso }} outstanding.</p>
+    {% endif %}
   </div>
   <div class="page-heading-actions">
     <a class="btn btn-outline-secondary" href="{% url 'all_members' %}"><i class="bi bi-people me-1"></i>All members</a>
@@ -29,14 +33,14 @@
 <div class="row g-3 mb-4 fade-up-2">
   <div class="col-md-4">
     <div class="card-soft metric-card">
-      <div class="metric-label">Members with loans</div>
+      <div class="metric-label">{% if filters.status == "completed" %}Members completed{% else %}Members with loans{% endif %}</div>
       <div class="metric-value">{{ member_count }}</div>
       <div class="metric-note">Matching your current filters</div>
     </div>
   </div>
   <div class="col-md-4">
     <div class="card-soft metric-card">
-      <div class="metric-label">Active loans</div>
+      <div class="metric-label">{% if filters.status == "completed" %}Open loans{% else %}Active loans{% endif %}</div>
       <div class="metric-value">{{ total_active_loans }}</div>
       <div class="metric-note">Across all members shown</div>
     </div>
@@ -125,7 +129,13 @@
               {% endif %}
             </td>
             <td class="text-muted d-none d-xl-table-cell text-nowrap">{{ member.last_activity }}</td>
-            <td>{% include "includes/status_badge.html" with status=member.account_status label=member.account_status|title %}</td>
+            <td>
+              {% if filters.status == "completed" %}
+                {% include "includes/status_badge.html" with status="paid" label="Completed" %}
+              {% else %}
+                {% include "includes/status_badge.html" with status=member.account_status label=member.account_status|title %}
+              {% endif %}
+            </td>
             <td class="table-actions">
               <div class="table-row-actions">
                 <a class="btn btn-sm btn-light" href="{% url 'borrower_detail' borrower_id=member.id %}">{% if member.active_loan_count > 1 %}View loans{% else %}View loan{% endif %}</a>
@@ -143,7 +153,11 @@
         {% empty %}
           <tr>
             <td colspan="9">
+              {% if filters.status == "completed" %}
+              {% include "includes/empty_state.html" with icon="bi-people" title="No completed loans" description="No members match your search, or none have fully paid off their loans yet." %}
+              {% else %}
               {% include "includes/empty_state.html" with icon="bi-people" title="No members with active loans" description="No members match your search, or none currently have an active loan. View all members to browse the full directory." %}
+              {% endif %}
             </td>
           </tr>
         {% endfor %}

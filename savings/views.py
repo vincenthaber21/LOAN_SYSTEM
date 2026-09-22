@@ -14,6 +14,7 @@ from lending.audit import record_activity
 from lending.models import ActivityLog, User
 
 from .forms import (
+    OfficerEditSavingsTransactionForm,
     OfficerOpenAccountForm,
     OfficerSavingsTransactionForm,
     OpenAccountForm,
@@ -29,11 +30,13 @@ from .services import (
     SavingsError,
     apply_due_interest,
     close_account,
+    delete_transaction,
     interest_schedule_state,
     open_account,
     record_deposit,
     record_withdrawal,
     resolve_membership_savings_product,
+    update_transaction,
 )
 
 
@@ -353,6 +356,88 @@ def officer_savings_account_detail(request, account_id):
                     return redirect("officer_savings_account_detail", account_id=account.pk)
                 except SavingsError as exc:
                     messages.error(request, str(exc))
+        elif action == "delete_transaction":
+            tx = get_object_or_404(
+                SavingsTransaction,
+                pk=request.POST.get("tx_id"),
+                account=account,
+            )
+            tx_type_label = tx.type_label
+            tx_amount = tx.amount
+            tx_reference = tx.reference_number or account.reference
+            try:
+                delete_transaction(tx)
+                record_activity(
+                    request.user,
+                    action=ActivityLog.Action.SAVINGS_TRANSACTION_DELETED,
+                    kind=ActivityLog.Kind.SAVINGS,
+                    title=f"Savings {tx_type_label.lower()} deleted · {account.reference}",
+                    description=(
+                        f"Removed mistaken {tx_type_label.lower()} of ₱{tx_amount:,.2f} "
+                        f"for {account.member.display_name()}."
+                    ),
+                    member=account.member,
+                    reference=tx_reference,
+                    amount=tx_amount,
+                    status="deleted",
+                    status_label="Deleted",
+                    url_name="officer_savings_account_detail",
+                    url_kwargs={"account_id": account.pk},
+                    request=request,
+                )
+                messages.success(request, f"{tx_type_label} entry deleted and balance updated.")
+                return redirect("officer_savings_account_detail", account_id=account.pk)
+            except SavingsError as exc:
+                messages.error(request, str(exc))
+        elif action == "edit_transaction":
+            tx = get_object_or_404(
+                SavingsTransaction,
+                pk=request.POST.get("tx_id"),
+                account=account,
+            )
+            edit_form = OfficerEditSavingsTransactionForm(
+                request.POST,
+                account=account,
+                transaction=tx,
+            )
+            if edit_form.is_valid():
+                data = edit_form.cleaned_data
+                try:
+                    update_transaction(
+                        tx,
+                        amount=data["amount"],
+                        method=data["method"],
+                        reference=data.get("reference_number", ""),
+                        notes=data.get("notes", ""),
+                        occurred_on=data.get("transaction_date"),
+                        transaction_type=data.get("transaction_type"),
+                    )
+                    record_activity(
+                        request.user,
+                        action=ActivityLog.Action.SAVINGS_TRANSACTION_UPDATED,
+                        kind=ActivityLog.Kind.SAVINGS,
+                        title=f"Savings {tx.type_label.lower()} updated · {account.reference}",
+                        description=(
+                            f"Corrected {tx.type_label.lower()} to ₱{data['amount']:,.2f} "
+                            f"for {account.member.display_name()}."
+                        ),
+                        member=account.member,
+                        reference=data.get("reference_number") or account.reference,
+                        amount=data["amount"],
+                        status="updated",
+                        status_label="Updated",
+                        url_name="officer_savings_account_detail",
+                        url_kwargs={"account_id": account.pk},
+                        request=request,
+                    )
+                    messages.success(request, f"{tx.type_label} entry updated and balance recalculated.")
+                    return redirect("officer_savings_account_detail", account_id=account.pk)
+                except SavingsError as exc:
+                    messages.error(request, str(exc))
+            else:
+                for field_errors in edit_form.errors.values():
+                    for error in field_errors:
+                        messages.error(request, error)
         elif action == "close" and request.user.is_admin:
             try:
                 close_account(account, closed_by=request.user)

@@ -269,6 +269,108 @@ def close_account(account, closed_by=None):
     return account
 
 
+def _rebuild_ledger_balances(account):
+    """Recompute balance_after for every row and sync account.balance."""
+    running = Decimal("0.00")
+    updates = []
+    for row in account.transactions.order_by("created_at", "pk"):
+        if row.transaction_type == SavingsTransaction.Type.WITHDRAWAL:
+            running -= row.amount
+        else:
+            running += row.amount
+        if running < 0:
+            raise SavingsError(
+                "This change would leave a negative balance in the ledger."
+            )
+        if row.balance_after != running:
+            row.balance_after = running
+            updates.append(row)
+    if updates:
+        SavingsTransaction.objects.bulk_update(updates, ["balance_after"])
+
+    if account.balance != running:
+        account.balance = running
+        account.save(update_fields=["balance"])
+    return running
+
+
+@transaction.atomic
+def delete_transaction(tx):
+    """Remove a mistaken ledger entry and rebuild running balances."""
+    account = (
+        SavingsAccount.objects.select_for_update()
+        .select_related("product")
+        .get(pk=tx.account_id)
+    )
+    if not account.is_operational:
+        raise SavingsError("Cannot delete transactions on a closed account.")
+
+    if tx.is_credit and account.balance - tx.amount < 0:
+        raise SavingsError(
+            "Cannot delete this entry: the account balance would become negative."
+        )
+
+    tx.delete()
+    _rebuild_ledger_balances(account)
+    return account
+
+
+@transaction.atomic
+def update_transaction(
+    tx,
+    *,
+    amount,
+    method,
+    reference="",
+    notes="",
+    occurred_on=None,
+    transaction_type=None,
+):
+    """Correct a mistaken ledger entry and rebuild running balances."""
+    account = (
+        SavingsAccount.objects.select_for_update()
+        .select_related("product")
+        .get(pk=tx.account_id)
+    )
+    if not account.is_operational:
+        raise SavingsError("Cannot edit transactions on a closed account.")
+
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        raise SavingsError("Amount must be greater than zero.")
+    if occurred_on and occurred_on > timezone.localdate():
+        raise SavingsError("Transaction date cannot be in the future.")
+
+    new_type = transaction_type or tx.transaction_type
+    if new_type not in SavingsTransaction.Type.values:
+        raise SavingsError("Invalid transaction type.")
+    if tx.transaction_type == SavingsTransaction.Type.INTEREST and new_type != tx.transaction_type:
+        raise SavingsError("Interest entries cannot be changed to another type.")
+
+    tx.amount = amount
+    tx.method = method
+    tx.reference_number = reference or ""
+    tx.notes = notes or ""
+    tx.transaction_type = new_type
+    if occurred_on is not None:
+        current_date = timezone.localtime(tx.created_at).date()
+        if occurred_on != current_date:
+            tx.created_at = _datetime_on_date(occurred_on)
+    tx.save(
+        update_fields=[
+            "amount",
+            "method",
+            "reference_number",
+            "notes",
+            "transaction_type",
+            "created_at",
+        ]
+    )
+
+    _rebuild_ledger_balances(account)
+    return tx
+
+
 def _localdate(value):
     return timezone.localtime(value).date()
 

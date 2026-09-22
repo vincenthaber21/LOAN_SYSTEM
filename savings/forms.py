@@ -194,6 +194,69 @@ class OfficerSavingsTransactionForm(forms.Form):
         return cleaned
 
 
+class OfficerEditSavingsTransactionForm(forms.Form):
+    transaction_type = forms.ChoiceField(
+        choices=[
+            (SavingsTransaction.Type.DEPOSIT, "Deposit"),
+            (SavingsTransaction.Type.WITHDRAWAL, "Withdrawal"),
+            (SavingsTransaction.Type.INTEREST, "Interest"),
+        ],
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    amount = forms.DecimalField(
+        min_value=Decimal("0.01"),
+        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0.01"}),
+    )
+    transaction_date = forms.DateField(
+        label="Transaction date",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+        help_text="Use the same date as the related cash movement or loan disbursement.",
+    )
+    method = forms.ChoiceField(
+        choices=SavingsTransaction.Method.choices,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    reference_number = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Optional reference"}),
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 2, "placeholder": "Optional note"}),
+    )
+
+    def __init__(self, *args, account=None, transaction=None, **kwargs):
+        self.account = account
+        self.transaction = transaction
+        super().__init__(*args, **kwargs)
+        self.fields["transaction_date"].widget.attrs["max"] = timezone.localdate().isoformat()
+        if transaction and transaction.transaction_type == SavingsTransaction.Type.INTEREST:
+            self.fields["transaction_type"].choices = [
+                (SavingsTransaction.Type.INTEREST, "Interest"),
+            ]
+            self.fields["transaction_type"].required = False
+            self.fields["transaction_type"].initial = SavingsTransaction.Type.INTEREST
+        elif transaction:
+            self.fields["transaction_type"].choices = [
+                (SavingsTransaction.Type.DEPOSIT, "Deposit"),
+                (SavingsTransaction.Type.WITHDRAWAL, "Withdrawal"),
+            ]
+
+    def clean_transaction_date(self):
+        transaction_date = self.cleaned_data.get("transaction_date")
+        if transaction_date and transaction_date > timezone.localdate():
+            raise forms.ValidationError("Transaction date cannot be in the future.")
+        return transaction_date
+
+    def clean(self):
+        cleaned = super().clean()
+        if self.transaction and self.transaction.transaction_type == SavingsTransaction.Type.INTEREST:
+            cleaned["transaction_type"] = SavingsTransaction.Type.INTEREST
+        elif not cleaned.get("transaction_type"):
+            self.add_error("transaction_type", "Select a transaction type.")
+        return cleaned
+
+
 class OfficerOpenAccountForm(forms.Form):
     member = forms.ModelChoiceField(
         queryset=None,

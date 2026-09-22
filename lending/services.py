@@ -427,12 +427,12 @@ def credit_payment_mutual_aid(loan, amount, *, payment=None, recorded_by=None, p
 
 
 def loan_term_months(loan):
-    """Term used for schedule generation and flat-interest recalculation.
+    """Term used for schedule generation and flat-interest calculation.
 
     After a remaining-balance reschedule (`schedule_start_date` set), always use
-    `loan.term_months` (the 1–3 month extension). Same after payments have begun —
-    unpaid periods shrink and term tracks the rebuilt schedule. Otherwise prefer
-    the approved application term so pre-disbursement edits stay in sync.
+    `loan.term_months` (the 1–3 month extension). After payments have begun, keep
+    `loan.term_months` (synced to the origination term for ordinary loans). Otherwise
+    prefer the approved application term so pre-disbursement edits stay in sync.
     """
     if loan.schedule_start_date is not None or loan.payments.exists():
         return loan.term_months
@@ -697,23 +697,26 @@ def _credit_installments_for_payment(unpaid_installments, loan_amount, paid_date
     Walks the given (already-ordered, unpaid) installments oldest-due-first, consuming
     loan_amount as credit. An installment flips to Paid only once the remaining credit
     fully covers its amount_due — a payment doesn't need to settle the whole loan to
-    retire individual periods, but a partial period is left unpaid (its due amount is
-    re-priced by the flat-rate recompute on the reduced principal instead).
+    retire individual periods. Any leftover credit that does not cover the next full day
+    is returned for the caller to apply as a partial payment (amount_paid) without
+    changing that day's original formula amount_due.
 
-    Example: 3 unpaid weeks at ₱437.50 each, loan_amount ₱1,000 → weeks 1–2 are marked
-    Paid (₱875.00 consumed); ₱125.00 remains, not enough for week 3, so week 3 (and
-    anything after it) stays unpaid and gets re-priced on the smaller remaining balance.
+    Example: 3 unpaid days at ₱178.79 each, loan_amount ₱400 → day 1–2 Paid (₱357.58);
+    ₱42.42 leftover is not enough for day 3, so day 3 stays pending at ₱178.79.
 
-    Returns (paid, remaining): installments marked Paid (already saved to the database)
-    and the still-unpaid installments, in order, for the caller to rebuild.
+    Returns (paid, remaining, leftover): installments marked Paid, still-unpaid rows,
+    and unused credit after full days were covered.
     """
     credit = Decimal(str(loan_amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     paid = []
     remaining = []
     still_covering = credit > 0
     for item in unpaid_installments:
-        if still_covering and credit >= item.amount_due:
-            credit = (credit - item.amount_due).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        due = (item.amount_due - (item.amount_paid or Decimal("0.00"))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        if still_covering and credit >= due and due > 0:
+            credit = (credit - due).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             item.amount_paid = item.amount_due
             item.status = Installment.Status.PAID
             item.paid_date = paid_date
@@ -723,7 +726,190 @@ def _credit_installments_for_payment(unpaid_installments, loan_amount, paid_date
             remaining.append(item)
     if paid:
         Installment.objects.bulk_update(paid, ["amount_paid", "status", "paid_date"])
-    return paid, remaining
+    return paid, remaining, credit
+
+
+def _apply_partial_installment_credit(installment, credit, paid_date):
+    """Apply leftover remittance credit to one unpaid day without changing amount_due."""
+    credit = Decimal(str(credit or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if credit <= 0 or installment is None:
+        return Decimal("0.00")
+    already = (installment.amount_paid or Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    room = (installment.amount_due - already).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if room <= 0:
+        return credit
+    applied = min(credit, room)
+    installment.amount_paid = (already + applied).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if installment.amount_paid >= installment.amount_due:
+        installment.amount_paid = installment.amount_due
+        installment.status = Installment.Status.PAID
+        installment.paid_date = paid_date
+    installment.save(update_fields=["amount_paid", "status", "paid_date"])
+    return (credit - applied).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _origination_flat_terms(loan):
+    """Capital, rate, and term used for the one-time flat formula at disbursement."""
+    capital = (
+        loan.disbursed_principal
+        if loan.disbursed_principal is not None
+        else loan.principal
+    )
+    rate = (
+        loan.original_interest_rate
+        if loan.original_interest_rate is not None
+        else loan.interest_rate
+    )
+    term = loan.original_term_months or loan_term_months(loan)
+    return (
+        Decimal(str(capital or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        Decimal(str(rate or 0)),
+        int(term or 0),
+    )
+
+
+def _sync_loan_balances_from_fixed_schedule(loan):
+    """Set principal / outstanding / total_payable from the fixed installment grid."""
+    capital, rate, term = _origination_flat_terms(loan)
+    if loan.disbursed_principal is None:
+        loan.disbursed_principal = capital
+    if loan.original_interest_rate is None:
+        loan.original_interest_rate = rate
+    if loan.original_term_months is None and term:
+        loan.original_term_months = term
+
+    unpaid = list(
+        loan.installments.exclude(status=Installment.Status.PAID).order_by(
+            "installment_number", "due_date"
+        )
+    )
+    outstanding = Decimal("0.00")
+    remaining_principal = Decimal("0.00")
+    for row in unpaid:
+        paid = (row.amount_paid or Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        due = (row.amount_due or Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        remaining = max(Decimal("0.00"), due - paid)
+        outstanding += remaining
+        if due > 0 and paid > 0 and remaining > 0:
+            frac = remaining / due
+            remaining_principal += (row.principal_component * frac).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        elif remaining > 0:
+            remaining_principal += row.principal_component
+
+    amounts = calculate_flat_loan_amounts(capital, rate, term)
+    loan.principal = remaining_principal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    loan.outstanding_balance = outstanding.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    loan.total_payable = amounts["total_payable"]
+    if term:
+        loan.term_months = term
+    loan.save(
+        update_fields=[
+            "disbursed_principal",
+            "original_interest_rate",
+            "original_term_months",
+            "principal",
+            "term_months",
+            "outstanding_balance",
+            "total_payable",
+        ]
+    )
+    return amounts
+
+
+def realign_loan_to_one_time_flat_schedule(loan):
+    """Rebuild the working-day grid from origination terms and replay payment credits.
+
+    Used when unpaid rows were previously re-priced after remittances. Paid history is
+    preserved by re-applying each payment's loan portion oldest-due-first. Skips
+    rescheduled loans (those keep the remaining-balance rebuild model).
+    """
+    if loan.schedule_start_date is not None:
+        return False
+    capital, rate, term = _origination_flat_terms(loan)
+    if capital <= 0 or term <= 0:
+        return False
+
+    payments = list(loan.payments.order_by("payment_date", "pk"))
+    if not payments:
+        return False
+
+    loan.disbursed_principal = capital
+    loan.original_interest_rate = rate
+    loan.original_term_months = term
+    loan.principal = capital
+    loan.interest_rate = rate
+    loan.term_months = term
+    loan.save(
+        update_fields=[
+            "disbursed_principal",
+            "original_interest_rate",
+            "original_term_months",
+            "principal",
+            "interest_rate",
+            "term_months",
+        ]
+    )
+    generate_schedule(loan)
+
+    unpaid = list(loan.installments.order_by("installment_number", "due_date"))
+    for payment in payments:
+        applied = Decimal(str(payment.loan_amount_applied or 0)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        if applied <= 0:
+            continue
+        unpaid = list(
+            loan.installments.exclude(status=Installment.Status.PAID).order_by(
+                "installment_number", "due_date"
+            )
+        )
+        _paid, unpaid, leftover = _credit_installments_for_payment(
+            unpaid, applied, payment.payment_date
+        )
+        if leftover > 0 and unpaid:
+            _apply_partial_installment_credit(unpaid[0], leftover, payment.payment_date)
+
+    unpaid = list(
+        loan.installments.exclude(status=Installment.Status.PAID).order_by(
+            "installment_number", "due_date"
+        )
+    )
+    if not unpaid:
+        loan.principal = Decimal("0.00")
+        loan.outstanding_balance = Decimal("0.00")
+        loan.status = Loan.Status.PAID
+        loan.total_payable = calculate_flat_loan_amounts(capital, rate, term)["total_payable"]
+        loan.save(update_fields=["principal", "outstanding_balance", "status", "total_payable"])
+        return True
+
+    _sync_loan_balances_from_fixed_schedule(loan)
+    if loan.status != Loan.Status.PAID:
+        loan.status = Loan.Status.ACTIVE
+        loan.save(update_fields=["status"])
+    return True
+
+
+def _unpaid_diverges_from_one_time_formula(loan):
+    """True when unpaid daily dues no longer match the origination flat per-day amount."""
+    if loan.schedule_start_date is not None or not loan.payments.exists():
+        return False
+    capital, rate, term = _origination_flat_terms(loan)
+    if capital <= 0 or term <= 0:
+        return False
+    amounts = calculate_flat_loan_amounts(capital, rate, term)
+    expected = amounts["per_day"]
+    periods = amounts["periods"]
+    unpaid = loan.installments.exclude(status=Installment.Status.PAID)
+    if not unpaid.exists():
+        return False
+    for row in unpaid:
+        if row.installment_number == periods:
+            continue
+        if (row.amount_due or Decimal("0.00")) != expected:
+            return True
+    return False
 
 
 def _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due_date, periods):
@@ -949,17 +1135,17 @@ def schedule_is_stale(loan):
 def generate_schedule(loan):
     """Build one installment per working day (Mon–Fri) for the loan term.
 
-    Flat interest is charged on the current principal for every month of the term:
+    Flat interest is charged once on the disbursed principal for every month of the term:
 
         total_interest = principal * (rate/100) * term_months
         total_payable  = principal + total_interest
+        per_day        = total_payable / (term_months * 22)
 
-    Payments reduce principal (e.g. ₱20,000 − ₱3,000 → ₱17,000) and the same
-    formula is reapplied on the new principal for the remaining working days.
-    When remaining principal is ₱1,000 or less, interest is waived.
+    That grid stays fixed for the life of the loan: remittances mark days Paid but do
+    not recompute interest on the remaining balance. Reschedule and the ≤₱1,000
+    principal waiver are the exceptions that rebuild unpaid rows.
 
     Interest begins on the Monday on/after `schedule_start_date` (or disbursement).
-    That total is then split evenly across `term_months * 22` working-day payments.
     Each day's amount_due equals its principal + interest components so the schedule
     sums exactly to total_payable; the final row absorbs component rounding.
     """
@@ -1131,13 +1317,16 @@ def ensure_schedule_current(loan):
     """Regenerate the schedule when it is out of sync with loan terms or disbursement date.
 
     Also strips interest from unpaid rows when remaining principal is ₱1,000 or less,
-    and keeps rescheduled loans aligned with the remaining-balance flat formula.
+    keeps rescheduled loans aligned with the remaining-balance flat formula, and
+    realigns ordinary loans whose unpaid days were re-priced after remittances.
     """
     sync_loan_term_from_application(loan)
     if loan.schedule_start_date is not None and _repair_rescheduled_flat_balances(loan):
         return True
     if schedule_is_stale(loan):
         return rebuild_loan_schedule(loan)
+    if _unpaid_diverges_from_one_time_formula(loan):
+        return realign_loan_to_one_time_flat_schedule(loan)
     if _waive_interest_on_small_remaining_principal(loan):
         return True
     return False
@@ -1997,11 +2186,14 @@ def record_payment(
     pay_frequency="daily",
     payment_date=None,
 ):
-    """Record a payment that reduces principal, then recalculates with the same flat formula.
+    """Record a payment against the fixed one-time flat schedule.
 
-    Cash-adjusted remittances are split: the exact portion reduces principal, the
+    Cash-adjusted remittances are split: the exact portion pays schedule rows, the
     rounding uplift goes to Membership/Savings, and the mutual-aid portion
     (₱15 × working days by default) is credited to KAP mutual aid.
+
+    Unpaid days keep their original formula amounts — interest is not recomputed
+    after each remittance. Reschedule and the ≤₱1,000 waiver still rebuild unpaid rows.
     """
     loan = Loan.objects.select_for_update().get(pk=loan.pk)
     amount = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -2045,7 +2237,7 @@ def record_payment(
         outstanding_before=outstanding_before,
     )
 
-    # Snapshot overdue months before the schedule is rebuilt (for late credit penalties).
+    # Snapshot overdue months before statuses change (for late credit penalties).
     overdue_month_numbers = sorted(
         {
             loan_month_number(number)
@@ -2057,73 +2249,58 @@ def record_payment(
 
     if loan.disbursed_principal is None:
         loan.disbursed_principal = loan.principal
+    if loan.original_interest_rate is None:
+        loan.original_interest_rate = loan.interest_rate
+    if loan.original_term_months is None:
+        loan.original_term_months = loan.term_months
 
     unpaid = list(
-        loan.installments.exclude(status=Installment.Status.PAID).order_by("installment_number", "due_date")
+        loan.installments.exclude(status=Installment.Status.PAID).order_by(
+            "installment_number", "due_date"
+        )
     )
-    # Credit whichever leading installments this payment's loan portion fully covers —
-    # they become Paid right away, even when the loan overall isn't settled yet. Only
-    # the still-uncovered remainder gets re-priced on the reduced principal below.
-    _paid_this_payment, unpaid = _credit_installments_for_payment(unpaid, loan_amount, paid_date)
-    periods_remaining = len(unpaid)
-    start_due = unpaid[0].due_date if unpaid else _first_installment_due_date(loan)
+    # Credit leading installments this payment's loan portion fully covers; leftover
+    # below one full day is applied as a partial amount_paid on the next row.
+    _paid_this_payment, unpaid, leftover = _credit_installments_for_payment(
+        unpaid, loan_amount, paid_date
+    )
+    if leftover > 0 and unpaid:
+        _apply_partial_installment_credit(unpaid[0], leftover, paid_date)
 
-    # Only the exact loan portion reduces principal; surplus goes to savings / mutual aid.
-    new_principal = max(
-        Decimal("0.00"),
-        (loan.principal - loan_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-    )
-    loan_payments_sum = sum(
-        (item.loan_amount_applied for item in loan.payments.all()),
-        Decimal("0.00"),
+    unpaid = list(
+        loan.installments.exclude(status=Installment.Status.PAID).order_by(
+            "installment_number", "due_date"
+        )
     )
 
-    if new_principal <= 0:
+    if not unpaid:
         for item in loan.installments.exclude(status=Installment.Status.PAID):
             item.amount_paid = item.amount_due
             item.status = Installment.Status.PAID
             item.paid_date = paid_date
             item.save(update_fields=["amount_paid", "status", "paid_date"])
+        capital, rate, term = _origination_flat_terms(loan)
         loan.principal = Decimal("0.00")
         loan.outstanding_balance = Decimal("0.00")
+        loan.total_payable = calculate_flat_loan_amounts(capital, rate, term)["total_payable"]
         loan.status = Loan.Status.PAID
-        loan.save(update_fields=["disbursed_principal", "principal", "outstanding_balance", "status"])
-        loan.application.status = LoanApplication.Status.CLOSED
-        loan.application.save(update_fields=["status"])
-    else:
-        if periods_remaining <= 0:
-            periods_remaining = max(1, working_day_count(loan.term_months))
-            start_due = _interest_start_monday(paid_date)
-        amounts = _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due, periods_remaining)
-        # Paid rows stay for history; term must cover paid + remaining unpaid so
-        # week/month views and working-day counts stay aligned with the schedule.
-        paid_count = loan.installments.filter(status=Installment.Status.PAID).count()
-        schedule_periods = paid_count + periods_remaining
-        schedule_months = max(
-            1,
-            int(
-                (Decimal(schedule_periods) / Decimal(WORKING_DAYS_PER_MONTH)).to_integral_value(
-                    rounding=ROUND_CEILING
-                )
-            ),
-        )
-        loan.principal = new_principal
-        loan.term_months = schedule_months
-        loan.outstanding_balance = amounts["total_payable"]
-        loan.total_payable = (loan_payments_sum + amounts["total_payable"]).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
-        loan.status = Loan.Status.ACTIVE
         loan.save(
             update_fields=[
                 "disbursed_principal",
+                "original_interest_rate",
+                "original_term_months",
                 "principal",
-                "term_months",
                 "outstanding_balance",
                 "total_payable",
                 "status",
             ]
         )
+        loan.application.status = LoanApplication.Status.CLOSED
+        loan.application.save(update_fields=["status"])
+    else:
+        _sync_loan_balances_from_fixed_schedule(loan)
+        loan.status = Loan.Status.ACTIVE
+        loan.save(update_fields=["status"])
         loan.application.status = LoanApplication.Status.ACTIVE
         loan.application.save(update_fields=["status"])
 
@@ -2151,8 +2328,7 @@ def record_payment(
         )
 
     loan.refresh_from_db(fields=["outstanding_balance"])
-    # Receipt outstanding moves by the principal applied to the loan (not the
-    # interest-rebuilt schedule total, which can drop by more than the remittance).
+    # Receipt outstanding moves by the loan portion of the remittance.
     payment.outstanding_after = max(
         Decimal("0.00"),
         (outstanding_before - loan_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),

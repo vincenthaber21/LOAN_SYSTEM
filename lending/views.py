@@ -1455,7 +1455,14 @@ def officer_edit_application(request, application_id):
 
 def _members_queryset(query="", status="", active_loans_only=False):
     qs = User.member_accounts().annotate(
-        active_loans=Count("loan_applications__loan", filter=Q(loan_applications__loan__status__in=["active", "overdue"])),
+        active_loans=Count(
+            "loan_applications__loan",
+            filter=Q(loan_applications__loan__status__in=["active", "overdue"]),
+        ),
+        completed_loans=Count(
+            "loan_applications__loan",
+            filter=Q(loan_applications__loan__status=Loan.Status.PAID),
+        ),
     ).prefetch_related("loan_applications__loan")
     if query:
         qs = qs.filter(Q(full_name__icontains=query) | Q(email__icontains=query) | Q(phone__icontains=query))
@@ -1463,6 +1470,9 @@ def _members_queryset(query="", status="", active_loans_only=False):
         qs = qs.filter(is_active=True)
     elif status == "inactive":
         qs = qs.filter(is_active=False)
+    elif status == "completed":
+        # Members who finished every loan (at least one paid, none still open).
+        return qs.filter(completed_loans__gt=0, active_loans=0)
     if active_loans_only:
         qs = qs.filter(active_loans__gt=0)
     return qs
@@ -1527,7 +1537,11 @@ def _member_list_context(members, total_active_loans, total_outstanding, query, 
         "total_adjusted_outstanding": total_adjusted_outstanding,
         "query": query,
         "filters": {"q": query, "status": status},
-        "borrower_status_filters": [{"value": "active", "label": "Active"}, {"value": "inactive", "label": "Inactive"}],
+        "borrower_status_filters": [
+            {"value": "active", "label": "Active"},
+            {"value": "inactive", "label": "Inactive"},
+            {"value": "completed", "label": "Completed loan"},
+        ],
     }
 
 
@@ -1536,8 +1550,9 @@ def _member_list_context(members, total_active_loans, total_outstanding, query, 
 def borrowers(request):
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
+    active_loans_only = status != "completed"
     members, total_active_loans, total_outstanding, total_adjusted_outstanding = _enrich_members(
-        _members_queryset(query, status, active_loans_only=True),
+        _members_queryset(query, status, active_loans_only=active_loans_only),
     )
     return render(
         request,
@@ -1685,7 +1700,7 @@ def delete_all_borrower_loans(request):
 
     query = (request.POST.get("q") or "").strip()
     status = (request.POST.get("status") or "").strip()
-    members = list(_members_queryset(query, status, active_loans_only=True))
+    members = list(_members_queryset(query, status, active_loans_only=status != "completed"))
     if not members:
         messages.info(request, "No members with loans match the current filters.")
         return redirect("borrowers")
@@ -3070,27 +3085,25 @@ def export_applications_csv(request):
 @role_required("officer")
 def export_borrowers_csv(request):
     _log_export(request, "Members CSV exported", "Member directory downloaded.")
-    members = User.member_accounts()
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
-    if query:
-        members = members.filter(Q(full_name__icontains=query) | Q(email__icontains=query) | Q(phone__icontains=query))
-    if status == "active":
-        members = members.filter(is_active=True)
-    elif status == "inactive":
-        members = members.filter(is_active=False)
+    members = _members_queryset(query, status, active_loans_only=False)
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="lumen-borrower-directory.csv"'
     writer = csv.writer(response)
     writer.writerow(["Name", "Email", "Phone", "Monthly income", "Credit score", "Status", "Joined"])
     for member in members:
+        if status == "completed":
+            account_label = "Completed loan"
+        else:
+            account_label = "Active" if member.is_active else "Inactive"
         writer.writerow([
             member.display_name(),
             member.email,
             member.phone,
             member.monthly_income or "",
             format_credit_score(member.credit_score),
-            "Active" if member.is_active else "Inactive",
+            account_label,
             member.joined_at,
         ])
     return response
