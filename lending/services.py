@@ -1583,26 +1583,24 @@ def _display_term_months(installments, term_months):
 def schedule_week_buckets(installments, term_months=None):
     """Group daily installments into weeks (5 working days each).
 
-    Display is capped at months × 4 weeks. Leftover working days fold into the
-    last week so a 4-month term shows Week 1–16 only. Daily formulas are unchanged.
+    Each row is at most 5 working days so the weekly amount stays
+    ``per_day × 5`` (last week may be shorter when the term does not divide evenly).
+    Daily formulas are unchanged; ``term_months`` is accepted for callers but does
+    not merge leftover days into an earlier week.
     """
     items = list(installments)
-    display_term = _display_term_months(items, term_months)
-    buckets = _schedule_period_buckets(items, WORKING_DAYS_PER_WEEK, "Week")
-    return _fold_schedule_buckets(buckets, term_weeks_total(display_term), "Week")
+    return _schedule_period_buckets(items, WORKING_DAYS_PER_WEEK, "Week")
 
 
 def schedule_biweek_buckets(installments, term_months=None):
     """Group daily installments into biweekly periods (10 working days each).
 
-    Display is capped at months × 2 biweeks so the weekly standard (months × 4)
-    stays consistent. Daily formulas are unchanged.
+    Each row is at most 10 working days so the biweekly amount stays
+    ``per_day × 10`` (last biweek may be shorter). Daily formulas are unchanged;
+    ``term_months`` is accepted for callers but does not merge leftover days.
     """
     items = list(installments)
-    display_term = _display_term_months(items, term_months)
-    buckets = _schedule_period_buckets(items, WORKING_DAYS_PER_BIWEEK, "Biweek")
-    target = term_weeks_total(display_term) // 2
-    return _fold_schedule_buckets(buckets, target, "Biweek")
+    return _schedule_period_buckets(items, WORKING_DAYS_PER_BIWEEK, "Biweek")
 
 
 def application_schedule_view_mode(loan):
