@@ -821,9 +821,11 @@ def _sync_loan_balances_from_fixed_schedule(loan):
 def realign_loan_to_one_time_flat_schedule(loan):
     """Rebuild the working-day grid from origination terms and replay payment credits.
 
-    Used when unpaid rows were previously re-priced after remittances. Paid history is
-    preserved by re-applying each payment's loan portion oldest-due-first. Skips
-    rescheduled loans (those keep the remaining-balance rebuild model).
+    Used when installment dues were re-priced after remittances or the ≤₱1,000
+    waiver stripped interest mid-term. Paid history is preserved by re-applying each
+    payment's loan portion oldest-due-first. Loans already marked Paid stay Paid and
+    any shortfall from a prior waived schedule is closed so Loan Exact matches the
+    one-time formula. Skips rescheduled loans.
     """
     if loan.schedule_start_date is not None:
         return False
@@ -832,8 +834,7 @@ def realign_loan_to_one_time_flat_schedule(loan):
         return False
 
     payments = list(loan.payments.order_by("payment_date", "pk"))
-    if not payments:
-        return False
+    was_paid = loan.status == Loan.Status.PAID
 
     loan.disbursed_principal = capital
     loan.original_interest_rate = rate
@@ -853,7 +854,14 @@ def realign_loan_to_one_time_flat_schedule(loan):
     )
     generate_schedule(loan)
 
-    unpaid = list(loan.installments.order_by("installment_number", "due_date"))
+    if not payments:
+        amounts = calculate_flat_loan_amounts(capital, rate, term)
+        loan.outstanding_balance = amounts["total_payable"]
+        loan.total_payable = amounts["total_payable"]
+        loan.save(update_fields=["outstanding_balance", "total_payable"])
+        return True
+
+    last_paid_date = payments[-1].payment_date
     for payment in payments:
         applied = Decimal(str(payment.loan_amount_applied or 0)).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -876,12 +884,27 @@ def realign_loan_to_one_time_flat_schedule(loan):
             "installment_number", "due_date"
         )
     )
+    amounts = calculate_flat_loan_amounts(capital, rate, term)
+
+    # Prior waiver/rebuild may have collected less than the true formula total.
+    # If the loan was already closed, keep it closed on the corrected schedule.
+    if was_paid and unpaid:
+        for item in unpaid:
+            item.amount_paid = item.amount_due
+            item.status = Installment.Status.PAID
+            item.paid_date = item.paid_date or last_paid_date
+        Installment.objects.bulk_update(unpaid, ["amount_paid", "status", "paid_date"])
+        unpaid = []
+
     if not unpaid:
         loan.principal = Decimal("0.00")
         loan.outstanding_balance = Decimal("0.00")
         loan.status = Loan.Status.PAID
-        loan.total_payable = calculate_flat_loan_amounts(capital, rate, term)["total_payable"]
+        loan.total_payable = amounts["total_payable"]
         loan.save(update_fields=["principal", "outstanding_balance", "status", "total_payable"])
+        if loan.application.status != LoanApplication.Status.CLOSED:
+            loan.application.status = LoanApplication.Status.CLOSED
+            loan.application.save(update_fields=["status"])
         return True
 
     _sync_loan_balances_from_fixed_schedule(loan)
@@ -891,9 +914,9 @@ def realign_loan_to_one_time_flat_schedule(loan):
     return True
 
 
-def _unpaid_diverges_from_one_time_formula(loan):
-    """True when unpaid daily dues no longer match the origination flat per-day amount."""
-    if loan.schedule_start_date is not None or not loan.payments.exists():
+def _schedule_diverges_from_one_time_formula(loan):
+    """True when any daily due (paid or unpaid) no longer matches the origination flat amount."""
+    if loan.schedule_start_date is not None:
         return False
     capital, rate, term = _origination_flat_terms(loan)
     if capital <= 0 or term <= 0:
@@ -901,15 +924,28 @@ def _unpaid_diverges_from_one_time_formula(loan):
     amounts = calculate_flat_loan_amounts(capital, rate, term)
     expected = amounts["per_day"]
     periods = amounts["periods"]
-    unpaid = loan.installments.exclude(status=Installment.Status.PAID)
-    if not unpaid.exists():
+    rows = list(loan.installments.order_by("installment_number"))
+    if not rows:
         return False
-    for row in unpaid:
+    if len(rows) != periods:
+        return True
+    for row in rows:
         if row.installment_number == periods:
             continue
         if (row.amount_due or Decimal("0.00")) != expected:
             return True
+        # Interest stripped mid-term (≤₱1,000 waiver rebuild) also diverges.
+        if expected > 0 and (row.interest_component or Decimal("0.00")) == 0:
+            interest_per = (amounts["total_interest"] / Decimal(periods)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            if interest_per > 0:
+                return True
     return False
+
+
+# Backwards-compatible alias used by older callers / shell checks.
+_unpaid_diverges_from_one_time_formula = _schedule_diverges_from_one_time_formula
 
 
 def _rebuild_schedule_for_remaining_principal(loan, new_principal, start_due_date, periods):
@@ -1316,16 +1352,17 @@ def _repair_rescheduled_flat_balances(loan):
 def ensure_schedule_current(loan):
     """Regenerate the schedule when it is out of sync with loan terms or disbursement date.
 
-    Also strips interest from unpaid rows when remaining principal is ₱1,000 or less,
-    keeps rescheduled loans aligned with the remaining-balance flat formula, and
-    realigns ordinary loans whose unpaid days were re-priced after remittances.
+    Keeps rescheduled loans aligned with the remaining-balance flat formula, realigns
+    ordinary loans whose daily dues left the one-time origination formula (including
+    mid-term ≤₱1,000 interest stripping), and only waives interest on loans that
+    originated at or below that ceiling.
     """
     sync_loan_term_from_application(loan)
     if loan.schedule_start_date is not None and _repair_rescheduled_flat_balances(loan):
         return True
     if schedule_is_stale(loan):
         return rebuild_loan_schedule(loan)
-    if _unpaid_diverges_from_one_time_formula(loan):
+    if _schedule_diverges_from_one_time_formula(loan):
         return realign_loan_to_one_time_flat_schedule(loan)
     if _waive_interest_on_small_remaining_principal(loan):
         return True
@@ -1333,7 +1370,16 @@ def ensure_schedule_current(loan):
 
 
 def _waive_interest_on_small_remaining_principal(loan):
-    """If principal is ≤₱1,000, rebuild unpaid schedule with principal only (no interest)."""
+    """If the loan *originated* at ≤₱1,000, keep unpaid rows interest-free.
+
+    Ordinary loans that start above the ceiling keep their one-time flat interest for
+    every working day — remaining principal dropping to ≤₱1,000 mid-term does not
+    rebuild or strip interest from the schedule.
+    """
+    capital, _rate, _term = _origination_flat_terms(loan)
+    if not principal_waives_interest(capital):
+        return False
+
     principal = Decimal(str(loan.principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if not principal_waives_interest(principal):
         return False
