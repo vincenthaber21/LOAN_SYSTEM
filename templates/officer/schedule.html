@@ -22,6 +22,10 @@
       · {{ loan.term_weeks_label }}
       · {% if view_mode == "month" %}{{ loan.term_months }} monthly payments of {{ loan.adjusted_monthly_payment|peso }} <span class="text-muted">(exact {{ loan.monthly_payment|peso }})</span>{% elif view_mode == "biweek" %}biweekly payments of {{ loan.adjusted_biweekly_payment|peso }} <span class="text-muted">(exact {{ loan.biweekly_payment|peso }})</span>{% elif view_mode == "week" %}weekly payments of {{ loan.adjusted_weekly_payment|peso }} <span class="text-muted">(exact {{ loan.weekly_payment|peso }})</span>{% else %}{{ loan.working_days }} working-day payments of {{ loan.adjusted_daily_payment|peso }} <span class="text-muted">(exact {{ loan.daily_payment|peso }})</span>{% endif %}
       · interest starts {{ loan.reschedule_interest_start_display }}.
+      {% elif amortization %}
+      {{ loan.application.borrower_name }}'s declining-balance plan from {{ loan.start_date }}
+      · {{ amortization.number_of_payments }} payments of {{ amortization.payment|peso }} every {{ amortization.interval_days }} days
+      · add-on {{ amortization.add_on_percent }}% converted to {{ amortization.period_rate_percent }}% per period.
       {% else %}
       {{ loan.application.borrower_name }}'s full payment plan from disbursement on {{ loan.start_date }}
       · {{ loan.term_months }}-month term
@@ -31,7 +35,14 @@
       {% endif %}
     </p>
   </div>
-  <a class="btn btn-outline-primary csv-link" href="{% url 'export_schedule_csv' loan_id=loan.id %}"><i class="bi bi-download"></i>Download CSV</a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-primary" href="{% url 'officer_passbook_pdf' loan_id=loan.id %}?view={{ view_mode }}&amp;plan={{ schedule_plan }}"><i class="bi bi-journal-bookmark me-1"></i>Download passbook PDF</a>
+    {% if amortization %}
+    <a class="btn btn-outline-primary" href="{% url 'export_schedule_amortization_pdf' loan_id=loan.id %}"><i class="bi bi-file-earmark-pdf me-1"></i>Download PDF</a>
+    <a class="btn btn-outline-primary" href="{% url 'export_schedule_xlsx' loan_id=loan.id %}"><i class="bi bi-file-earmark-excel me-1"></i>Download Excel</a>
+    {% endif %}
+    <a class="btn btn-outline-primary csv-link" href="{% url 'export_schedule_csv' loan_id=loan.id %}"><i class="bi bi-download"></i>Download CSV</a>
+  </div>
 </div>
 
 {% if showing_original and original_terms %}
@@ -98,6 +109,9 @@
 </div>
 {% endif %}
 
+{% if amortization and not showing_original %}
+{% include "includes/declining_schedule.html" with amortization=amortization show_status=True %}
+{% else %}
 <form class="filter-bar schedule-filters mb-4" method="get" action="{% url 'officer_repayment_schedule' loan_id=loan.id %}">
   <div class="schedule-filters-row">
     {% if loan.is_rescheduled %}
@@ -310,4 +324,5 @@
     {% endif %}
   </div>
 </div>
+{% endif %}
 {% endblock %}

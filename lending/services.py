@@ -915,8 +915,11 @@ def realign_loan_to_one_time_flat_schedule(loan):
 
 
 def _schedule_diverges_from_one_time_formula(loan):
-    """True when any daily due (paid or unpaid) no longer matches the origination flat amount."""
-    if loan.schedule_start_date is not None:
+    """True when any daily due (paid or unpaid) no longer matches the origination flat amount.
+
+    Loans already stored on the declining-balance schedule are left as recorded.
+    """
+    if loan.schedule_start_date is not None or loan.period_rate is not None:
         return False
     capital, rate, term = _origination_flat_terms(loan)
     if capital <= 0 or term <= 0:
@@ -1149,27 +1152,210 @@ def update_reschedule_start_date(loan, start_date):
     }
 
 
+def declining_first_due_date(loan):
+    """First payment date for an add-on / declining-balance schedule.
+
+    Uses the reschedule start when one is set, otherwise the disbursement date
+    plus any grace days. Dates then step by the payment interval; they are not
+    snapped to Monday.
+    """
+    start = loan.schedule_start_date or loan.disbursed_date
+    return start + timedelta(days=int(loan.grace_period_days or 0))
+
+
+def declining_inputs_for_loan(loan):
+    """Map a loan's monthly rate, term, and pay frequency onto the add-on schedule inputs.
+
+    The product rate is a monthly add-on percentage. The total add-on rate for the
+    term is that rate times the number of months (2.75% × 12 months = 33%).
+    Principal of ₱1,000 or less stays interest-free.
+    """
+    from .amortization import addon_rate_for_term, interval_days_for_frequency, payment_count_for_term
+
+    principal = Decimal(str(loan.principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    term = loan_term_months(loan)
+    frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
+    interval = interval_days_for_frequency(frequency)
+    count = payment_count_for_term(term, interval)
+    if principal_waives_interest(principal):
+        addon = Decimal("0")
+    else:
+        addon = addon_rate_for_term(loan.interest_rate or 0, term)
+    return {
+        "principal": principal,
+        "add_on_rate": addon,
+        "number_of_payments": count,
+        "payment_interval_days": interval,
+        "first_due_date": declining_first_due_date(loan),
+    }
+
+
+def declining_schedule_context(loan):
+    """Stored declining-balance schedule for display and export.
+
+    Reads the saved period rate and installment rows. It does not solve for i again.
+    """
+    if loan.period_rate is None or loan.schedule_start_date is not None:
+        return None
+    installments = list(loan.installments.order_by("installment_number"))
+    if not installments or not loan.payment_interval_days:
+        return None
+    from .amortization import rate_summary
+
+    summary = rate_summary(loan.period_rate, loan.payment_interval_days, loan.addon_rate or 0)
+    first = installments[0]
+    opening = (first.ending_balance + first.principal_component).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    rows = [
+        {
+            "number": 0,
+            "due_date": None,
+            "payment": Decimal("0.00"),
+            "interest": Decimal("0.00"),
+            "principal": Decimal("0.00"),
+            "balance": opening,
+            "status": "",
+            "status_label": "",
+            "is_opening": True,
+            "is_next": False,
+        }
+    ]
+    next_unpaid = next(
+        (item for item in installments if item.status != Installment.Status.PAID),
+        None,
+    )
+    for item in installments:
+        rows.append(
+            {
+                "number": item.installment_number,
+                "due_date": item.due_date,
+                "payment": item.amount_due,
+                "interest": item.interest_component,
+                "principal": item.principal_component,
+                "balance": item.ending_balance,
+                "status": item.status,
+                "status_label": item.status_label,
+                "is_opening": False,
+                "is_next": next_unpaid is not None and item.pk == next_unpaid.pk,
+            }
+        )
+    payment_rows = [row for row in rows if row["number"] > 0]
+    regular_payment = payment_rows[0]["payment"] if payment_rows else Decimal("0.00")
+    total_repayment = sum((row["payment"] for row in payment_rows), Decimal("0.00"))
+    total_interest = sum((row["interest"] for row in payment_rows), Decimal("0.00"))
+    interval = loan.payment_interval_days
+    comparison = (
+        f"Add-on {summary['add_on_percent']}% for the term versus "
+        f"{summary['period_rate_percent']}% declining each {interval}-day period "
+        f"(nominal annual {summary['nominal_annual_percent']}%, "
+        f"effective annual {summary['effective_annual_percent']}%)."
+    )
+    return {
+        "rows": rows,
+        "payment": regular_payment,
+        "total_repayment": total_repayment.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        "total_interest": total_interest.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        "interval_days": interval,
+        "number_of_payments": loan.number_of_payments or len(payment_rows),
+        "comparison": comparison,
+        **summary,
+    }
+
+
 def schedule_is_stale(loan):
     """True when stored installments no longer match the loan terms or disbursement date."""
     if not loan.installments.exists():
         return True
     # After payments, paid rows are kept for history while unpaid rows (and often
-    # term_months) shrink. Total count will no longer equal term×22 — that is
+    # term_months) shrink. Total count will no longer equal the original grid — that is
     # expected, and rebuild_loan_schedule refuses to wipe paid history anyway.
     if loan.payments.exists():
         return False
-    term = loan_term_months(loan)
-    expected = expected_period_count(term)
+    if loan.schedule_start_date is not None:
+        term = loan_term_months(loan)
+        expected = expected_period_count(term)
+        first_due = _first_installment_due_date(loan)
+    else:
+        inputs = declining_inputs_for_loan(loan)
+        expected = inputs["number_of_payments"]
+        first_due = inputs["first_due_date"]
     if loan.installments.count() != expected:
         return True
     first = loan.installments.order_by("installment_number").first()
     if not first:
         return True
-    return first.due_date != _first_installment_due_date(loan)
+    return first.due_date != first_due
 
 
-def generate_schedule(loan):
-    """Build one installment per working day (Mon–Fri) for the loan term.
+def _clear_declining_terms(loan):
+    """Drop stored declining-balance terms when a flat working-day plan is rebuilt."""
+    if (
+        loan.period_rate is None
+        and loan.addon_rate is None
+        and loan.payment_interval_days is None
+        and loan.number_of_payments is None
+    ):
+        return
+    loan.period_rate = None
+    loan.addon_rate = None
+    loan.payment_interval_days = None
+    loan.number_of_payments = None
+    loan.save(
+        update_fields=["period_rate", "addon_rate", "payment_interval_days", "number_of_payments"]
+    )
+
+
+def _generate_declining_schedule(loan):
+    """Store one installment per payment interval using the solved declining-balance rate."""
+    from .amortization import calculate_amortization, configured_final_payment_policy
+
+    Installment.objects.filter(loan=loan).delete()
+    inputs = declining_inputs_for_loan(loan)
+    stored_rate = None
+    if (
+        loan.period_rate is not None
+        and loan.addon_rate == inputs["add_on_rate"]
+        and loan.number_of_payments == inputs["number_of_payments"]
+        and loan.payment_interval_days == inputs["payment_interval_days"]
+        and Decimal(str(loan.principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        == inputs["principal"]
+    ):
+        stored_rate = loan.period_rate
+    result = calculate_amortization(
+        inputs["principal"],
+        inputs["add_on_rate"],
+        inputs["number_of_payments"],
+        inputs["payment_interval_days"],
+        inputs["first_due_date"],
+        period_rate=stored_rate,
+        final_payment_policy=configured_final_payment_policy(),
+    )
+    Installment.objects.bulk_create(
+        [
+            Installment(
+                loan=loan,
+                installment_number=row.number,
+                due_date=row.due_date,
+                principal_component=row.principal,
+                interest_component=row.interest,
+                amount_due=row.payment,
+                ending_balance=row.balance,
+            )
+            for row in result.payments
+        ]
+    )
+    loan.period_rate = result.period_rate
+    loan.addon_rate = result.add_on_rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    loan.payment_interval_days = result.payment_interval_days
+    loan.number_of_payments = result.number_of_payments
+    loan.save(
+        update_fields=["period_rate", "addon_rate", "payment_interval_days", "number_of_payments"]
+    )
+
+
+def _generate_flat_working_day_schedule(loan):
+    """Build one installment per working day (Mon–Fri) for a rescheduled loan term.
 
     Flat interest is charged once on the disbursed principal for every month of the term:
 
@@ -1219,6 +1405,20 @@ def generate_schedule(loan):
         principal_remaining = max(Decimal("0.00"), principal_remaining - principal)
         interest_remaining = max(Decimal("0.00"), interest_remaining - interest)
     Installment.objects.bulk_create(installments)
+    _clear_declining_terms(loan)
+
+
+def generate_schedule(loan):
+    """Build the repayment grid for a loan.
+
+    Ordinary loans use the add-on rate converted to a declining-balance rate, with
+    one row per payment interval. Rescheduled remaining-balance plans keep the flat
+    working-day grid.
+    """
+    if loan.schedule_start_date is not None:
+        _generate_flat_working_day_schedule(loan)
+        return
+    _generate_declining_schedule(loan)
 
 
 def rebuild_loan_schedule(loan):
@@ -1681,6 +1881,20 @@ def view_mode_to_pay_frequency(view_mode):
 
 def next_due_for_display(loan, view_mode="day"):
     """Next remittance for the selected schedule Display (day/week/biweek/month)."""
+    if loan.period_rate is not None and loan.schedule_start_date is None:
+        next_item = loan.next_installment
+        if not next_item:
+            return None
+        amount = next_item.remaining
+        frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
+        return {
+            "due_date": next_item.due_date,
+            "label": "Scheduled",
+            "frequency": frequency,
+            "amount": amount,
+            "mutual_aid": Decimal("0.00"),
+            "adjusted_amount": adjust_payment(amount),
+        }
     view_mode = {
         "day": "day",
         "daily": "day",
@@ -1865,6 +2079,29 @@ def application_payment_preview(application, view_mode=None, month=None, start_d
         raise ValueError("Application has no term months.")
     assumed_release = start_date or next_disbursement_weekday()
     amounts = calculate_flat_loan_amounts(principal, rate, term)
+    from .amortization import (
+        addon_rate_for_term,
+        calculate_amortization,
+        configured_final_payment_policy,
+        interval_days_for_frequency,
+        payment_count_for_term,
+    )
+
+    interval = interval_days_for_frequency(application.payment_frequency)
+    payment_count = payment_count_for_term(int(term), interval)
+    addon = (
+        Decimal("0")
+        if principal_waives_interest(principal)
+        else addon_rate_for_term(rate, term)
+    )
+    amortization_result = calculate_amortization(
+        principal,
+        addon,
+        payment_count,
+        interval,
+        assumed_release,
+        final_payment_policy=configured_final_payment_policy(),
+    )
     installments = build_virtual_installments(principal, rate, term, assumed_release)
     default_view = payment_frequency_to_view_mode(application.payment_frequency)
     display = _schedule_display_from_installments(
@@ -1902,9 +2139,51 @@ def application_payment_preview(application, view_mode=None, month=None, start_d
             "payment_frequency": application.payment_frequency,
             "payment_frequency_label": application.get_payment_frequency_display(),
             "product_name": application.product_name,
+            "period_payment": amortization_result.payment,
+            "add_on_percent": amortization_result.add_on_percent,
+            "period_rate_percent": amortization_result.period_rate_percent,
+            "nominal_annual_percent": amortization_result.nominal_annual_percent,
+            "effective_annual_percent": amortization_result.effective_annual_percent,
+            "payment_count": amortization_result.number_of_payments,
+            "interval_days": amortization_result.payment_interval_days,
+            "declining_total_payable": amortization_result.total_repayment,
+            "declining_total_interest": amortization_result.total_interest,
         },
         "application_pay_frequency": application.payment_frequency,
         "default_view_mode": default_view,
+        "amortization": {
+            "rows": [
+                {
+                    "number": row.number,
+                    "due_date": row.due_date,
+                    "payment": row.payment,
+                    "interest": row.interest,
+                    "principal": row.principal,
+                    "balance": row.balance,
+                    "is_opening": row.number == 0,
+                    "is_next": row.number == 1,
+                    "status": "",
+                    "status_label": "Preview" if row.number else "",
+                }
+                for row in amortization_result.rows
+            ],
+            "payment": amortization_result.payment,
+            "total_repayment": amortization_result.total_repayment,
+            "total_interest": amortization_result.total_interest,
+            "interval_days": amortization_result.payment_interval_days,
+            "number_of_payments": amortization_result.number_of_payments,
+            "add_on_percent": amortization_result.add_on_percent,
+            "period_rate_percent": amortization_result.period_rate_percent,
+            "nominal_annual_percent": amortization_result.nominal_annual_percent,
+            "effective_annual_percent": amortization_result.effective_annual_percent,
+            "comparison": (
+                f"Add-on {amortization_result.add_on_percent}% for the term versus "
+                f"{amortization_result.period_rate_percent}% declining each "
+                f"{amortization_result.payment_interval_days}-day period "
+                f"(nominal annual {amortization_result.nominal_annual_percent}%, "
+                f"effective annual {amortization_result.effective_annual_percent}%)."
+            ),
+        },
     })
     return display
 
@@ -2069,8 +2348,8 @@ def disburse_application(
     rate = application.final_interest_rate or application.loan_product.interest_rate
     term = application.final_term_months or application.term_months
     grace_period_days = application.loan_product.grace_period_days if application.loan_product else 0
-    # Flat interest: total_payable = principal + (principal * rate% * term_months).
-    # The daily schedule splits that total across term_months * 22 working days.
+    # Total repayment uses the term add-on (monthly rate × months). The stored
+    # schedule then converts that add-on into a declining-balance rate.
     amounts = calculate_flat_loan_amounts(amount, rate, term)
     total_payable = amounts["total_payable"]
     loan = Loan.objects.create(

@@ -4,6 +4,12 @@ import django.utils.timezone
 
 
 def backfill_activity_logs(apps, schema_editor):
+    # The live audit backfill selects the current LoanApplication model, which
+    # includes columns added in later migrations. A brand-new database has no
+    # applications yet at this point, so there is nothing to copy.
+    LoanApplication = apps.get_model("lending", "LoanApplication")
+    if not LoanApplication.objects.exists():
+        return
     from lending.audit import backfill_activity_logs as run_backfill
 
     run_backfill()

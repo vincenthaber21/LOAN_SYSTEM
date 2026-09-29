@@ -1,0 +1,82 @@
+{% load lending_tags %}
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card-soft">
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="card-title">Amortization schedule</h2>
+        <span class="small text-muted">{{ amortization.number_of_payments }} payment{{ amortization.number_of_payments|pluralize }} · every {{ amortization.interval_days }} days</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>No.</th>
+              <th>Due Date</th>
+              <th>Scheduled Payment</th>
+              <th>Interest</th>
+              <th>Principal</th>
+              <th>Balance</th>
+              {% if show_status %}<th>Status</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in amortization.rows %}
+            <tr{% if row.is_next %} class="schedule-original-start"{% endif %}>
+              <td class="text-muted">{{ row.number }}</td>
+              <td>
+                {% if row.is_opening %}
+                <span class="text-muted">Opening balance</span>
+                {% else %}
+                <strong>{{ row.due_date|date:"M d, Y" }}</strong>
+                {% if row.is_next %}<span class="badge status-pending ms-2">Next</span>{% endif %}
+                {% endif %}
+              </td>
+              <td class="fw-semibold">{% if row.is_opening %}—{% else %}{{ row.payment|peso }}{% endif %}</td>
+              <td>{% if row.is_opening %}—{% else %}{{ row.interest|peso }}{% endif %}</td>
+              <td>{% if row.is_opening %}—{% else %}{{ row.principal|peso }}{% endif %}</td>
+              <td>{{ row.balance|peso }}</td>
+              {% if show_status %}
+              <td>
+                {% if row.is_opening %}
+                <span class="text-muted">—</span>
+                {% elif row.status %}
+                {% include "includes/status_badge.html" with status=row.status label=row.status_label %}
+                {% else %}
+                <span class="badge status-neutral">{{ row.status_label|default:"Preview" }}</span>
+                {% endif %}
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card-soft mb-4">
+      <div class="card-header"><h2 class="card-title">Rate comparison</h2></div>
+      <div class="card-body">
+        <p class="text-muted small">{{ amortization.comparison }}</p>
+        <div class="detail-label">Payment per period</div>
+        <div class="detail-value mb-3">{{ amortization.payment|peso }}</div>
+        <div class="detail-label">Total repayment</div>
+        <div class="detail-value mb-3">{{ amortization.total_repayment|peso }}</div>
+        <div class="detail-label">Total interest</div>
+        <div class="detail-value mb-3">{{ amortization.total_interest|peso }}</div>
+        <div class="detail-label">Add-on rate for the term</div>
+        <div class="detail-value mb-3">{{ amortization.add_on_percent }}%</div>
+        <div class="detail-label">Declining rate per period</div>
+        <div class="detail-value mb-3">{{ amortization.period_rate_percent }}%</div>
+        <div class="detail-label">Nominal annual rate</div>
+        <div class="detail-value mb-1">{{ amortization.nominal_annual_percent }}%</div>
+        <div class="text-muted small mb-3">period rate × (365 / {{ amortization.interval_days }} days)</div>
+        <div class="detail-label">Effective annual rate</div>
+        <div class="detail-value mb-3">{{ amortization.effective_annual_percent }}%</div>
+        {% if loan and loan.outstanding_balance > 0 %}
+        <a class="btn btn-primary w-100" href="{% url 'officer_make_payment' loan_id=loan.id %}"><i class="bi bi-cash-coin me-1"></i>Record payment</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>

@@ -47,6 +47,14 @@ CSRF_TRUSTED_ORIGINS = [
 SECURE_SSL_REDIRECT = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "0" if DEBUG else "1") == "1"
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+# Production staff sessions end 12 hours after the last request.
+# The daily task then deletes leftover session rows and locks accounts
+# that keep failing sign-in. Override with DJANGO_SESSION_COOKIE_AGE (seconds).
+if not DEBUG:
+    SESSION_COOKIE_AGE = int(os.environ.get("DJANGO_SESSION_COOKIE_AGE", str(12 * 60 * 60)))
+    SESSION_SAVE_EVERY_REQUEST = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
@@ -167,6 +175,14 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Allow restoring a full-database backup through Django admin (Features).
 # Override with DJANGO_DATA_UPLOAD_MAX_MEMORY_SIZE (bytes) if backups are larger.
+# Last payment of an add-on / declining-balance schedule.
+# match_total_repayment: adjust the final interest so payments sum to
+# principal × (1 + add-on rate).
+# standard_rounding: keep the final interest as round(balance × period rate, 2).
+LOAN_FINAL_PAYMENT_POLICY = os.environ.get(
+    "LOAN_FINAL_PAYMENT_POLICY", "match_total_repayment"
+)
+
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(
     os.environ.get("DJANGO_DATA_UPLOAD_MAX_MEMORY_SIZE", str(100 * 1024 * 1024))
 )

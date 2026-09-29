@@ -2,7 +2,9 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -42,17 +44,40 @@ from .services import (
     update_membership,
 )
 
+LEDGER_PAGE_SIZE = 20
 
-def _membership_ledger(membership):
+
+def _membership_ledger(membership, *, sync=False):
+    """Totals from contribution and disbursed-claim rows, not the stored counters."""
     contributions = membership.contributions.all()
     agg = contributions.aggregate(
         contribution_count=Count("id"),
         total_amount=Sum("amount"),
     )
+    total_contributed = agg["total_amount"] or Decimal("0.00")
+    benefits_claimed = (
+        membership.claims.filter(status=MutualAidClaim.Status.DISBURSED).aggregate(
+            value=Sum(Coalesce("amount_approved", "amount_requested"))
+        )["value"]
+        or Decimal("0.00")
+    )
+    if sync:
+        updates = []
+        if membership.total_contributed != total_contributed:
+            membership.total_contributed = total_contributed
+            updates.append("total_contributed")
+        if membership.benefits_claimed != benefits_claimed:
+            membership.benefits_claimed = benefits_claimed
+            updates.append("benefits_claimed")
+        if updates:
+            membership.save(update_fields=updates)
     last_contribution = contributions.select_related("recorded_by").order_by("-created_at", "-pk").first()
     return {
         "contribution_count": agg["contribution_count"] or 0,
-        "total_amount": agg["total_amount"] or Decimal("0.00"),
+        "total_amount": total_contributed,
+        "total_contributed": total_contributed,
+        "benefits_claimed": benefits_claimed,
+        "net_balance": total_contributed - benefits_claimed,
         "last_contribution": last_contribution,
     }
 
@@ -493,17 +518,25 @@ def officer_mutual_aid_membership_detail(request, membership_id):
             except MutualAidError as exc:
                 messages.error(request, str(exc))
 
-    contributions = list(
-        membership.contributions.select_related("recorded_by", "period").order_by("-created_at", "-pk")[:50]
-    )
-    claims = membership.claims.select_related("reviewed_by", "disbursed_by").order_by("-created_at")[:20]
-    ledger = _membership_ledger(membership)
+    contribution_page = Paginator(
+        membership.contributions.select_related("recorded_by", "period").order_by("-created_at", "-pk"),
+        LEDGER_PAGE_SIZE,
+    ).get_page(request.GET.get("page"))
+    claims_page = Paginator(
+        membership.claims.select_related("reviewed_by", "disbursed_by").order_by("-created_at", "-pk"),
+        LEDGER_PAGE_SIZE,
+    ).get_page(request.GET.get("claims_page"))
+    ledger = _membership_ledger(membership, sync=True)
     period_rows = _membership_period_rows(membership)
 
     return render(request, "officer/mutual_aid_membership_detail.html", {
         "membership": membership,
-        "contributions": contributions,
-        "claims": claims,
+        "contributions": contribution_page.object_list,
+        "page_obj": contribution_page,
+        "is_paginated": contribution_page.has_other_pages(),
+        "claims": claims_page.object_list,
+        "claims_page_obj": claims_page,
+        "claims_paginated": claims_page.has_other_pages(),
         "ledger": ledger,
         "period_rows": period_rows,
         "contribution_form": contribution_form,

@@ -3,6 +3,11 @@ from django.db import migrations
 
 def backfill_payment_outstanding_snapshots(apps, schema_editor):
     # Use concrete models so loan_amount_applied and receipt helpers are available.
+    # A fresh database has no payments at this migration, and querying the live
+    # Loan model would require columns added in later migrations.
+    PaymentHistorical = apps.get_model("lending", "Payment")
+    if not PaymentHistorical.objects.exists():
+        return
     from lending.models import Payment
     from lending.services import payment_receipt_balances
 

@@ -122,6 +122,7 @@
     <a class="btn btn-outline-primary" href="{% url 'application_pdf' application_id=loan.application_id %}" target="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>View PDF</a>
     <a class="btn btn-outline-primary" href="{% url 'disbursement_receipt' disbursement_id=loan.application_id %}"><i class="bi bi-receipt me-1"></i>Disbursement receipt</a>
     <a class="btn btn-outline-primary" href="{% url 'officer_repayment_schedule' loan_id=loan.id %}"><i class="bi bi-calendar3 me-1"></i>Schedule</a>
+    <a class="btn btn-outline-primary" href="{% url 'officer_passbook_pdf' loan_id=loan.id %}"><i class="bi bi-journal-bookmark me-1"></i>Download passbook PDF</a>
     {% if loan.outstanding_balance > 0 %}<a class="btn btn-primary" href="{% url 'officer_make_payment' loan_id=loan.id %}{% if next_due %}?pay={{ next_due.frequency }}{% endif %}"><i class="bi bi-cash-coin me-1"></i>Record payment</a>{% endif %}
   </div>
 </div>
@@ -224,7 +225,7 @@
               <span class="ms-1">(loan exact {{ chosen_pay_amount_exact|peso }})</span>
             </div>
           </div>
-          <div class="col-sm-4"><div class="detail-label">Interest rate</div><div class="detail-value">{% if loan.is_rescheduled %}{{ loan.reschedule_rate }}% (included in principal){% else %}{{ loan.interest_rate }}% fixed{% endif %}</div></div>
+          <div class="col-sm-4"><div class="detail-label">Interest rate</div><div class="detail-value">{% if amortization %}{{ amortization.period_rate_percent }}% per period{% elif loan.is_rescheduled %}{{ loan.reschedule_rate }}% (included in principal){% else %}{{ loan.interest_rate }}% fixed{% endif %}</div>{% if amortization %}<div class="text-muted small">Add-on {{ amortization.add_on_percent }}% for the term · nominal annual {{ amortization.nominal_annual_percent }}% · EAR {{ amortization.effective_annual_percent }}%</div>{% endif %}</div>
           <div class="col-sm-4"><div class="detail-label">Payments remaining</div><div class="detail-value">{{ loan.payments_remaining }}</div></div>
           <div class="col-sm-4"><div class="detail-label">Origination date</div><div class="detail-value">{{ loan.start_date }}</div></div>
           {% if loan.is_rescheduled %}
@@ -244,6 +245,18 @@
             <div class="detail-value">{{ loan.term_months }} months</div>
             <div class="text-muted small">{{ loan.term_weeks_label }}</div>
           </div>
+          {% if amortization %}
+          <div class="col-sm-4">
+            <div class="detail-label">Payment per period</div>
+            <div class="detail-value">{{ amortization.payment|peso }}</div>
+            <div class="text-muted small">Every {{ amortization.interval_days }} days · {{ amortization.number_of_payments }} payments</div>
+          </div>
+          <div class="col-sm-4">
+            <div class="detail-label">Total interest</div>
+            <div class="detail-value">{{ amortization.total_interest|peso }}</div>
+            <div class="text-muted small">{{ amortization.comparison }}</div>
+          </div>
+          {% else %}
           <div class="col-sm-4">
             <div class="detail-label">Payment per week</div>
             <div class="detail-value">{{ loan.adjusted_weekly_payment|peso }}</div>
@@ -259,6 +272,7 @@
             <div class="detail-value">{{ loan.adjusted_monthly_payment|peso }}</div>
             <div class="text-muted small">Exact {{ loan.monthly_payment|peso }}</div>
           </div>
+          {% endif %}
           <div class="col-sm-4">
             <div class="detail-label">Total payable</div>
             <div class="detail-value">{{ loan.adjusted_total_payable|peso }}</div>

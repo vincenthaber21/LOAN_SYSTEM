@@ -23,7 +23,7 @@ from .decorators import role_required
 from .forms import BalanceExtensionForm, BorrowerLoanApplicationForm, CharacterReferenceFormSet, DocumentForm, ExpiredMonthSignatureForm, LoanApplicationForm, LoanProductEditForm, LoanProductForm, ManagerAccountEditForm, ManagerAccountForm, OfficerAccountEditForm, OfficerAccountForm, OfficerLoanApplicationForm, OfficerMemberEditForm, OfficerMemberForm, OfficerPasswordChangeForm, PaymentForm, ProfileForm, RegistrationForm, RescheduleStartDateForm, ReviewForm, available_loan_products_for_borrower, unavailable_product_ids_for_borrower
 from .audit import application_decision_log, browser_label, record_activity, record_staff_auth_event
 from .models import ActivityLog, Document, Installment, Loan, LoanApplication, LoanOfficer, LoanProduct, LoginLogoutLog, Manager, Notification, Payment, User
-from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, deduction_amount_for_key, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, pre_reschedule_maturity_date, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_deduction_keys, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount, update_reschedule_start_date
+from .services import ACTIVITY_PERIOD_FILTERS, BalanceExtensionError, DisbursementDayError, ExpiredMonthSignatureError, activity_range_label, adjust_payment, application_payment_preview, balance_extension_previews, can_extend_loan_balance, disburse_application, disbursement_day_error_message, disbursement_start_time_label, disbursement_weekday_label, deduction_amount_for_key, declining_schedule_context, ensure_schedule_current, expired_month_rows, extend_loan_balance, format_activity_timestamp, format_credit_score, get_borrower_credit_summary, get_disbursement_start_time, get_disbursement_weekday, get_officer_activity_log, is_disbursement_condition_enabled, is_disbursement_time_open, is_disbursement_weekday, loan_maturity_date, mark_overdue_installments, next_disbursement_weekday, normalize_credit_score, original_schedule_display_rows, payment_adjustment_surplus, payment_frequency_to_view_mode, payment_receipt_balances, pre_reschedule_maturity_date, record_expired_month_signature, record_payment, reject_superseded_applications, resolve_activity_date_range, credit_score_blocks_loans, credit_score_loan_block_message, schedule_display_rows, split_payment_for_savings, standard_deduction_keys, standard_disbursement_deductions, application_schedule_view_mode, application_type_for_member, next_due_for_display, BALANCE_EXTENSION_RATE, daily_mutual_aid_amount, mutual_aid_for_pay_frequency, mutual_aid_for_remittance_amount, update_reschedule_start_date
 
 
 APPLICATION_DOCUMENT_SPECS = (
@@ -936,6 +936,7 @@ def application_review(request, application_id):
     schedule_payment_count = 0
     schedule_preview_ready = False
     schedule_preview_error = ""
+    schedule_amortization = None
     preview_mutual_aid = daily_mutual_aid_amount()
     try:
         preview = application_payment_preview(
@@ -950,6 +951,7 @@ def application_review(request, application_id):
         schedule_selected_month = preview["selected_month"]
         schedule_payment_count = preview["payment_count"]
         preview_mutual_aid = preview.get("daily_mutual_aid_amount") or preview_mutual_aid
+        schedule_amortization = preview.get("amortization")
         schedule_preview_ready = True
     except Exception as exc:
         schedule_preview_error = str(exc) or "Could not build a payment preview for this application."
@@ -981,6 +983,7 @@ def application_review(request, application_id):
         ],
         "review_notes": [{"author": application.reviewed_by.display_name(), "created_at": application.decision_date, "body": application.review_notes}] if application.review_notes and application.reviewed_by else [],
         "schedule_preview": schedule_preview,
+        "schedule_amortization": schedule_amortization,
         "schedule_preview_terms": schedule_preview_terms,
         "schedule_preview_ready": schedule_preview_ready,
         "schedule_preview_error": schedule_preview_error,
@@ -2052,7 +2055,7 @@ def _build_activity_log_context(request, staff):
         "savings": ("Savings", "Savings accounts and transactions handled by this staff member."),
         "mutual_aid": ("Mutual aid", "Enrollments, contributions, and claims handled by this staff member."),
         "account": ("Accounts", "Officer, manager, and product changes."),
-        "security": ("Login & logout", "Logins, logouts, failed sign-ins, and data exports."),
+        "security": ("Login & logout", "Logins, logouts, failed sign-ins, locked accounts, and data exports."),
     }
     activity_heading, activity_blurb = activity_copy.get(activity_type, activity_copy["all"])
 
@@ -2448,6 +2451,7 @@ def officer_loan_detail(request, loan_id):
             return redirect("officer_loan_detail", loan_id=loan.id)
 
     pay_freq = loan.application.payment_frequency or "daily"
+    amortization = declining_schedule_context(loan)
     mutual_aid_daily = daily_mutual_aid_amount()
     mutual_aid_for_plan = mutual_aid_for_pay_frequency(pay_freq)
     loan_exact = loan.suggested_payment_for(pay_freq, adjust=False)
@@ -2457,6 +2461,7 @@ def officer_loan_detail(request, loan_id):
         "officer/loan_detail.html",
         {
             "loan": loan,
+            "amortization": amortization,
             "payments": payments,
             "next_due": next_due,
             "expired_months": expired_months,
@@ -2505,11 +2510,13 @@ def officer_schedule(request, loan_id):
 
     payments_made_count = loan.payments.count()
     total_collected_to_loan = max(Decimal("0.00"), loan.original_amount - loan.principal)
+    amortization = None if showing_original else declining_schedule_context(loan)
     return render(
         request,
         "officer/schedule.html",
         {
             "loan": loan,
+            "amortization": amortization,
             "installments": loan.installments.all(),
             "schedule": display["schedule"],
             "payment_count": display["payment_count"],
@@ -2530,6 +2537,47 @@ def officer_schedule(request, loan_id):
             "total_collected_to_loan": total_collected_to_loan,
         },
     )
+
+
+@login_required
+@role_required("officer")
+def officer_passbook_pdf(request, loan_id):
+    loan = get_object_or_404(
+        Loan.objects.select_related("application", "application__borrower", "application__loan_product"),
+        pk=loan_id,
+    )
+    mark_overdue_installments()
+    ensure_schedule_current(loan)
+    view_mode = request.GET.get("view") or application_schedule_view_mode(loan)
+    plan = (request.GET.get("plan") or "current").lower()
+    showing_original = bool(loan.is_rescheduled and plan == "original")
+    from .passbook_pdf import build_passbook_schedule_pdf
+
+    pdf_bytes = build_passbook_schedule_pdf(
+        loan,
+        view_mode=view_mode,
+        showing_original=showing_original,
+    )
+    label = "original" if showing_original else "passbook"
+    filename = f"{loan.reference}-{label}-schedule.pdf"
+    record_activity(
+        request.user,
+        action=ActivityLog.Action.DATA_EXPORTED,
+        kind=ActivityLog.Kind.APPLICATION,
+        title=f"{loan.reference} passbook downloaded",
+        description=f"Passbook schedule PDF for {loan.application.borrower_name}.",
+        member=loan.application.borrower,
+        reference=loan.reference,
+        amount=loan.outstanding_balance,
+        status="neutral",
+        status_label="Exported",
+        url_name="officer_loan_detail",
+        url_kwargs={"loan_id": loan.pk},
+        request=request,
+    )
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 @login_required
@@ -3161,6 +3209,47 @@ def export_disbursements_csv(request):
     return response
 
 
+def _amortization_export_or_404(request, loan_id):
+    loan_qs = Loan.objects.select_related("application", "application__borrower")
+    if not request.user.is_officer:
+        loan_qs = loan_qs.filter(application__borrower=request.user)
+    loan = get_object_or_404(loan_qs, pk=loan_id)
+    ensure_schedule_current(loan)
+    schedule = declining_schedule_context(loan)
+    if schedule is None:
+        raise Http404("This loan does not have a declining-balance schedule.")
+    return loan, schedule
+
+
+@login_required
+def schedule_excel(request, loan_id):
+    loan, schedule = _amortization_export_or_404(request, loan_id)
+    from .amortization_export import build_amortization_xlsx
+
+    payload = build_amortization_xlsx(loan, schedule)
+    if request.user.is_officer:
+        _log_export(request, f"{loan.reference} schedule Excel exported", f"Amortization workbook for {loan.application.borrower_name}.")
+    response = HttpResponse(
+        payload,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{loan.reference}-amortization.xlsx"'
+    return response
+
+
+@login_required
+def schedule_amortization_pdf(request, loan_id):
+    loan, schedule = _amortization_export_or_404(request, loan_id)
+    from .amortization_export import build_amortization_pdf
+
+    payload = build_amortization_pdf(loan, schedule)
+    if request.user.is_officer:
+        _log_export(request, f"{loan.reference} schedule PDF exported", f"Amortization PDF for {loan.application.borrower_name}.")
+    response = HttpResponse(payload, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{loan.reference}-amortization.pdf"'
+    return response
+
+
 @login_required
 def schedule_export(request, loan_id):
     loan_qs = Loan.objects if request.user.is_officer else Loan.objects.filter(application__borrower=request.user)
@@ -3171,6 +3260,21 @@ def schedule_export(request, loan_id):
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{loan.reference}-schedule.csv"'
     writer = csv.writer(response)
+    if loan.period_rate is not None and loan.schedule_start_date is None:
+        writer.writerow(["No.", "Due Date", "Scheduled Payment", "Interest", "Principal", "Balance", "Status"])
+        opening = declining_schedule_context(loan)
+        if opening:
+            for row in opening["rows"]:
+                writer.writerow([
+                    row["number"],
+                    row["due_date"] or "",
+                    row["payment"],
+                    row["interest"],
+                    row["principal"],
+                    row["balance"],
+                    row["status_label"],
+                ])
+        return response
     writer.writerow(["Installment", "Due date", "Principal", "Interest", "Amount due", "Adjusted", "Amount paid", "Status"])
     for item in loan.installments.all():
         writer.writerow([item.installment_number, item.due_date, item.principal_component, item.interest_component, item.amount_due, item.adjusted_amount, item.amount_paid, item.get_status_display()])

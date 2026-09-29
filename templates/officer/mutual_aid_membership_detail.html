@@ -17,19 +17,19 @@
   <div class="col-md-3">
     <div class="card-soft metric-card">
       <div class="metric-label">Total contributed</div>
-      <div class="metric-value">{{ membership.total_contributed|peso }}</div>
+      <div class="metric-value">{{ ledger.total_contributed|peso }}</div>
     </div>
   </div>
   <div class="col-md-3">
     <div class="card-soft metric-card">
       <div class="metric-label">Benefits claimed</div>
-      <div class="metric-value text-success">{{ membership.benefits_claimed|peso }}</div>
+      <div class="metric-value text-success">{{ ledger.benefits_claimed|peso }}</div>
     </div>
   </div>
   <div class="col-md-3">
     <div class="card-soft metric-card">
       <div class="metric-label">Net balance</div>
-      <div class="metric-value">{{ membership.net_balance|peso }}</div>
+      <div class="metric-value">{{ ledger.net_balance|peso }}</div>
     </div>
   </div>
   <div class="col-md-3">
@@ -113,7 +113,7 @@
       <div class="card-header d-flex justify-content-between align-items-start">
         <div>
           <div class="eyebrow">Contribution ledger</div>
-          <h2 class="card-title mt-1 mb-1">Member contributions.</h2>
+          <h2 class="card-title mt-1 mb-1">All member contributions.</h2>
         </div>
         <span class="badge rounded-pill status-neutral">{{ ledger.contribution_count }} record{{ ledger.contribution_count|pluralize }}</span>
       </div>
@@ -179,6 +179,26 @@
             </tbody>
           </table>
         </div>
+        {% if is_paginated %}
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 px-3 py-3 border-top">
+          <div class="text-muted small">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} contributions.</div>
+          <nav aria-label="Contribution ledger pages">
+            <ul class="pagination pagination-sm mb-0">
+              {% if page_obj.has_previous %}
+              <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if claims_page_obj.number != 1 %}&claims_page={{ claims_page_obj.number }}{% endif %}">Previous</a></li>
+              {% else %}
+              <li class="page-item disabled"><span class="page-link">Previous</span></li>
+              {% endif %}
+              <li class="page-item active"><span class="page-link">{{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+              {% if page_obj.has_next %}
+              <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if claims_page_obj.number != 1 %}&claims_page={{ claims_page_obj.number }}{% endif %}">Next</a></li>
+              {% else %}
+              <li class="page-item disabled"><span class="page-link">Next</span></li>
+              {% endif %}
+            </ul>
+          </nav>
+        </div>
+        {% endif %}
         {% else %}
         <div class="p-4">{% include "includes/empty_state.html" with icon="bi-cash-stack" title="No contributions yet" description="Record the member's first contribution to start the ledger." %}</div>
         {% endif %}
@@ -264,6 +284,26 @@
             </tbody>
           </table>
         </div>
+        {% if claims_paginated %}
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 px-3 py-3 border-top">
+          <div class="text-muted small">Showing {{ claims_page_obj.start_index }}–{{ claims_page_obj.end_index }} of {{ claims_page_obj.paginator.count }} claims.</div>
+          <nav aria-label="Claims history pages">
+            <ul class="pagination pagination-sm mb-0">
+              {% if claims_page_obj.has_previous %}
+              <li class="page-item"><a class="page-link" href="?claims_page={{ claims_page_obj.previous_page_number }}{% if page_obj.number != 1 %}&page={{ page_obj.number }}{% endif %}">Previous</a></li>
+              {% else %}
+              <li class="page-item disabled"><span class="page-link">Previous</span></li>
+              {% endif %}
+              <li class="page-item active"><span class="page-link">{{ claims_page_obj.number }} of {{ claims_page_obj.paginator.num_pages }}</span></li>
+              {% if claims_page_obj.has_next %}
+              <li class="page-item"><a class="page-link" href="?claims_page={{ claims_page_obj.next_page_number }}{% if page_obj.number != 1 %}&page={{ page_obj.number }}{% endif %}">Next</a></li>
+              {% else %}
+              <li class="page-item disabled"><span class="page-link">Next</span></li>
+              {% endif %}
+            </ul>
+          </nav>
+        </div>
+        {% endif %}
         {% else %}
         <div class="p-4">{% include "includes/empty_state.html" with icon="bi-inbox" title="No claims filed" description="Claims submitted for this membership will appear here." %}</div>
         {% endif %}

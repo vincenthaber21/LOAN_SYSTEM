@@ -623,6 +623,30 @@ class Loan(models.Model):
         blank=True,
         help_text="Term months before the first balance-extension reschedule.",
     )
+    period_rate = models.DecimalField(
+        max_digits=18,
+        decimal_places=12,
+        null=True,
+        blank=True,
+        help_text="Declining-balance interest rate per payment period, solved from the add-on rate.",
+    )
+    addon_rate = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Total add-on rate for the term (for example 0.330000 for 33%).",
+    )
+    payment_interval_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Calendar days between scheduled payments.",
+    )
+    number_of_payments = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of payments in the stored declining-balance schedule.",
+    )
 
     class Meta:
         ordering = ["-disbursed_date", "-id"]
@@ -885,8 +909,21 @@ class Loan(models.Model):
 
         When adjust=True (default), the amount is rounded to a cash-friendly
         multiple of ₱10 via adjust_payment() before capping.
+
+        Declining-balance loans collect the next stored installment, which already
+        follows the application's payment interval.
         """
         from .services import WORKING_DAYS_PER_MONTH, adjust_payment
+
+        if self.period_rate is not None:
+            item = self.next_installment
+            amount = item.remaining if item else Decimal("0.00")
+            outstanding = self.outstanding_balance or Decimal("0.00")
+            if outstanding <= 0 or amount <= 0:
+                return Decimal("0.00")
+            if adjust:
+                amount = adjust_payment(amount)
+            return min(amount, outstanding)
 
         mapping = {
             "daily": self.daily_payment,
@@ -1042,6 +1079,12 @@ class Installment(models.Model):
     interest_component = models.DecimalField(max_digits=12, decimal_places=2)
     amount_due = models.DecimalField(max_digits=12, decimal_places=2)
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    ending_balance = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Principal balance remaining after this payment.",
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     paid_date = models.DateField(null=True, blank=True)
     credit_penalty_applied = models.BooleanField(
@@ -1492,6 +1535,7 @@ class ActivityLog(models.Model):
         SIGNED_IN = "signed_in", "Signed in"
         SIGNED_OUT = "signed_out", "Signed out"
         SIGN_IN_FAILED = "sign_in_failed", "Failed sign-in"
+        ACCOUNT_LOCKED = "account_locked", "Account locked"
 
     actor = models.ForeignKey(
         User,

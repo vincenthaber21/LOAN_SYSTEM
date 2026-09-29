@@ -3,6 +3,7 @@ import csv
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
@@ -35,6 +36,7 @@ from .services import (
     delete_transaction,
     interest_schedule_state,
     open_account,
+    _rebuild_ledger_balances,
     record_deposit,
     record_withdrawal,
     resolve_membership_savings_product,
@@ -42,25 +44,37 @@ from .services import (
     update_transaction,
 )
 
+LEDGER_PAGE_SIZE = 20
+
+
+# Cash-rounding credits are deposits, but they are not member savings deposits.
+_CASH_ROUNDING = Q(reference_number__startswith="ADJ-") | Q(notes__startswith="Cash-rounding adjustment")
+
 
 def _ledger_summary(account, last_movement=None):
     qs = account.transactions.all()
+    deposits = Q(transaction_type=SavingsTransaction.Type.DEPOSIT)
     agg = qs.aggregate(
-        total_deposits=Sum("amount", filter=Q(transaction_type=SavingsTransaction.Type.DEPOSIT)),
+        total_deposits=Sum("amount", filter=deposits & ~_CASH_ROUNDING),
+        total_adjustments=Sum("amount", filter=deposits & _CASH_ROUNDING),
         total_interest_earned=Sum("amount", filter=Q(transaction_type=SavingsTransaction.Type.INTEREST)),
         total_withdrawals=Sum("amount", filter=Q(transaction_type=SavingsTransaction.Type.WITHDRAWAL)),
         transaction_count=Count("id"),
     )
     total_deposits = agg["total_deposits"] or Decimal("0.00")
+    total_adjustments = agg["total_adjustments"] or Decimal("0.00")
     total_interest_earned = agg["total_interest_earned"] or Decimal("0.00")
     total_withdrawals = agg["total_withdrawals"] or Decimal("0.00")
+    current_balance = total_deposits + total_adjustments + total_interest_earned - total_withdrawals
     if last_movement is None:
-        last_movement = qs.select_related("created_by").order_by("-created_at").first()
+        last_movement = qs.select_related("created_by").order_by("-created_at", "-pk").first()
     return {
+        "current_balance": current_balance,
         "total_deposits": total_deposits,
+        "total_adjustments": total_adjustments,
         "total_interest_earned": total_interest_earned,
         "total_withdrawals": total_withdrawals,
-        "net_flow": total_deposits + total_interest_earned - total_withdrawals,
+        "net_flow": current_balance,
         "transaction_count": agg["transaction_count"] or 0,
         "last_movement": last_movement,
     }
@@ -476,15 +490,22 @@ def officer_savings_account_detail(request, account_id):
                 f"Applied {count} interest credit{'s' if count != 1 else ''} totaling ₱{total:,.2f} automatically.",
             )
 
-    transactions = list(
-        account.transactions.select_related("created_by").order_by("-created_at")[:50]
-    )
-    last_movement = transactions[0] if transactions else None
-    ledger = _ledger_summary(account, last_movement=last_movement)
+    try:
+        _rebuild_ledger_balances(account)
+    except SavingsError as exc:
+        messages.error(request, str(exc))
+    else:
+        account.refresh_from_db()
+
+    transactions_qs = account.transactions.select_related("created_by").order_by("-created_at", "-pk")
+    page_obj = Paginator(transactions_qs, LEDGER_PAGE_SIZE).get_page(request.GET.get("page"))
+    ledger = _ledger_summary(account)
     interest = interest_schedule_state(account)
     return render(request, "officer/savings_account_detail.html", {
         "account": account,
-        "transactions": transactions,
+        "transactions": page_obj.object_list,
+        "page_obj": page_obj,
+        "is_paginated": page_obj.has_other_pages(),
         "ledger": ledger,
         "interest": interest,
         "transaction_form": transaction_form,

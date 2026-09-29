@@ -17,7 +17,7 @@
   <div class="col-md-3">
     <div class="card-soft metric-card">
       <div class="metric-label">Current balance</div>
-      <div class="metric-value">{{ account.balance|peso }}</div>
+      <div class="metric-value">{{ ledger.current_balance|peso }}</div>
       <div class="metric-note positive">{{ account.status_label }}</div>
     </div>
   </div>
@@ -25,7 +25,7 @@
     <div class="card-soft metric-card">
       <div class="metric-label">Total deposited</div>
       <div class="metric-value">{{ ledger.total_deposits|peso }}</div>
-      <div class="metric-note">Member deposits only</div>
+      <div class="metric-note">Member deposits only{% if ledger.total_adjustments %} · excludes {{ ledger.total_adjustments|peso }} cash-rounding{% endif %}</div>
     </div>
   </div>
   <div class="col-md-3">
@@ -119,7 +119,7 @@
       <div class="card-header d-flex flex-wrap justify-content-between align-items-start gap-2">
         <div>
           <div class="eyebrow">Transaction ledger</div>
-          <h2 class="card-title mt-1 mb-1">Latest movements on this account.</h2>
+          <h2 class="card-title mt-1 mb-1">All movements on this account.</h2>
           <p class="text-muted small mb-0">A running record of deposits, withdrawals, and balance changes.</p>
         </div>
         <span class="badge rounded-pill status-neutral">{{ ledger.transaction_count }} movement{{ ledger.transaction_count|pluralize }}</span>
@@ -147,7 +147,7 @@
           <div class="col-sm-4">
             <div class="border rounded-3 px-3 py-2 h-100">
               <div class="text-muted small">Ledger balance</div>
-              <div class="fw-semibold">{{ account.balance|peso }}</div>
+              <div class="fw-semibold">{{ ledger.current_balance|peso }}</div>
             </div>
           </div>
         </div>
@@ -239,8 +239,25 @@
             </tbody>
           </table>
         </div>
-        {% if ledger.transaction_count > transactions|length %}
-        <div class="text-muted small mt-3">Showing the latest {{ transactions|length }} of {{ ledger.transaction_count }} movements.</div>
+        {% if is_paginated %}
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+          <div class="text-muted small">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} movements.</div>
+          <nav aria-label="Transaction ledger pages">
+            <ul class="pagination pagination-sm mb-0">
+              {% if page_obj.has_previous %}
+              <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a></li>
+              {% else %}
+              <li class="page-item disabled"><span class="page-link">Previous</span></li>
+              {% endif %}
+              <li class="page-item active"><span class="page-link">{{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+              {% if page_obj.has_next %}
+              <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a></li>
+              {% else %}
+              <li class="page-item disabled"><span class="page-link">Next</span></li>
+              {% endif %}
+            </ul>
+          </nav>
+        </div>
         {% endif %}
         {% else %}
         {% include "includes/empty_state.html" with icon="bi-journal-text" title="No ledger entries yet" description="Deposits and withdrawals recorded on this account will appear here." %}
