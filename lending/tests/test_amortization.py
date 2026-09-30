@@ -172,7 +172,36 @@ class DecliningBalanceScheduleTests(TestCase):
     def test_term_mapping_for_twelve_month_biweekly_loan(self):
         self.assertEqual(payment_count_for_term(12, 14), 26)
         self.assertEqual(payment_count_for_term(1, 30), 1)
+        self.assertEqual(payment_count_for_term(6, 1), 132)
         self.assertEqual(addon_rate_for_term(Decimal("2.75"), 12), Decimal("0.33"))
+
+    def test_daily_due_dates_skip_saturday_and_sunday(self):
+        start = date(2026, 9, 29)  # Tuesday
+        result = calculate_amortization(
+            Decimal("8000"),
+            Decimal("0.36"),
+            payment_count_for_term(6, 1),
+            1,
+            start,
+        )
+        self.assertEqual(len(result.payments), 132)
+        self.assertEqual(result.payments[0].due_date, date(2026, 9, 29))
+        self.assertEqual(result.payments[3].due_date, date(2026, 10, 2))  # Friday
+        self.assertEqual(result.payments[4].due_date, date(2026, 10, 5))  # Monday
+        for row in result.payments:
+            self.assertLess(row.due_date.weekday(), 5, row.due_date)
+
+        weekend_start = calculate_amortization(
+            Decimal("8000"),
+            Decimal("0.36"),
+            3,
+            1,
+            date(2026, 10, 3),  # Saturday
+        )
+        self.assertEqual(
+            [row.due_date for row in weekend_start.payments],
+            [date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7)],
+        )
 
 
 class LoanScheduleStorageTests(TestCase):

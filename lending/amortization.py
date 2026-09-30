@@ -29,6 +29,8 @@ FREQUENCY_INTERVAL_DAYS = {
     "biweekly": 14,
     "monthly": 30,
 }
+# Daily collection is Monday–Friday. One month is 22 working days.
+WORKING_DAYS_PER_MONTH = 22
 
 
 class AmortizationError(ValueError):
@@ -145,7 +147,11 @@ def interval_days_for_frequency(frequency) -> int:
 
 
 def payment_count_for_term(term_months, interval_days) -> int:
-    """Payments in the term, using a 365-day year (12 months / 14 days → 26)."""
+    """Payments in the term.
+
+    Daily (1-day) plans use working days only: 22 weekdays per month.
+    Other intervals use a 365-day year (12 months / 14 days → 26).
+    """
     try:
         term_months = int(term_months)
         interval_days = int(interval_days)
@@ -155,9 +161,30 @@ def payment_count_for_term(term_months, interval_days) -> int:
         raise AmortizationError("term_months must be at least 1.")
     if interval_days < 1:
         raise AmortizationError("payment_interval_days must be at least 1.")
+    if interval_days == 1:
+        return max(1, term_months * WORKING_DAYS_PER_MONTH)
     span = Decimal(term_months) * Decimal(365) / Decimal(12)
     count = (span / Decimal(interval_days)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return max(1, int(count))
+
+
+def align_to_weekday(value: date) -> date:
+    """Move Saturday or Sunday forward to Monday. Weekdays stay put."""
+    while value.weekday() >= 5:
+        value += timedelta(days=1)
+    return value
+
+
+def working_day_due_dates(first_due: date, periods: int) -> list[date]:
+    """One due date per working day (Monday–Friday), starting on or after `first_due`."""
+    current = align_to_weekday(first_due)
+    dates: list[date] = []
+    for _ in range(periods):
+        dates.append(current)
+        current += timedelta(days=1)
+        while current.weekday() >= 5:
+            current += timedelta(days=1)
+    return dates
 
 
 def addon_rate_for_term(monthly_percent, term_months) -> Decimal:
@@ -350,8 +377,12 @@ def calculate_amortization(
     ]
     balance = principal
     payments_so_far = Decimal("0.00")
+    weekday_dates = working_day_due_dates(first_due, periods) if interval == 1 else None
     for number in range(1, periods + 1):
-        due = first_due + timedelta(days=(number - 1) * interval)
+        if weekday_dates is not None:
+            due = weekday_dates[number - 1]
+        else:
+            due = first_due + timedelta(days=(number - 1) * interval)
         interest = money(balance * solved)
         if number == periods:
             principal_part = balance

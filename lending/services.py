@@ -1167,11 +1167,17 @@ def declining_first_due_date(loan):
     """First payment date for an add-on / declining-balance schedule.
 
     Uses the reschedule start when one is set, otherwise the disbursement date
-    plus any grace days. Dates then step by the payment interval; they are not
-    snapped to Monday.
+    plus any grace days. Daily plans collect on working days only, so a Saturday
+    or Sunday start moves to Monday. Other frequencies keep the calendar date.
     """
+    from .amortization import align_to_weekday
+
     start = loan.schedule_start_date or loan.disbursed_date
-    return start + timedelta(days=int(loan.grace_period_days or 0))
+    start = start + timedelta(days=int(loan.grace_period_days or 0))
+    frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
+    if str(frequency).lower() == "daily":
+        return align_to_weekday(start)
+    return start
 
 
 def declining_inputs_for_loan(loan):
@@ -1302,7 +1308,14 @@ def schedule_is_stale(loan):
     first = loan.installments.order_by("installment_number").first()
     if not first:
         return True
-    return first.due_date != first_due
+    if first.due_date != first_due:
+        return True
+    # Django week_day: Sunday=1, Saturday=7. Daily plans must not bill weekends.
+    if loan.schedule_start_date is None:
+        frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
+        if str(frequency).lower() == "daily" and loan.installments.filter(due_date__week_day__in=[1, 7]).exists():
+            return True
+    return False
 
 
 def _clear_declining_terms(loan):

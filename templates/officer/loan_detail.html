@@ -249,7 +249,7 @@
           <div class="col-sm-4">
             <div class="detail-label">Payment per period</div>
             <div class="detail-value">{{ amortization.payment|peso }}</div>
-            <div class="text-muted small">Every {{ amortization.interval_days }} days · {{ amortization.number_of_payments }} payments</div>
+            <div class="text-muted small">{% if amortization.interval_days == 1 %}Each working day (Mon–Fri){% else %}Every {{ amortization.interval_days }} days{% endif %} · {{ amortization.number_of_payments }} payments</div>
           </div>
           <div class="col-sm-4">
             <div class="detail-label">Total interest</div>

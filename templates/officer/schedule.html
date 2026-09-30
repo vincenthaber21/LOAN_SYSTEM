@@ -24,7 +24,7 @@
       · interest starts {{ loan.reschedule_interest_start_display }}.
       {% elif amortization %}
       {{ loan.application.borrower_name }}'s declining-balance plan from {{ loan.start_date }}
-      · {{ amortization.number_of_payments }} payments of {{ amortization.payment|peso }} every {{ amortization.interval_days }} days
+      · {{ amortization.number_of_payments }} payments of {{ amortization.payment|peso }} {% if amortization.interval_days == 1 %}each working day (Mon–Fri){% else %}every {{ amortization.interval_days }} days{% endif %}
       · add-on {{ amortization.add_on_percent }}% converted to {{ amortization.period_rate_percent }}% per period.
       {% else %}
       {{ loan.application.borrower_name }}'s full payment plan from disbursement on {{ loan.start_date }}
