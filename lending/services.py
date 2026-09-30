@@ -1167,17 +1167,14 @@ def declining_first_due_date(loan):
     """First payment date for an add-on / declining-balance schedule.
 
     Uses the reschedule start when one is set, otherwise the disbursement date
-    plus any grace days. Daily plans collect on working days only, so a Saturday
-    or Sunday start moves to Monday. Other frequencies keep the calendar date.
+    plus any grace days. A Saturday or Sunday start moves to Monday so no
+    payment is scheduled on the weekend.
     """
     from .amortization import align_to_weekday
 
     start = loan.schedule_start_date or loan.disbursed_date
     start = start + timedelta(days=int(loan.grace_period_days or 0))
-    frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
-    if str(frequency).lower() == "daily":
-        return align_to_weekday(start)
-    return start
+    return align_to_weekday(start)
 
 
 def declining_inputs_for_loan(loan):
@@ -1286,6 +1283,16 @@ def declining_schedule_context(loan):
     }
 
 
+def _ordinary_schedule_includes_weekend(loan):
+    """True when an ordinary loan has a due date on Saturday or Sunday.
+
+    Django's week_day lookup uses Sunday=1 and Saturday=7.
+    """
+    if loan.schedule_start_date is not None or not loan.installments.exists():
+        return False
+    return loan.installments.filter(due_date__week_day__in=[1, 7]).exists()
+
+
 def schedule_is_stale(loan):
     """True when stored installments no longer match the loan terms or disbursement date."""
     if not loan.installments.exists():
@@ -1310,11 +1317,8 @@ def schedule_is_stale(loan):
         return True
     if first.due_date != first_due:
         return True
-    # Django week_day: Sunday=1, Saturday=7. Daily plans must not bill weekends.
-    if loan.schedule_start_date is None:
-        frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
-        if str(frequency).lower() == "daily" and loan.installments.filter(due_date__week_day__in=[1, 7]).exists():
-            return True
+    if _ordinary_schedule_includes_weekend(loan):
+        return True
     return False
 
 
@@ -1591,11 +1595,9 @@ def ensure_schedule_current(loan):
     sync_loan_term_from_application(loan)
     if loan.schedule_start_date is not None and _repair_rescheduled_flat_balances(loan):
         return True
-    if (
-        loan.schedule_start_date is None
-        and loan.period_rate is None
-        and (loan.installments.exists() or loan.payments.exists())
-    ):
+    if loan.schedule_start_date is None and (
+        loan.period_rate is None or _ordinary_schedule_includes_weekend(loan)
+    ) and (loan.installments.exists() or loan.payments.exists()):
         return realign_loan_to_one_time_flat_schedule(loan)
     if schedule_is_stale(loan):
         return rebuild_loan_schedule(loan)

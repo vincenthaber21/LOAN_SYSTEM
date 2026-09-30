@@ -187,6 +187,25 @@ def working_day_due_dates(first_due: date, periods: int) -> list[date]:
     return dates
 
 
+def schedule_due_dates(first_due: date, periods: int, interval_days: int) -> list[date]:
+    """Due dates that never fall on Saturday or Sunday.
+
+    Daily plans are one working day apart. Longer intervals step by that many
+    calendar days, then move a Saturday or Sunday forward to Monday.
+    """
+    if interval_days == 1:
+        return working_day_due_dates(first_due, periods)
+    current = align_to_weekday(first_due)
+    dates: list[date] = []
+    for _ in range(periods):
+        dates.append(current)
+        nxt = align_to_weekday(current + timedelta(days=interval_days))
+        if nxt <= current:
+            nxt = align_to_weekday(current + timedelta(days=1))
+        current = nxt
+    return dates
+
+
 def addon_rate_for_term(monthly_percent, term_months) -> Decimal:
     """Total add-on rate for the term from a monthly flat percentage.
 
@@ -377,12 +396,9 @@ def calculate_amortization(
     ]
     balance = principal
     payments_so_far = Decimal("0.00")
-    weekday_dates = working_day_due_dates(first_due, periods) if interval == 1 else None
+    due_dates = schedule_due_dates(first_due, periods, interval)
     for number in range(1, periods + 1):
-        if weekday_dates is not None:
-            due = weekday_dates[number - 1]
-        else:
-            due = first_due + timedelta(days=(number - 1) * interval)
+        due = due_dates[number - 1]
         interest = money(balance * solved)
         if number == periods:
             principal_part = balance

@@ -133,13 +133,15 @@ class DecliningBalanceScheduleTests(TestCase):
             self.assertEqual(len(result.payments), 10)
             self.assertGreater(result.period_rate, 0)
             self.assertEqual(result.payments[-1].balance, Decimal("0.00"))
-            self.assertEqual(
-                result.payments[-1].due_date,
-                start + timedelta(days=9 * interval),
-            )
             self.assertEqual(sum(row.payment for row in result.payments), result.total_repayment)
-            for previous, current in zip(result.payments, result.payments[1:]):
-                self.assertEqual((current.due_date - previous.due_date).days, interval)
+            calendar_last = start + timedelta(days=9 * interval)
+            self.assertGreaterEqual(result.payments[-1].due_date, calendar_last)
+            for row in result.payments:
+                self.assertLess(row.due_date.weekday(), 5, row.due_date)
+            if interval == 7:
+                self.assertEqual(result.payments[-1].due_date, calendar_last)
+                for previous, current in zip(result.payments, result.payments[1:]):
+                    self.assertEqual((current.due_date - previous.due_date).days, interval)
 
     def test_standard_rounding_still_ends_at_zero(self):
         result = calculate_amortization(
@@ -202,6 +204,28 @@ class DecliningBalanceScheduleTests(TestCase):
             [row.due_date for row in weekend_start.payments],
             [date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7)],
         )
+
+    def test_longer_intervals_skip_saturday_and_sunday(self):
+        weekly = calculate_amortization(
+            Decimal("10000"),
+            Decimal("0.10"),
+            4,
+            7,
+            date(2026, 10, 3),  # Saturday, moved to Monday
+        )
+        self.assertEqual(weekly.payments[0].due_date, date(2026, 10, 5))
+        self.assertEqual(weekly.payments[1].due_date, date(2026, 10, 12))
+        monthly = calculate_amortization(
+            Decimal("10000"),
+            Decimal("0.10"),
+            3,
+            30,
+            date(2026, 9, 25),  # Friday
+        )
+        self.assertEqual(monthly.payments[0].due_date, date(2026, 9, 25))
+        self.assertEqual(monthly.payments[1].due_date, date(2026, 10, 26))  # Oct 25 is Sunday
+        for row in list(weekly.payments) + list(monthly.payments):
+            self.assertLess(row.due_date.weekday(), 5, row.due_date)
 
 
 class LoanScheduleStorageTests(TestCase):
@@ -375,3 +399,68 @@ class LoanScheduleStorageTests(TestCase):
         self.assertEqual(loan.total_payable, Decimal("10400.00"))
         self.assertEqual(loan.outstanding_balance, Decimal("10305.45"))
         self.assertEqual(loan.installments.filter(status=Installment.Status.PAID).count(), 1)
+
+    def test_paid_daily_loan_drops_weekend_due_dates(self):
+        """A stored daily schedule that bills Saturday is rebuilt onto weekdays."""
+        application = LoanApplication.objects.create(
+            borrower=self.member,
+            loan_product=self.product,
+            amount_requested=Decimal("8000.00"),
+            term_months=5,
+            payment_frequency=LoanApplication.PaymentFrequency.DAILY,
+            final_interest_rate=Decimal("6.00"),
+            final_term_months=5,
+            status=LoanApplication.Status.ACTIVE,
+        )
+        loan = Loan.objects.create(
+            application=application,
+            principal=Decimal("8000.00"),
+            disbursed_principal=Decimal("8000.00"),
+            interest_rate=Decimal("6.00"),
+            term_months=5,
+            disbursed_date=date(2026, 9, 11),
+            total_payable=Decimal("10400.00"),
+            outstanding_balance=Decimal("10305.45"),
+            period_rate=Decimal("0.010000000000"),
+            addon_rate=Decimal("0.300000"),
+            payment_interval_days=1,
+            number_of_payments=2,
+            grace_period_days=0,
+        )
+        Installment.objects.create(
+            loan=loan,
+            installment_number=1,
+            due_date=date(2026, 9, 11),  # Friday
+            principal_component=Decimal("50.00"),
+            interest_component=Decimal("18.42"),
+            amount_due=Decimal("68.42"),
+            amount_paid=Decimal("68.42"),
+            status=Installment.Status.PAID,
+            paid_date=date(2026, 9, 11),
+        )
+        Installment.objects.create(
+            loan=loan,
+            installment_number=2,
+            due_date=date(2026, 9, 12),  # Saturday
+            principal_component=Decimal("50.00"),
+            interest_component=Decimal("18.42"),
+            amount_due=Decimal("68.42"),
+        )
+        Payment.objects.create(
+            loan=loan,
+            amount=Decimal("68.42"),
+            payment_date=date(2026, 9, 11),
+            recorded_by=self.officer,
+        )
+
+        self.client.force_login(self.officer)
+        page = self.client.get(reverse("officer_repayment_schedule", args=[loan.pk]))
+        self.assertEqual(page.status_code, 200)
+        loan.refresh_from_db()
+        self.assertEqual(loan.number_of_payments, 110)
+        weekends = [
+            item.due_date
+            for item in loan.installments.all()
+            if item.due_date.weekday() >= 5
+        ]
+        self.assertEqual(weekends, [])
