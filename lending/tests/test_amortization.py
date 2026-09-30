@@ -17,7 +17,7 @@ from lending.amortization import (
     payment_count_for_term,
     solve_period_rate,
 )
-from lending.models import Loan, LoanApplication, LoanProduct, User
+from lending.models import Installment, Loan, LoanApplication, LoanProduct, Payment, User
 from lending.services import generate_schedule, rebuild_loan_schedule
 
 
@@ -281,3 +281,68 @@ class LoanScheduleStorageTests(TestCase):
         self.assertEqual(pdf_response.status_code, 200)
         self.assertEqual(pdf_response["Content-Type"], "application/pdf")
         self.assertTrue(pdf_response.content.startswith(b"%PDF"))
+
+    def test_paid_working_day_loan_switches_to_declining_balance(self):
+        """A live loan still on the old daily flat grid is rebuilt when the schedule opens."""
+        application = LoanApplication.objects.create(
+            borrower=self.member,
+            loan_product=self.product,
+            amount_requested=Decimal("8000.00"),
+            term_months=5,
+            payment_frequency=LoanApplication.PaymentFrequency.DAILY,
+            final_interest_rate=Decimal("6.00"),
+            final_term_months=5,
+            status=LoanApplication.Status.ACTIVE,
+        )
+        loan = Loan.objects.create(
+            application=application,
+            principal=Decimal("7634.62"),
+            disbursed_principal=Decimal("8000.00"),
+            interest_rate=Decimal("6.00"),
+            term_months=5,
+            disbursed_date=date(2026, 9, 11),
+            total_payable=Decimal("10400.00"),
+            outstanding_balance=Decimal("10034.62"),
+            grace_period_days=0,
+        )
+        Installment.objects.create(
+            loan=loan,
+            installment_number=1,
+            due_date=date(2026, 9, 14),
+            principal_component=Decimal("72.73"),
+            interest_component=Decimal("21.82"),
+            amount_due=Decimal("94.55"),
+            amount_paid=Decimal("94.55"),
+            status=Installment.Status.PAID,
+            paid_date=date(2026, 9, 14),
+        )
+        Payment.objects.create(
+            loan=loan,
+            amount=Decimal("94.55"),
+            payment_date=date(2026, 9, 14),
+            recorded_by=self.officer,
+        )
+        for number, due in enumerate(
+            (date(2026, 9, 15), date(2026, 9, 16), date(2026, 9, 17), date(2026, 9, 18)),
+            start=2,
+        ):
+            Installment.objects.create(
+                loan=loan,
+                installment_number=number,
+                due_date=due,
+                principal_component=Decimal("72.73"),
+                interest_component=Decimal("21.82"),
+                amount_due=Decimal("94.55"),
+            )
+
+        self.client.force_login(self.officer)
+        page = self.client.get(reverse("officer_repayment_schedule", args=[loan.pk]))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "declining-balance plan")
+        self.assertNotContains(page, "working-day payments")
+        loan.refresh_from_db()
+        self.assertIsNotNone(loan.period_rate)
+        self.assertEqual(loan.payment_interval_days, 1)
+        self.assertEqual(loan.total_payable, Decimal("10400.00"))
+        self.assertEqual(loan.outstanding_balance, Decimal("10305.45"))
+        self.assertEqual(loan.installments.filter(status=Installment.Status.PAID).count(), 1)

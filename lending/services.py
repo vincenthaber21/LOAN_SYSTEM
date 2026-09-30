@@ -819,13 +819,12 @@ def _sync_loan_balances_from_fixed_schedule(loan):
 
 
 def realign_loan_to_one_time_flat_schedule(loan):
-    """Rebuild the working-day grid from origination terms and replay payment credits.
+    """Replace an ordinary loan's grid with the declining-balance schedule and replay payments.
 
-    Used when installment dues were re-priced after remittances or the ≤₱1,000
-    waiver stripped interest mid-term. Paid history is preserved by re-applying each
-    payment's loan portion oldest-due-first. Loans already marked Paid stay Paid and
-    any shortfall from a prior waived schedule is closed so Loan Exact matches the
-    one-time formula. Skips rescheduled loans.
+    Opening a loan that is still on the working-day flat plan (no stored period rate)
+    rebuilds it from the disbursed principal, origination rate, and pay frequency.
+    Collected remittances are re-applied oldest-due-first. Loans already marked Paid
+    stay Paid. Skips rescheduled loans.
     """
     if loan.schedule_start_date is not None:
         return False
@@ -859,6 +858,7 @@ def realign_loan_to_one_time_flat_schedule(loan):
         loan.outstanding_balance = amounts["total_payable"]
         loan.total_payable = amounts["total_payable"]
         loan.save(update_fields=["outstanding_balance", "total_payable"])
+        _mark_loan_overdue_rows(loan)
         return True
 
     last_paid_date = payments[-1].payment_date
@@ -905,13 +905,24 @@ def realign_loan_to_one_time_flat_schedule(loan):
         if loan.application.status != LoanApplication.Status.CLOSED:
             loan.application.status = LoanApplication.Status.CLOSED
             loan.application.save(update_fields=["status"])
+        _mark_loan_overdue_rows(loan)
         return True
 
     _sync_loan_balances_from_fixed_schedule(loan)
     if loan.status != Loan.Status.PAID:
         loan.status = Loan.Status.ACTIVE
         loan.save(update_fields=["status"])
+    _mark_loan_overdue_rows(loan)
     return True
+
+
+def _mark_loan_overdue_rows(loan):
+    """Mark this loan's past-due pending rows overdue without adjusting credit score."""
+    today = timezone.localdate()
+    loan.installments.filter(
+        status=Installment.Status.PENDING,
+        due_date__lt=today,
+    ).update(status=Installment.Status.OVERDUE)
 
 
 def _schedule_diverges_from_one_time_formula(loan):
@@ -1168,19 +1179,25 @@ def declining_inputs_for_loan(loan):
 
     The product rate is a monthly add-on percentage. The total add-on rate for the
     term is that rate times the number of months (2.75% × 12 months = 33%).
-    Principal of ₱1,000 or less stays interest-free.
+    Ordinary loans use the disbursed principal and origination rate, not the
+    reduced principal left after payments. Principal of ₱1,000 or less stays
+    interest-free.
     """
     from .amortization import addon_rate_for_term, interval_days_for_frequency, payment_count_for_term
 
-    principal = Decimal(str(loan.principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    term = loan_term_months(loan)
+    if loan.schedule_start_date is None:
+        principal, rate, term = _origination_flat_terms(loan)
+    else:
+        principal = Decimal(str(loan.principal or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        rate = loan.interest_rate or 0
+        term = loan_term_months(loan)
     frequency = getattr(loan.application, "payment_frequency", None) or "monthly"
     interval = interval_days_for_frequency(frequency)
     count = payment_count_for_term(term, interval)
     if principal_waives_interest(principal):
         addon = Decimal("0")
     else:
-        addon = addon_rate_for_term(loan.interest_rate or 0, term)
+        addon = addon_rate_for_term(rate, term)
     return {
         "principal": principal,
         "add_on_rate": addon,
@@ -1552,14 +1569,21 @@ def _repair_rescheduled_flat_balances(loan):
 def ensure_schedule_current(loan):
     """Regenerate the schedule when it is out of sync with loan terms or disbursement date.
 
-    Keeps rescheduled loans aligned with the remaining-balance flat formula, realigns
-    ordinary loans whose daily dues left the one-time origination formula (including
-    mid-term ≤₱1,000 interest stripping), and only waives interest on loans that
-    originated at or below that ceiling.
+    Ordinary loans, including ones that already have payments, are stored on the
+    add-on rate converted to a declining-balance schedule. A working-day grid that
+    still matches the old flat daily amount is replaced the next time the loan is
+    opened, and collected remittances are replayed onto the new rows. Rescheduled
+    loans stay on the remaining-balance flat formula.
     """
     sync_loan_term_from_application(loan)
     if loan.schedule_start_date is not None and _repair_rescheduled_flat_balances(loan):
         return True
+    if (
+        loan.schedule_start_date is None
+        and loan.period_rate is None
+        and (loan.installments.exists() or loan.payments.exists())
+    ):
+        return realign_loan_to_one_time_flat_schedule(loan)
     if schedule_is_stale(loan):
         return rebuild_loan_schedule(loan)
     if _schedule_diverges_from_one_time_formula(loan):
